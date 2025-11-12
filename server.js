@@ -371,47 +371,7 @@ Be specific and informative. Focus on what matters for preparation.`,
             400
         );
 
-        console.log(`  📝 Generating action items...`);
-
-        // Generate action items with full context
-        const actionPrompt = `Based on this meeting information, suggest 3-5 specific action items to prepare effectively.
-
-Meeting: ${meeting.summary}
-Attendees: ${brief.attendees.map(a => `${a.name} (${a.title})`).join(', ')}
-Recent emails: ${emails?.slice(0, 5).map(e => e.subject).join('; ')}
-
-Return ONLY a JSON array of actionable preparation steps. Each item should be:
-- Specific and concrete (what to review, prepare, or research)
-- Actionable before the meeting
-- Relevant to the attendees and context
-- 10-40 words
-
-Example format:
-["Review Q3 sales metrics and prepare comparison with Q2 targets", "Research competitor pricing models mentioned in John's last email", "Prepare technical architecture diagram for the new API integration"]
-
-Return ONLY the JSON array, no other text.`;
-
-        const actionResult = await synthesizeResults(actionPrompt, summaryData, 400);
-
-        try {
-            let cleanAction = actionResult
-                .replace(/```json/g, '')
-                .replace(/```/g, '')
-                .trim();
-            const parsed = JSON.parse(cleanAction);
-            brief.actionItems = Array.isArray(parsed) ? parsed
-                .filter(item => item && typeof item === 'string' && item.length > 10)
-                .slice(0, 5) : [];
-        } catch (e) {
-            console.error(`  ⚠️  Failed to parse action items:`, e.message);
-            // Fallback parsing
-            brief.actionItems = actionResult ?
-                actionResult
-                    .split(/[\n•\-]/)
-                    .map(a => a.trim().replace(/^[\d\.\)]+\s*/, ''))
-                    .filter(a => a && a.length > 10)
-                    .slice(0, 5) : [];
-        }
+        // Action items will be generated AFTER all context is gathered
 
         // Generate email analysis - meeting-specific
         console.log(`  📧 Analyzing email threads for meeting context...`);
@@ -561,11 +521,72 @@ Return ONLY a JSON array. If insufficient context for meaningful recommendations
                     .slice(0, 5) : [];
         }
 
+        // Generate action items LAST with full context
+        console.log(`  📝 Generating action items with full context...`);
+        const actionPrompt = `You are preparing for the meeting: "${meeting.summary}"
+
+Based on ALL the context gathered below, suggest 4-6 HIGH-QUALITY, STRATEGIC action items to prepare effectively for THIS SPECIFIC MEETING.
+
+FULL CONTEXT:
+- Attendees: ${brief.attendees.map(a => `${a.name} (${a.keyFacts.join('; ')})`).join(' | ')}
+- Email discussions: ${emailAnalysis}
+- Document insights: ${documentAnalysis}
+- Company context: ${companyResearch}
+- Strategic recommendations: ${parsedRecommendations.join(' | ')}
+
+CRITICAL INSTRUCTIONS:
+1. Each action item must be DIRECTLY relevant to "${meeting.summary}" - NOT other meetings or calendar events
+2. Reference SPECIFIC documents, emails, or insights from the context above
+3. Make items substantive and detailed (20-60 words each)
+4. Focus on what will make THIS meeting successful
+5. Connect action items to the actual context provided (e.g., "Review the 'Kordn8 MVP Functions' document mentioned in emails")
+6. Avoid generic suggestions - be concrete and meeting-specific
+
+Example format:
+["Review the 'Kordn8 MVP Functions Detailed Report' shared by Akshay on Nov 9, paying special attention to current limitations and gaps that need addressing, and prepare 2-3 specific questions about implementation priorities", "Based on the financial coordination emails with Continuum Labs, prepare a brief update on payment status and any outstanding invoicing questions that may come up in the meeting"]
+
+Return ONLY a JSON array of 4-6 action items. Each should demonstrate understanding of the meeting's context and purpose.`;
+
+        const actionResult = await synthesizeResults(
+            actionPrompt,
+            {
+                meetingTitle: meeting.summary,
+                attendees: brief.attendees,
+                emailAnalysis,
+                documentAnalysis,
+                companyResearch,
+                recommendations: parsedRecommendations
+            },
+            700
+        );
+
+        let parsedActionItems = [];
+        try {
+            let cleanAction = actionResult
+                .replace(/```json/g, '')
+                .replace(/```/g, '')
+                .trim();
+            const parsed = JSON.parse(cleanAction);
+            parsedActionItems = Array.isArray(parsed) ? parsed
+                .filter(item => item && typeof item === 'string' && item.length > 15)
+                .slice(0, 6) : [];
+        } catch (e) {
+            console.error(`  ⚠️  Failed to parse action items:`, e.message);
+            // Fallback parsing
+            parsedActionItems = actionResult ?
+                actionResult
+                    .split(/[\n•\-]/)
+                    .map(a => a.trim().replace(/^[\d\.\)]+\s*/, ''))
+                    .filter(a => a && a.length > 15)
+                    .slice(0, 6) : [];
+        }
+
         // Assemble comprehensive brief
         brief.emailAnalysis = emailAnalysis;
         brief.documentAnalysis = documentAnalysis;
         brief.companyResearch = companyResearch;
         brief.recommendations = parsedRecommendations;
+        brief.actionItems = parsedActionItems;
 
         console.log(`✓ Comprehensive brief generated with ${brief.attendees.length} attendees`);
         res.json(brief);
