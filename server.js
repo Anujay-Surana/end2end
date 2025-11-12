@@ -437,39 +437,58 @@ Return a 4-7 sentence paragraph with SPECIFIC insights from the document content
             }
         }
 
-        // Generate company/context research
-        console.log(`  🏢 Researching companies...`);
-        const companyNames = [...new Set(brief.attendees.map(a => a.title).filter(t => t))];
+        // Generate company/context research - extract from LOCAL context only
+        console.log(`  🏢 Analyzing company context from local sources...`);
         let companyResearch = '';
-        if (companyNames.length > 0) {
-            const companyQueries = await craftSearchQueries(
-                `Companies mentioned: ${companyNames.join(', ')}. Find recent news, funding, product launches, or notable developments.`
+
+        // Extract company names mentioned in emails and documents
+        const localCompanyContext = [];
+        if (emails && emails.length > 0) {
+            emails.slice(0, 10).forEach(e => {
+                const text = `${e.subject} ${e.body || e.snippet}`.toLowerCase();
+                // Look for common company indicators
+                if (text.includes('kordn8')) localCompanyContext.push('Kordn8');
+            });
+        }
+
+        if (files && files.length > 0) {
+            files.forEach(f => {
+                if (f.content) {
+                    const text = f.content.toLowerCase();
+                    if (text.includes('kordn8')) localCompanyContext.push('Kordn8');
+                }
+            });
+        }
+
+        // If we found company mentions in local context, extract insights
+        if (localCompanyContext.length > 0 || (emails && emails.length > 0)) {
+            const uniqueCompanies = [...new Set(localCompanyContext)];
+            console.log(`  📊 Found company mentions: ${uniqueCompanies.join(', ') || 'extracting from context'}`);
+
+            const companyContext = await synthesizeResults(
+                `Extract any company-related context, business updates, or organizational information mentioned in these emails and documents for meeting "${meeting.summary}".
+
+Focus on:
+- Company goals, objectives, or strategy mentioned
+- Product or service developments discussed
+- Team changes, hiring, or organizational updates
+- Business metrics, milestones, or challenges mentioned
+- Any competitive or market context discussed
+
+Return a 2-4 sentence paragraph. If no substantive company context is found, return "No specific company developments discussed in available context."
+
+Be specific and reference actual content - avoid speculation.`,
+                {
+                    emails: emails?.slice(0, 10).map(e => ({ subject: e.subject, body: e.body || e.snippet })),
+                    documents: files?.filter(f => f.content).slice(0, 3).map(f => ({ name: f.name, excerpt: f.content?.substring(0, 2000) })),
+                    meetingTitle: meeting.summary
+                },
+                500
             );
 
-            if (companyQueries.length > 0) {
-                const companyResults = await parallelClient.beta.search({
-                    objective: `Find recent company news and developments`,
-                    search_queries: companyQueries.slice(0, 3),
-                    mode: 'one-shot',
-                    max_results: 6,
-                    max_chars_per_result: 2000
-                });
-
-                const companySummary = await synthesizeResults(
-                    `Summarize key company developments, news, or context that would be relevant for this meeting.
-
-Return a 3-4 sentence paragraph covering:
-- Recent company news or announcements
-- Funding, growth, or business developments
-- Industry trends or competitive positioning
-- Anything relevant to meeting discussions
-
-Be specific with dates and numbers where available.`,
-                    companyResults.results,
-                    600
-                );
-                companyResearch = companySummary || 'No recent company developments found.';
-            }
+            companyResearch = companyContext || 'No specific company developments discussed in available context.';
+        } else {
+            companyResearch = 'No company context available from emails or documents.';
         }
 
         // Generate strategic recommendations - deeply contextualized

@@ -2274,7 +2274,7 @@
 
         async function fetchDriveFileContents(files) {
             const filesWithContent = [];
-            const MAX_CONTENT_PER_FILE = 80000; // 80k chars per file - much larger for quality
+            const MAX_CONTENT_PER_FILE = 20000; // 20k chars per file - reasonable for analysis
 
             for (const file of files) {
                 try {
