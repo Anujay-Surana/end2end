@@ -233,9 +233,8 @@ If emails don't contain professional info, return empty array: []`,
                 }
             }
 
-            // STEP 2: Only do web search if we have minimal local context
-            if (keyFacts.length < 2) {
-                console.log(`    🌐 Supplementing with web search...`);
+            // STEP 2: Always do web search to supplement
+            console.log(`    🌐 Supplementing with web search...`);
 
                 // Craft queries with email domain for disambiguation
                 const queries = await craftSearchQueries(
@@ -292,13 +291,12 @@ Return JSON array of 2-3 specific, verified facts ONLY if confident.`,
                     }
                 }
 
-                // Try to extract title from web results
-                if (searchResult.results?.[0]?.excerpts) {
-                    const excerpt = searchResult.results[0].excerpts.join(' ');
-                    const titleMatch = excerpt.match(new RegExp(`${name}[^,.]*(CEO|CTO|VP|Director|Head|Manager|Engineer|Designer|Lead|Founder|Partner|Analyst|Specialist|Coordinator)[^,.]{0,30}`, 'i'));
-                    if (titleMatch && excerpt.includes(domain)) {
-                        title = titleMatch[0].trim();
-                    }
+            // Try to extract title from web results
+            if (searchResult.results?.[0]?.excerpts) {
+                const excerpt = searchResult.results[0].excerpts.join(' ');
+                const titleMatch = excerpt.match(new RegExp(`${name}[^,.]*(CEO|CTO|VP|Director|Head|Manager|Engineer|Designer|Lead|Founder|Partner|Analyst|Specialist|Coordinator)[^,.]{0,30}`, 'i'));
+                if (titleMatch && excerpt.includes(domain)) {
+                    title = titleMatch[0].trim();
                 }
             }
 
@@ -418,29 +416,40 @@ Be specific - quote or reference actual email content when relevant.`,
             emailAnalysis = emailSummary || 'No email activity found.';
         }
 
-        // Generate document/file analysis - meeting-specific
-        console.log(`  📄 Analyzing documents for meeting relevance...`);
+        // Generate document/file analysis - meeting-specific with content
+        console.log(`  📄 Analyzing document content for meeting relevance...`);
         let documentAnalysis = '';
         if (files && files.length > 0) {
-            const docSummary = await synthesizeResults(
-                `You are preparing for a meeting titled "${meeting.summary}". Analyze these documents and identify which are directly relevant to THIS SPECIFIC MEETING.
+            // Filter files with content
+            const filesWithContent = files.filter(f => f.content && f.content.length > 100);
 
-For each relevant document:
-- Explain what it likely contains based on the title
-- How it specifically relates to the meeting discussion
-- What key points or sections to review
+            if (filesWithContent.length > 0) {
+                const docSummary = await synthesizeResults(
+                    `You are preparing for a meeting titled "${meeting.summary}".
 
-If a document seems unrelated to the meeting topic, don't mention it.
+Analyze the ACTUAL CONTENT of these documents and extract insights relevant to THIS SPECIFIC MEETING.
 
-Return a 3-5 sentence paragraph focused ONLY on meeting-relevant documents. Be specific about what to look for in each document.`,
-                files.slice(0, 8).map(f => ({
-                    name: f.name,
-                    mimeType: f.mimeType,
-                    modifiedTime: f.modifiedTime
-                })),
-                500
-            );
-            documentAnalysis = docSummary || 'No meeting-relevant documents identified.';
+For each document:
+- Summarize key points that relate to the meeting topic
+- Quote or reference specific sections that are relevant
+- Explain how this content connects to meeting objectives
+- Note any data, decisions, or action items mentioned
+
+IGNORE documents unrelated to the meeting topic.
+
+Return a 4-7 sentence paragraph with SPECIFIC insights from the document content (not vague descriptions).`,
+                    filesWithContent.map(f => ({
+                        name: f.name,
+                        content: f.content.substring(0, 15000), // First 15k chars per doc
+                        mimeType: f.mimeType
+                    })),
+                    800
+                );
+                documentAnalysis = docSummary || 'No meeting-relevant content found in documents.';
+            } else if (files.length > 0) {
+                // Fallback to title-based analysis if no content
+                documentAnalysis = `Found ${files.length} documents: ${files.map(f => f.name).slice(0, 3).join(', ')}. Unable to access content for detailed analysis.`;
+            }
         }
 
         // Generate company/context research

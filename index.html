@@ -2746,6 +2746,11 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     files = await fetchDriveFiles(attendeeEmails);
                 }
 
+                // Fetch file contents for analysis
+                console.log(`📄 Fetching content for ${files.length} files...`);
+                const filesWithContent = await fetchDriveFileContents(files.slice(0, 5));
+                console.log(`✓ Fetched content for ${filesWithContent.length} files`);
+
                 // Call backend to generate brief
                 const response = await fetch('/api/prep-meeting', {
                     method: 'POST',
@@ -2755,8 +2760,20 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     body: JSON.stringify({
                         meeting,
                         attendees,
-                        emails: emails.slice(0, 10).map(e => ({ subject: e.subject, snippet: e.snippet })),
-                        files: files.slice(0, 5).map(f => ({ name: f.name, mimeType: f.mimeType }))
+                        emails: emails.slice(0, 15).map(e => ({
+                            subject: e.subject,
+                            snippet: e.snippet,
+                            from: e.from,
+                            body: e.body || e.snippet,
+                            date: e.date
+                        })),
+                        files: filesWithContent.map(f => ({
+                            name: f.name,
+                            mimeType: f.mimeType,
+                            modifiedTime: f.modifiedTime,
+                            id: f.id,
+                            content: f.content || ''
+                        }))
                     })
                 });
 
