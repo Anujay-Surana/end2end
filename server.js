@@ -367,7 +367,135 @@ Return ONLY the JSON array, no other text.`;
                     .slice(0, 5) : [];
         }
 
-        console.log(`✓ Brief generated with ${brief.attendees.length} attendees`);
+        // Generate email analysis
+        console.log(`  📧 Analyzing email threads...`);
+        let emailAnalysis = '';
+        if (emails && emails.length > 0) {
+            const emailSummary = await synthesizeResults(
+                `Analyze these email threads and extract key themes, decisions, and action items discussed.
+
+Return a 3-5 sentence paragraph summarizing:
+- Main topics discussed
+- Important decisions or agreements
+- Outstanding questions or action items
+- Tone and urgency of communications
+
+Be specific and reference actual email content.`,
+                emails.slice(0, 10),
+                500
+            );
+            emailAnalysis = emailSummary || 'No significant email activity found.';
+        }
+
+        // Generate document/file analysis
+        console.log(`  📄 Analyzing documents...`);
+        let documentAnalysis = '';
+        if (files && files.length > 0) {
+            const docSummary = await synthesizeResults(
+                `Based on these document titles and metadata, infer what materials are relevant for this meeting.
+
+Return a 2-3 sentence paragraph describing:
+- What these documents likely contain
+- How they relate to the meeting topic
+- What to review or prepare from them
+
+Be concise but specific.`,
+                files.slice(0, 5),
+                400
+            );
+            documentAnalysis = docSummary || 'No relevant documents identified.';
+        }
+
+        // Generate company/context research
+        console.log(`  🏢 Researching companies...`);
+        const companyNames = [...new Set(brief.attendees.map(a => a.title).filter(t => t))];
+        let companyResearch = '';
+        if (companyNames.length > 0) {
+            const companyQueries = await craftSearchQueries(
+                `Companies mentioned: ${companyNames.join(', ')}. Find recent news, funding, product launches, or notable developments.`
+            );
+
+            if (companyQueries.length > 0) {
+                const companyResults = await parallelClient.beta.search({
+                    objective: `Find recent company news and developments`,
+                    search_queries: companyQueries.slice(0, 3),
+                    mode: 'one-shot',
+                    max_results: 6,
+                    max_chars_per_result: 2000
+                });
+
+                const companySummary = await synthesizeResults(
+                    `Summarize key company developments, news, or context that would be relevant for this meeting.
+
+Return a 3-4 sentence paragraph covering:
+- Recent company news or announcements
+- Funding, growth, or business developments
+- Industry trends or competitive positioning
+- Anything relevant to meeting discussions
+
+Be specific with dates and numbers where available.`,
+                    companyResults.results,
+                    600
+                );
+                companyResearch = companySummary || 'No recent company developments found.';
+            }
+        }
+
+        // Generate strategic recommendations
+        console.log(`  💡 Generating recommendations...`);
+        const recommendations = await synthesizeResults(
+            `Based on all the meeting context, provide 3-5 strategic recommendations or discussion points.
+
+Consider:
+- Attendee backgrounds and expertise
+- Recent email discussions
+- Company context
+- Meeting objectives
+
+Return ONLY a JSON array of recommendation strings. Each should be:
+- Specific and actionable
+- Tailored to this specific meeting
+- 20-60 words
+- Strategic rather than tactical
+
+Example:
+["Leverage Susannah's life sciences expertise to discuss healthcare AI applications, referencing her recent SPC blog post", "Propose pilot program with Kordn8's MVP, addressing the prototype limitations mentioned in recent reports"]
+
+Return ONLY the JSON array.`,
+            {
+                meeting: { title: meeting.summary, description: meeting.description },
+                attendees: brief.attendees,
+                emails: emails?.slice(0, 5),
+                files: files?.slice(0, 3),
+                companyContext: companyResearch
+            },
+            800
+        );
+
+        let parsedRecommendations = [];
+        try {
+            let cleanRecs = recommendations
+                .replace(/```json/g, '')
+                .replace(/```/g, '')
+                .trim();
+            const parsed = JSON.parse(cleanRecs);
+            parsedRecommendations = Array.isArray(parsed) ? parsed.slice(0, 5) : [];
+        } catch (e) {
+            console.error(`  ⚠️  Failed to parse recommendations:`, e.message);
+            parsedRecommendations = recommendations ?
+                recommendations.split(/[\n•\-]/)
+                    .map(r => r.trim().replace(/^[\d\.\)]+\s*/, ''))
+                    .filter(r => r && r.length > 20)
+                    .slice(0, 5) : [];
+        }
+
+        // Assemble comprehensive brief
+        brief.emailAnalysis = emailAnalysis;
+        brief.documentAnalysis = documentAnalysis;
+        brief.companyResearch = companyResearch;
+        brief.recommendations = parsedRecommendations;
+
+        console.log(`✓ Comprehensive brief generated with ${brief.attendees.length} attendees`);
         res.json(brief);
 
     } catch (error) {

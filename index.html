@@ -1051,6 +1051,83 @@
             font-size: 12px;
             margin-bottom: 12px;
         }
+
+        /* Analysis Sections */
+        .analysis-section {
+            padding: 24px;
+            background: #ffffff;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .analysis-section h3 {
+            margin: 0 0 16px 0;
+            color: #333;
+            font-size: 20px;
+        }
+
+        .analysis-text {
+            color: #555;
+            line-height: 1.8;
+            font-size: 15px;
+            white-space: pre-wrap;
+        }
+
+        /* Attendee Email */
+        .attendee-email {
+            color: #888;
+            font-size: 13px;
+            margin: 4px 0;
+        }
+
+        .key-facts-section {
+            margin-top: 12px;
+        }
+
+        .key-facts-section strong {
+            color: #666;
+            font-size: 13px;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        /* Recommendations */
+        .recommendations-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .recommendation-item {
+            display: flex;
+            gap: 12px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-left: 4px solid #34a853;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            align-items: flex-start;
+        }
+
+        .rec-number {
+            background: #34a853;
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .rec-text {
+            color: #333;
+            line-height: 1.6;
+            font-size: 15px;
+        }
     </style>
 </head>
 <body>
@@ -2336,7 +2413,7 @@
                     `${name} ${company} news ${new Date().getFullYear()}`
                 ];
 
-                const response = await fetch('http://localhost:3000/api/parallel-search', {
+                const response = await fetch('/api/parallel-search', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2375,7 +2452,7 @@
                     `${companyName} products services`
                 ];
 
-                const response = await fetch('http://localhost:3000/api/parallel-search', {
+                const response = await fetch('/api/parallel-search', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2415,7 +2492,7 @@
                     `${title} insights`
                 ].filter(q => q.length > 10); // Only valid queries
 
-                const response = await fetch('http://localhost:3000/api/parallel-search', {
+                const response = await fetch('/api/parallel-search', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2670,7 +2747,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 }
 
                 // Call backend to generate brief
-                const response = await fetch('http://localhost:3000/api/prep-meeting', {
+                const response = await fetch('/api/prep-meeting', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2715,6 +2792,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
             };
 
+            // Create tabbed interface with comprehensive sections
             modalBody.innerHTML = `
                 <div class="modern-brief">
                     <!-- Hero Card -->
@@ -2724,10 +2802,19 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                         ${brief.summary ? `<p class="executive-summary">${brief.summary}</p>` : ''}
                     </div>
 
-                    <!-- Attendees Section -->
-                    ${brief.attendees && brief.attendees.length > 0 ? `
-                        <div class="brief-section">
-                            <h3>Key People</h3>
+                    <!-- Tab Navigation -->
+                    <div class="brief-tabs">
+                        <button class="brief-tab-button active" onclick="switchBriefTab('attendees')">Attendees</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('emails')">Email Analysis</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('documents')">Documents</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('company')">Company Intel</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('strategy')">Recommendations</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('actions')">Action Items</button>
+                    </div>
+
+                    <!-- Tab: Attendees -->
+                    <div id="brief-tab-attendees" class="brief-tab-content active">
+                        ${brief.attendees && brief.attendees.length > 0 ? `
                             <div class="attendee-grid">
                                 ${brief.attendees.map(att => `
                                     <div class="attendee-modern-card">
@@ -2735,35 +2822,107 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                                         <div class="attendee-details">
                                             <h4>${att.name}</h4>
                                             <p class="attendee-title">${att.title}</p>
+                                            <p class="attendee-email">${att.email}</p>
                                             ${att.keyFacts && att.keyFacts.length > 0 ? `
-                                                <ul class="key-facts">
-                                                    ${att.keyFacts.map(fact => `<li>${fact}</li>`).join('')}
-                                                </ul>
-                                            ` : ''}
+                                                <div class="key-facts-section">
+                                                    <strong>Key Information:</strong>
+                                                    <ul class="key-facts">
+                                                        ${att.keyFacts.map(fact => `<li>${fact}</li>`).join('')}
+                                                    </ul>
+                                                </div>
+                                            ` : '<p style="color: #888;">No additional information found</p>'}
                                         </div>
                                     </div>
                                 `).join('')}
                             </div>
-                        </div>
-                    ` : ''}
+                        ` : '<p>No attendee information available.</p>'}
+                    </div>
 
-                    <!-- Action Items -->
-                    ${brief.actionItems && brief.actionItems.length > 0 ? `
-                        <div class="brief-section">
-                            <h3>Action Items</h3>
-                            <div class="action-checklist">
-                                ${brief.actionItems.map(item => `
-                                    <label class="action-item">
-                                        <input type="checkbox">
-                                        <span>${item}</span>
-                                    </label>
-                                `).join('')}
-                            </div>
+                    <!-- Tab: Email Analysis -->
+                    <div id="brief-tab-emails" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>📧 Email Thread Analysis</h3>
+                            ${brief.emailAnalysis ? `
+                                <p class="analysis-text">${brief.emailAnalysis}</p>
+                            ` : '<p style="color: #888;">No recent email activity to analyze.</p>'}
                         </div>
-                    ` : ''}
+                    </div>
+
+                    <!-- Tab: Documents -->
+                    <div id="brief-tab-documents" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>📄 Document Review</h3>
+                            ${brief.documentAnalysis ? `
+                                <p class="analysis-text">${brief.documentAnalysis}</p>
+                            ` : '<p style="color: #888;">No relevant documents identified.</p>'}
+                        </div>
+                    </div>
+
+                    <!-- Tab: Company Intel -->
+                    <div id="brief-tab-company" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>🏢 Company & Context Research</h3>
+                            ${brief.companyResearch ? `
+                                <p class="analysis-text">${brief.companyResearch}</p>
+                            ` : '<p style="color: #888;">No company research available.</p>'}
+                        </div>
+                    </div>
+
+                    <!-- Tab: Strategic Recommendations -->
+                    <div id="brief-tab-strategy" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>💡 Strategic Recommendations</h3>
+                            ${brief.recommendations && brief.recommendations.length > 0 ? `
+                                <ul class="recommendations-list">
+                                    ${brief.recommendations.map((rec, idx) => `
+                                        <li class="recommendation-item">
+                                            <span class="rec-number">${idx + 1}</span>
+                                            <span class="rec-text">${rec}</span>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            ` : '<p style="color: #888;">No recommendations generated.</p>'}
+                        </div>
+                    </div>
+
+                    <!-- Tab: Action Items -->
+                    <div id="brief-tab-actions" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>✅ Preparation Checklist</h3>
+                            ${brief.actionItems && brief.actionItems.length > 0 ? `
+                                <div class="action-checklist">
+                                    ${brief.actionItems.map(item => `
+                                        <label class="action-item">
+                                            <input type="checkbox">
+                                            <span>${item}</span>
+                                        </label>
+                                    `).join('')}
+                                </div>
+                            ` : '<p style="color: #888;">No action items identified.</p>'}
+                        </div>
+                    </div>
                 </div>
             `;
         }
+
+        // Tab switching function
+        window.switchBriefTab = function(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.brief-tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.brief-tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            // Show selected tab
+            const selectedTab = document.getElementById(`brief-tab-${tabName}`);
+            const selectedButton = event.target;
+            if (selectedTab) {
+                selectedTab.classList.add('active');
+                selectedButton.classList.add('active');
+            }
+        };
 
         function formatMeetingTime(meeting) {
             const start = new Date(meeting.start.dateTime || meeting.start.date);
