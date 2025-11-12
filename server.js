@@ -189,6 +189,12 @@ app.post('/api/prep-meeting', async (req, res) => {
             const domain = att.email.split('@')[1];
             const company = domain.split('.')[0];
 
+            // Skip resource calendars (conference rooms)
+            if (att.email.includes('@resource.calendar.google.com')) {
+                console.log(`  ⏭️  Skipping resource calendar: ${name}`);
+                return null;
+            }
+
             console.log(`  🔍 Researching: ${name} (${att.email})`);
 
             let keyFacts = [];
@@ -236,60 +242,79 @@ If emails don't contain professional info, return empty array: []`,
             // STEP 2: Always do web search to supplement
             console.log(`    🌐 Supplementing with web search...`);
 
-                // Craft queries with email domain for disambiguation
-                const queries = await craftSearchQueries(
-                    `${name} ${att.email} ${domain}. Find current role and professional background. Include email domain to find the RIGHT person.`
+            // Craft queries with email domain for disambiguation
+            const queries = await craftSearchQueries(
+                `${name} ${att.email} ${domain}. Find current role and professional background. Include email domain to find the RIGHT person.`
+            );
+
+            if (queries.length === 0) {
+                queries.push(
+                    `"${name}" ${domain} LinkedIn`,
+                    `"${name}" ${att.email}`,
+                    `${name} ${company}`
                 );
+            }
 
-                if (queries.length === 0) {
-                    queries.push(
-                        `"${name}" ${domain} LinkedIn profile`,
-                        `"${name}" ${att.email} role`
-                    );
-                }
+            const searchResult = await parallelClient.beta.search({
+                objective: `Find professional information about ${name} at ${domain}`,
+                search_queries: queries.slice(0, 3),
+                mode: 'one-shot',
+                max_results: 8,
+                max_chars_per_result: 2500
+            });
 
-                const searchResult = await parallelClient.beta.search({
-                    objective: `Find professional information about ${name} at ${domain}`,
-                    search_queries: queries.slice(0, 3),
-                    mode: 'one-shot',
-                    max_results: 5,
-                    max_chars_per_result: 2000
-                });
+            console.log(`    ✓ Found ${searchResult.results?.length || 0} web results`);
 
-                console.log(`    ✓ Found ${searchResult.results?.length || 0} web results`);
+            if (searchResult.results && searchResult.results.length > 0) {
+                // Adjust confidence based on whether we have local context
+                const hasLocalContext = keyFacts.length > 0;
 
-                // CONFIDENCE CHECK: Verify we found the right person
-                const hasEmailMatch = searchResult.results?.some(r =>
+                // Check if results mention the email domain
+                const domainMentioned = searchResult.results.some(r =>
                     r.url?.includes(domain) ||
-                    r.excerpts?.some(ex => ex.includes(att.email) || ex.includes(domain))
+                    r.excerpts?.some(ex => ex.toLowerCase().includes(domain.toLowerCase()))
                 );
 
-                if (hasEmailMatch || searchResult.results?.length > 0) {
-                    const webSynthesis = await synthesizeResults(
-                        `Extract professional info about ${name} from ${domain} (email: ${att.email}).
+                const confidenceLevel = hasLocalContext ? 'strict' : (domainMentioned ? 'moderate' : 'lenient');
+                console.log(`    🎯 Confidence level: ${confidenceLevel}`);
 
-CRITICAL: Only include info if you're CONFIDENT it's about THIS specific person (check email domain matches).
-
-If unsure or if results seem to be about a different person, return empty array: []
-
-Return JSON array of 2-3 specific, verified facts ONLY if confident.`,
-                        searchResult.results,
-                        500
-                    );
-
-                    try {
-                        let clean = webSynthesis?.replace(/```json/g, '').replace(/```/g, '').trim();
-                        const parsed = JSON.parse(clean);
-                        if (Array.isArray(parsed) && parsed.length > 0) {
-                            // Add web facts, marking them as supplementary
-                            keyFacts.push(...parsed.filter(f => f && f.length > 10));
-                            source = keyFacts.length > parsed.length ? 'local+web' : 'web';
-                            console.log(`    ✓ Added ${parsed.length} facts from web`);
-                        }
-                    } catch (e) {
-                        console.log(`    ⚠️  Web results low confidence, skipping`);
-                    }
+                let confidencePrompt = '';
+                if (confidenceLevel === 'strict') {
+                    confidencePrompt = `CRITICAL: Only include info if you're CONFIDENT it's about THIS specific person at ${domain}. If unsure, return empty array: []`;
+                } else if (confidenceLevel === 'moderate') {
+                    confidencePrompt = `Extract info about ${name} from ${domain}. Prioritize results mentioning ${domain}. If results seem to be about a different person with same name, return empty array: []`;
+                } else {
+                    confidencePrompt = `Extract professional info about ${name}. The email is ${att.email}. Include basic professional info found. If results are clearly about a different person, return empty array: []`;
                 }
+
+                const webSynthesis = await synthesizeResults(
+                    `${confidencePrompt}
+
+Return JSON array of 2-4 specific, professional facts.
+
+Example format: ["Software Engineer at ${company}", "Previously worked at X", "Expertise in Y"]`,
+                    searchResult.results,
+                    600
+                );
+
+                try {
+                    let clean = webSynthesis?.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const parsed = JSON.parse(clean);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        // Add web facts
+                        const webFacts = parsed.filter(f => f && f.length > 10);
+                        keyFacts.push(...webFacts);
+                        source = hasLocalContext ? 'local+web' : 'web';
+                        console.log(`    ✓ Added ${webFacts.length} facts from web`);
+                    } else {
+                        console.log(`    ⚠️  GPT returned empty array (low confidence)`);
+                    }
+                } catch (e) {
+                    console.log(`    ⚠️  Failed to parse web results: ${e.message}`);
+                }
+            } else {
+                console.log(`    ⚠️  No web results found`);
+            }
 
             // Try to extract title from web results
             if (searchResult.results?.[0]?.excerpts) {
