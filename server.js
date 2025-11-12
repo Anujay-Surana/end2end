@@ -183,113 +183,136 @@ app.post('/api/prep-meeting', async (req, res) => {
             context: ''
         };
 
-        // Research attendees in parallel
+        // Research attendees - prioritize local context, then web
         const attendeePromises = attendees.slice(0, 6).map(async (att) => {
             const name = att.displayName || att.email.split('@')[0];
             const domain = att.email.split('@')[1];
             const company = domain.split('.')[0];
 
-            console.log(`  🔍 Researching: ${name} at ${company}`);
-
-            // Craft queries with GPT
-            const queries = await craftSearchQueries(
-                `Person: ${name} at ${company}. Find their current role, recent work/projects, professional background, and any notable achievements or activities.`
-            );
-
-            if (queries.length === 0) {
-                queries.push(`${name} ${company} LinkedIn`, `${name} ${company} role`, `${name} ${company} bio`);
-            }
-
-            // Search with Parallel AI - more comprehensive
-            const searchResult = await parallelClient.beta.search({
-                objective: `Find detailed professional information about ${name} from ${company}`,
-                search_queries: queries.slice(0, 3),
-                mode: 'one-shot',
-                max_results: 8,
-                max_chars_per_result: 3000
-            });
-
-            console.log(`  ✓ Found ${searchResult.results?.length || 0} results for ${name}`);
-
-            // Synthesize with GPT
-            const synthesis = await synthesizeResults(
-                `Analyze the search results about ${name} and extract 3-4 key facts that would be valuable to know before a meeting.
-
-Focus on:
-- Current role and responsibilities
-- Recent achievements, projects, or announcements
-- Professional background and expertise areas
-- Company context (funding, growth, initiatives)
-
-Return ONLY a JSON array of fact strings. Each fact should be:
-- Specific and informative (not generic like "works at ${company}")
-- 15-80 words
-- Verified from the search results
-- Useful for business meeting context
-
-Example good output:
-["Leads the AI Infrastructure team at ${company}, managing 15+ engineers", "Previously VP of Engineering at startup that was acquired by Google in 2021", "Recently published research on distributed systems at SOSP conference"]
-
-Return ONLY the JSON array, no other text.`,
-                searchResult.results,
-                600
-            );
+            console.log(`  🔍 Researching: ${name} (${att.email})`);
 
             let keyFacts = [];
             let title = company;
+            let source = 'local'; // Track data source
 
-            try {
-                // Clean up JSON artifacts
-                let cleanSynthesis = synthesis
-                    .replace(/```json/g, '')
-                    .replace(/```/g, '')
-                    .trim();
+            // STEP 1: Extract info from local context (emails)
+            const attendeeEmails = emails ? emails.filter(e =>
+                e.from?.toLowerCase().includes(att.email.toLowerCase()) ||
+                e.snippet?.toLowerCase().includes(name.toLowerCase())
+            ) : [];
 
-                const parsed = JSON.parse(cleanSynthesis);
-                if (Array.isArray(parsed)) {
-                    keyFacts = parsed
-                        .filter(fact =>
-                            fact &&
-                            typeof fact === 'string' &&
-                            fact.length > 15 &&
-                            fact.length < 200 &&
-                            // Only filter truly useless statements
-                            !fact.toLowerCase().match(/^(works? (at|in|for)|based in|active on|experienced|professional)/i)
-                        )
-                        .slice(0, 4);
-                }
-            } catch (e) {
-                console.error(`  ⚠️  Failed to parse synthesis for ${name}:`, e.message);
-                // Fallback: try to extract bullet points or lines
-                if (synthesis) {
-                    keyFacts = synthesis
-                        .split(/[\n•\-]/)
-                        .map(f => f.trim().replace(/^[\d\.\)]+\s*/, ''))
-                        .filter(f => f && f.length > 15 && f.length < 200)
-                        .slice(0, 4);
-                }
-            }
+            if (attendeeEmails.length > 0) {
+                console.log(`    📧 Found ${attendeeEmails.length} emails from ${name}`);
+                const localSynthesis = await synthesizeResults(
+                    `Extract key professional information about ${name} (${att.email}) from these emails for meeting "${meeting.summary}".
 
-            // Try to extract a better title from search results
-            if (searchResult.results?.[0]?.title) {
-                title = searchResult.results[0].title;
-            }
-            if (searchResult.results?.[0]?.excerpts) {
-                const excerpt = searchResult.results[0].excerpts.join(' ');
-                // Look for title patterns
-                const titleMatch = excerpt.match(new RegExp(`${name}[^,.]*(CEO|CTO|VP|Director|Head|Manager|Engineer|Designer|Lead|Founder|Partner)[^,.]*`, 'i'));
-                if (titleMatch) {
-                    title = titleMatch[0].trim();
+Focus on:
+- Their role or title if mentioned
+- Projects or work they're involved in
+- Expertise areas or responsibilities
+- Any context relevant to this meeting
+
+Return ONLY a JSON array of 2-4 specific facts. Only include facts directly stated in the emails.
+
+Example: ["Leading the Kordn8 MVP development mentioned in Nov 9 email", "Requested UBM agenda document for this meeting"]
+
+If emails don't contain professional info, return empty array: []`,
+                    attendeeEmails.slice(0, 10),
+                    400
+                );
+
+                try {
+                    let clean = localSynthesis?.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const parsed = JSON.parse(clean);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        keyFacts = parsed.filter(f => f && f.length > 10);
+                        console.log(`    ✓ Extracted ${keyFacts.length} facts from emails`);
+                    }
+                } catch (e) {
+                    console.log(`    ⚠️  No structured info from emails`);
                 }
             }
 
-            console.log(`  ✓ Extracted ${keyFacts.length} facts for ${name}`);
+            // STEP 2: Only do web search if we have minimal local context
+            if (keyFacts.length < 2) {
+                console.log(`    🌐 Supplementing with web search...`);
+
+                // Craft queries with email domain for disambiguation
+                const queries = await craftSearchQueries(
+                    `${name} ${att.email} ${domain}. Find current role and professional background. Include email domain to find the RIGHT person.`
+                );
+
+                if (queries.length === 0) {
+                    queries.push(
+                        `"${name}" ${domain} LinkedIn profile`,
+                        `"${name}" ${att.email} role`
+                    );
+                }
+
+                const searchResult = await parallelClient.beta.search({
+                    objective: `Find professional information about ${name} at ${domain}`,
+                    search_queries: queries.slice(0, 3),
+                    mode: 'one-shot',
+                    max_results: 5,
+                    max_chars_per_result: 2000
+                });
+
+                console.log(`    ✓ Found ${searchResult.results?.length || 0} web results`);
+
+                // CONFIDENCE CHECK: Verify we found the right person
+                const hasEmailMatch = searchResult.results?.some(r =>
+                    r.url?.includes(domain) ||
+                    r.excerpts?.some(ex => ex.includes(att.email) || ex.includes(domain))
+                );
+
+                if (hasEmailMatch || searchResult.results?.length > 0) {
+                    const webSynthesis = await synthesizeResults(
+                        `Extract professional info about ${name} from ${domain} (email: ${att.email}).
+
+CRITICAL: Only include info if you're CONFIDENT it's about THIS specific person (check email domain matches).
+
+If unsure or if results seem to be about a different person, return empty array: []
+
+Return JSON array of 2-3 specific, verified facts ONLY if confident.`,
+                        searchResult.results,
+                        500
+                    );
+
+                    try {
+                        let clean = webSynthesis?.replace(/```json/g, '').replace(/```/g, '').trim();
+                        const parsed = JSON.parse(clean);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            // Add web facts, marking them as supplementary
+                            keyFacts.push(...parsed.filter(f => f && f.length > 10));
+                            source = keyFacts.length > parsed.length ? 'local+web' : 'web';
+                            console.log(`    ✓ Added ${parsed.length} facts from web`);
+                        }
+                    } catch (e) {
+                        console.log(`    ⚠️  Web results low confidence, skipping`);
+                    }
+                }
+
+                // Try to extract title from web results
+                if (searchResult.results?.[0]?.excerpts) {
+                    const excerpt = searchResult.results[0].excerpts.join(' ');
+                    const titleMatch = excerpt.match(new RegExp(`${name}[^,.]*(CEO|CTO|VP|Director|Head|Manager|Engineer|Designer|Lead|Founder|Partner|Analyst|Specialist|Coordinator)[^,.]{0,30}`, 'i'));
+                    if (titleMatch && excerpt.includes(domain)) {
+                        title = titleMatch[0].trim();
+                    }
+                }
+            }
+
+            // Limit to top facts
+            keyFacts = keyFacts.slice(0, 4);
+
+            console.log(`  ✓ ${name}: ${keyFacts.length} facts (source: ${source})`);
 
             return {
                 name: name,
                 email: att.email,
                 title: title,
-                keyFacts: keyFacts
+                keyFacts: keyFacts,
+                dataSource: source
             };
         });
 
@@ -367,43 +390,57 @@ Return ONLY the JSON array, no other text.`;
                     .slice(0, 5) : [];
         }
 
-        // Generate email analysis
-        console.log(`  📧 Analyzing email threads...`);
+        // Generate email analysis - meeting-specific
+        console.log(`  📧 Analyzing email threads for meeting context...`);
         let emailAnalysis = '';
         if (emails && emails.length > 0) {
             const emailSummary = await synthesizeResults(
-                `Analyze these email threads and extract key themes, decisions, and action items discussed.
+                `You are preparing for a meeting titled "${meeting.summary}". Analyze these email threads and extract ONLY information directly relevant to THIS SPECIFIC MEETING.
 
-Return a 3-5 sentence paragraph summarizing:
-- Main topics discussed
-- Important decisions or agreements
-- Outstanding questions or action items
-- Tone and urgency of communications
+Focus on:
+- Discussions, decisions, or context about the meeting topic
+- Action items or deliverables mentioned that relate to this meeting
+- Important context shared between attendees about the meeting subject
+- Any preparation, documents, or topics mentioned for discussion
 
-Be specific and reference actual email content.`,
-                emails.slice(0, 10),
-                500
+IGNORE:
+- General company updates unrelated to this meeting
+- Event invitations or social activities
+- Administrative emails (unless directly about this meeting)
+- Generic community announcements
+
+Return a 3-5 sentence paragraph. If emails don't contain relevant meeting context, say "No directly relevant email discussions found about this meeting topic."
+
+Be specific - quote or reference actual email content when relevant.`,
+                emails.slice(0, 15),
+                600
             );
-            emailAnalysis = emailSummary || 'No significant email activity found.';
+            emailAnalysis = emailSummary || 'No email activity found.';
         }
 
-        // Generate document/file analysis
-        console.log(`  📄 Analyzing documents...`);
+        // Generate document/file analysis - meeting-specific
+        console.log(`  📄 Analyzing documents for meeting relevance...`);
         let documentAnalysis = '';
         if (files && files.length > 0) {
             const docSummary = await synthesizeResults(
-                `Based on these document titles and metadata, infer what materials are relevant for this meeting.
+                `You are preparing for a meeting titled "${meeting.summary}". Analyze these documents and identify which are directly relevant to THIS SPECIFIC MEETING.
 
-Return a 2-3 sentence paragraph describing:
-- What these documents likely contain
-- How they relate to the meeting topic
-- What to review or prepare from them
+For each relevant document:
+- Explain what it likely contains based on the title
+- How it specifically relates to the meeting discussion
+- What key points or sections to review
 
-Be concise but specific.`,
-                files.slice(0, 5),
-                400
+If a document seems unrelated to the meeting topic, don't mention it.
+
+Return a 3-5 sentence paragraph focused ONLY on meeting-relevant documents. Be specific about what to look for in each document.`,
+                files.slice(0, 8).map(f => ({
+                    name: f.name,
+                    mimeType: f.mimeType,
+                    modifiedTime: f.modifiedTime
+                })),
+                500
             );
-            documentAnalysis = docSummary || 'No relevant documents identified.';
+            documentAnalysis = docSummary || 'No meeting-relevant documents identified.';
         }
 
         // Generate company/context research
@@ -441,35 +478,36 @@ Be specific with dates and numbers where available.`,
             }
         }
 
-        // Generate strategic recommendations
-        console.log(`  💡 Generating recommendations...`);
+        // Generate strategic recommendations - deeply contextualized
+        console.log(`  💡 Generating meeting-specific recommendations...`);
         const recommendations = await synthesizeResults(
-            `Based on all the meeting context, provide 3-5 strategic recommendations or discussion points.
+            `You are preparing for the meeting: "${meeting.summary}"
 
-Consider:
-- Attendee backgrounds and expertise
-- Recent email discussions
-- Company context
-- Meeting objectives
+Based on the LOCAL CONTEXT (emails, documents, attendee info), provide 3-5 strategic recommendations for THIS SPECIFIC MEETING.
 
-Return ONLY a JSON array of recommendation strings. Each should be:
-- Specific and actionable
-- Tailored to this specific meeting
-- 20-60 words
-- Strategic rather than tactical
+Context available:
+- Attendees: ${brief.attendees.map(a => `${a.name} (${a.keyFacts.join('; ')})`).join(' | ')}
+- Email discussions: ${emailAnalysis}
+- Documents: ${documentAnalysis}
+- Company context: ${companyResearch}
 
-Example:
-["Leverage Susannah's life sciences expertise to discuss healthcare AI applications, referencing her recent SPC blog post", "Propose pilot program with Kordn8's MVP, addressing the prototype limitations mentioned in recent reports"]
+Each recommendation should:
+1. Reference SPECIFIC information from the context above
+2. Be actionable for THIS meeting
+3. Connect multiple data points (e.g., "Based on email X and document Y, suggest Z")
+4. Be 25-70 words
 
-Return ONLY the JSON array.`,
+Example format:
+["Based on Akshay's Nov 9 email sharing the UBM agenda document and the 'Kordn8 MVP Functions Detailed Report', prepare specific questions about MVP limitations and proposed solutions for the Kordn8 discussion", "Reference the 'Short Term User Stickiness' document when discussing retention strategies - it appears directly relevant to meeting objectives"]
+
+Return ONLY a JSON array. If insufficient context for meaningful recommendations, return fewer but high-quality ones.`,
             {
-                meeting: { title: meeting.summary, description: meeting.description },
-                attendees: brief.attendees,
-                emails: emails?.slice(0, 5),
-                files: files?.slice(0, 3),
-                companyContext: companyResearch
+                meetingTitle: meeting.summary,
+                emailContext: emailAnalysis,
+                docContext: documentAnalysis,
+                attendeeContext: brief.attendees.map(a => ({ name: a.name, facts: a.keyFacts, source: a.dataSource }))
             },
-            800
+            900
         );
 
         let parsedRecommendations = [];
