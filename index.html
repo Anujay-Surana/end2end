@@ -1708,10 +1708,18 @@
         }
 
         function signOut() {
+            // Clear all user-specific state to prevent data leakage
             accessToken = null;
             userEmail = null;
             userProfile = null;
-            interactiveBrief = null; // Clear meeting brief data to prevent leakage
+            interactiveBrief = null;
+            meetingBrief = null;
+            currentMeetingId = null;
+            currentEmails = [];
+            currentFiles = [];
+            currentAttachments = [];
+            currentMeeting = null;
+
             if (countdownInterval) {
                 clearInterval(countdownInterval);
             }
@@ -2148,6 +2156,11 @@
 
         // View Navigation Functions
         function showMeetingDetail(index) {
+            // Clear cached state from previous meeting to prevent data leakage
+            currentEmails = [];
+            currentAttachments = [];
+            currentFiles = [];
+
             currentMeeting = allEvents[index];
             document.getElementById('eventsContainer').classList.remove('visible');
             document.getElementById('meetingDetailContainer').classList.add('visible');
@@ -2156,6 +2169,14 @@
         }
 
         function showCalendarView() {
+            // Clear all meeting-specific cached state
+            currentEmails = [];
+            currentAttachments = [];
+            currentFiles = [];
+            meetingBrief = null;
+            currentMeetingId = null;
+            interactiveBrief = null;
+
             document.getElementById('eventsContainer').classList.add('visible');
             document.getElementById('meetingDetailContainer').classList.remove('visible');
             currentMeeting = null;
@@ -3128,16 +3149,12 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 const attendees = meeting.attendees || [];
                 const attendeeEmails = attendees.map(att => att.email).filter(Boolean);
 
-                // Fetch local context
-                let emails = currentEmails;
-                let files = currentFiles;
+                // ALWAYS fetch fresh data to prevent cross-meeting contamination
+                currentEmails = [];
+                currentFiles = [];
 
-                if (emails.length === 0) {
-                    emails = await fetchPastEmails(attendeeEmails);
-                }
-                if (files.length === 0) {
-                    files = await fetchDriveFiles(attendeeEmails);
-                }
+                const emails = await fetchPastEmails(attendeeEmails);
+                const files = await fetchDriveFiles(attendeeEmails);
 
                 // Fetch file contents for analysis
                 console.log(`📄 Fetching content for ${files.length} files...`);
@@ -3685,6 +3702,10 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         }
 
         function closePrepModal() {
+            // Clear brief state to prevent data leakage
+            meetingBrief = null;
+            currentMeetingId = null;
+
             document.getElementById('prepModal').classList.remove('visible');
         }
 
@@ -4093,16 +4114,12 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 const attendees = meeting.attendees || [];
                 const attendeeEmails = attendees.map(att => att.email).filter(Boolean);
 
-                // Fetch local context (use cached if available)
-                let emails = currentEmails;
-                let files = currentFiles;
+                // ALWAYS fetch fresh data to prevent cross-meeting contamination
+                currentEmails = [];
+                currentFiles = [];
 
-                if (emails.length === 0) {
-                    emails = await fetchPastEmails(attendeeEmails);
-                }
-                if (files.length === 0) {
-                    files = await fetchDriveFiles(attendeeEmails);
-                }
+                const emails = await fetchPastEmails(attendeeEmails);
+                const files = await fetchDriveFiles(attendeeEmails);
 
                 // Fetch file contents
                 const filesWithContent = await fetchDriveFileContents(files.slice(0, 5));
@@ -4362,9 +4379,11 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 interactivePrepWs.close();
             }
 
-            // Clear state
+            // Clear state to prevent data leakage
             interactivePrepWs = null;
             interactiveBrief = null;
+            meetingBrief = null;
+            currentMeetingId = null;
             chatMessagesArray = [];
             conversationHistory = [];
             voiceConversationMode = false;
