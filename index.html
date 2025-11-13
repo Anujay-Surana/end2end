@@ -1128,6 +1128,187 @@
             line-height: 1.6;
             font-size: 15px;
         }
+
+        /* Real-Time Meeting Assistant Styles */
+        .enter-meeting-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .enter-meeting-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .meeting-assistant {
+            margin-top: 30px;
+            padding: 20px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+
+        .assistant-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .assistant-header h2 {
+            margin: 0;
+            font-size: 20px;
+            color: #1f2937;
+        }
+
+        .stop-assistant-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .stop-assistant-btn:hover {
+            background: #dc2626;
+        }
+
+        .assistant-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .transcript-panel, .suggestions-panel {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 15px;
+            min-height: 400px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .transcript-panel h3, .suggestions-panel h3 {
+            margin: 0 0 15px 0;
+            font-size: 16px;
+            color: #374151;
+            font-weight: 600;
+        }
+
+        .transcript-content, .suggestions-content {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .transcript-item {
+            margin-bottom: 12px;
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            border-left: 3px solid #667eea;
+        }
+
+        .transcript-item.user {
+            border-left-color: #10b981;
+            background: #f0fdf4;
+        }
+
+        .transcript-speaker {
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+
+        .transcript-text {
+            color: #4b5563;
+        }
+
+        .transcript-timestamp {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 4px;
+        }
+
+        .suggestion-item {
+            margin-bottom: 12px;
+            padding: 12px;
+            border-radius: 6px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .suggestion-item.info {
+            background: #dbeafe;
+            border-left: 3px solid #3b82f6;
+        }
+
+        .suggestion-item.warning {
+            background: #fef3c7;
+            border-left: 3px solid #f59e0b;
+        }
+
+        .suggestion-item.error {
+            background: #fee2e2;
+            border-left: 3px solid #ef4444;
+        }
+
+        .suggestion-type {
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+            letter-spacing: 0.5px;
+        }
+
+        .suggestion-item.info .suggestion-type {
+            color: #1e40af;
+        }
+
+        .suggestion-item.warning .suggestion-type {
+            color: #b45309;
+        }
+
+        .suggestion-item.error .suggestion-type {
+            color: #991b1b;
+        }
+
+        .suggestion-message {
+            color: #374151;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .suggestion-placeholder {
+            text-align: center;
+            color: #9ca3af;
+            padding: 40px 20px;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -1162,7 +1343,10 @@
         <div id="meetingDetailContainer" class="meeting-detail-container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <button class="back-button" onclick="showCalendarView()">← Back to Calendar</button>
-                <button class="prep-button" id="prepMeButton" onclick="prepareForMeeting()">Prep Me</button>
+                <div style="display: flex; gap: 10px;">
+                    <button class="prep-button" id="prepMeButton" onclick="prepareForMeeting()">Prep Me</button>
+                    <button class="enter-meeting-button" id="enterMeetingButton" onclick="enterMeeting()" style="display: none;">🎤 Entering Meeting</button>
+                </div>
             </div>
 
             <div class="meeting-header">
@@ -1214,6 +1398,35 @@
                 <div id="filesList"></div>
             </div>
 
+            <!-- Real-Time Meeting Assistant -->
+            <div id="meetingAssistantContainer" class="meeting-assistant" style="display: none;">
+                <div class="assistant-header">
+                    <h2>🎤 Real-Time Meeting Assistant</h2>
+                    <button class="stop-assistant-btn" onclick="stopMeetingAssistant()">Stop</button>
+                </div>
+
+                <div class="assistant-grid">
+                    <!-- Live Transcript -->
+                    <div class="transcript-panel">
+                        <h3>Live Transcript</h3>
+                        <div id="transcriptContainer" class="transcript-content"></div>
+                    </div>
+
+                    <!-- AI Suggestions -->
+                    <div class="suggestions-panel">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0;">AI Suggestions</h3>
+                            <button onclick="clearSuggestions()" style="background: #666; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;">
+                                Clear
+                            </button>
+                        </div>
+                        <div id="suggestionsContainer" class="suggestions-content">
+                            <div class="suggestion-placeholder">Listening for conversation...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div style="text-align: center; margin-top: 30px;">
                 <button id="signOutButton2" style="background: #666; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer;" onclick="signOut()">Sign Out</button>
             </div>
@@ -1227,6 +1440,22 @@
                     <button class="prep-modal-close" onclick="closePrepModal()">&times;</button>
                 </div>
                 <div id="prepModalBody"></div>
+            </div>
+        </div>
+
+        <!-- Speaker Mapping Modal -->
+        <div id="speakerMappingModal" class="prep-modal" style="display: none;">
+            <div class="prep-modal-content" style="max-width: 500px;">
+                <div class="prep-modal-header">
+                    <span>👤 Identify Speakers</span>
+                </div>
+                <div style="padding: 24px;">
+                    <p style="margin-bottom: 20px; color: #666;">We've detected multiple speakers. Please identify who is speaking:</p>
+                    <div id="speakerMappingList"></div>
+                    <button class="enter-meeting-button" onclick="confirmSpeakerMapping()" style="width: 100%; margin-top: 20px;">
+                        Continue
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -2783,8 +3012,18 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
                 const brief = await response.json();
 
+                // Store brief globally for meeting assistant
+                meetingBrief = brief;
+                currentMeetingId = meeting.id;
+
                 // Render the clean brief
                 renderModernBrief(brief, meeting);
+
+                // Show "Entering Meeting" button
+                const enterMeetingBtn = document.getElementById('enterMeetingButton');
+                if (enterMeetingBtn) {
+                    enterMeetingBtn.style.display = 'inline-block';
+                }
 
             } catch (error) {
                 console.error('Error preparing meeting brief:', error);
@@ -3302,6 +3541,366 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         window.prepareForMeeting = prepareForMeeting;
         window.closePrepModal = closePrepModal;
         window.switchBriefTab = switchBriefTab;
+
+        // ===== REAL-TIME MEETING ASSISTANT =====
+
+        let meetingAssistantWs = null;
+        let mediaRecorder = null;
+        let audioContext = null;
+        let scriptProcessor = null;
+        let mediaStream = null;
+        let meetingBrief = null;
+        let currentMeetingId = null;
+
+        // Speaker mapping state
+        let detectedSpeakers = new Set();
+        let speakerMappings = new Map();
+        let pendingMappingModal = false;
+        let recentSuggestions = new Set(); // Client-side deduplication
+
+        async function enterMeeting() {
+            try {
+                // Check browser compatibility
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert('Your browser does not support audio recording. Please use Chrome, Firefox, or Safari.');
+                    return;
+                }
+
+                if (!window.MediaRecorder) {
+                    alert('Your browser does not support MediaRecorder API. Please update your browser.');
+                    return;
+                }
+
+                if (!window.WebSocket) {
+                    alert('Your browser does not support WebSocket. Please update your browser.');
+                    return;
+                }
+
+                // Show the assistant UI
+                document.getElementById('meetingAssistantContainer').style.display = 'block';
+                document.getElementById('enterMeetingButton').disabled = true;
+                document.getElementById('enterMeetingButton').textContent = '🎤 Active...';
+
+                // Get microphone access
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: 16000
+                    }
+                });
+
+                // Connect to WebSocket
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host;
+                meetingAssistantWs = new WebSocket(`${protocol}//${host}`);
+
+                meetingAssistantWs.onopen = () => {
+                    console.log('✓ Connected to meeting assistant');
+
+                    // Send initialization with meeting context
+                    meetingAssistantWs.send(JSON.stringify({
+                        type: 'init',
+                        meetingId: currentMeetingId,
+                        context: meetingBrief || {},
+                        userEmail: userEmail || ''
+                    }));
+                };
+
+                meetingAssistantWs.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'ready') {
+                        console.log('✓ Meeting assistant ready');
+                        startAudioCapture(stream);
+                    }
+                    else if (data.type === 'deepgram_ready') {
+                        console.log('✓ Deepgram connection ready');
+                        // Show visual feedback
+                        const suggestionsContainer = document.getElementById('suggestionsContainer');
+                        suggestionsContainer.innerHTML = '<div class="suggestion-placeholder">🎤 Listening... Start speaking.</div>';
+                    }
+                    else if (data.type === 'transcript') {
+                        // Track detected speakers
+                        if (data.speakerId !== null && data.speakerId !== undefined) {
+                            if (!detectedSpeakers.has(data.speakerId) && !speakerMappings.has(data.speakerId)) {
+                                detectedSpeakers.add(data.speakerId);
+                                // Show mapping modal after 2-3 speakers detected
+                                if (detectedSpeakers.size >= 2 && !pendingMappingModal) {
+                                    pendingMappingModal = true;
+                                    showSpeakerMappingModal();
+                                }
+                            }
+                        }
+                        addTranscriptItem(data);
+                    }
+                    else if (data.type === 'speaker_mapped') {
+                        console.log(`✓ Speaker ${data.speakerId} mapped to ${data.name}`);
+                    }
+                    else if (data.type === 'suggestions') {
+                        addSuggestions(data.suggestions);
+                    }
+                    else if (data.type === 'error') {
+                        console.error('Assistant error:', data.message);
+                        // Show error in UI
+                        const suggestionsContainer = document.getElementById('suggestionsContainer');
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'suggestion-item error';
+                        errorDiv.innerHTML = `
+                            <div class="suggestion-type">Error</div>
+                            <div class="suggestion-message">${data.message}</div>
+                        `;
+                        suggestionsContainer.insertBefore(errorDiv, suggestionsContainer.firstChild);
+                    }
+                };
+
+                meetingAssistantWs.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    alert('Connection error. Please try again.');
+                };
+
+                meetingAssistantWs.onclose = () => {
+                    console.log('Meeting assistant disconnected');
+                    stopAudioCapture();
+                };
+
+            } catch (error) {
+                console.error('Failed to start meeting assistant:', error);
+                alert('Failed to access microphone. Please check permissions.');
+                document.getElementById('enterMeetingButton').disabled = false;
+                document.getElementById('enterMeetingButton').textContent = '🎤 Entering Meeting';
+            }
+        }
+
+        function startAudioCapture(stream) {
+            try {
+                mediaStream = stream;
+
+                // Create AudioContext with 16kHz sample rate (Deepgram requirement)
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 16000
+                });
+
+                console.log(`✓ AudioContext created (${audioContext.sampleRate}Hz)`);
+
+                // Create source from microphone stream
+                const source = audioContext.createMediaStreamSource(stream);
+
+                // Create ScriptProcessor for raw PCM extraction
+                // Buffer size 4096 gives good balance of latency vs processing overhead
+                scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                scriptProcessor.onaudioprocess = (e) => {
+                    if (meetingAssistantWs && meetingAssistantWs.readyState === WebSocket.OPEN) {
+                        const inputData = e.inputBuffer.getChannelData(0); // Float32Array [-1, 1]
+
+                        // Convert Float32 to Int16 PCM (linear16 format for Deepgram)
+                        const pcmData = new Int16Array(inputData.length);
+                        for (let i = 0; i < inputData.length; i++) {
+                            // Clamp to [-1, 1] and convert to 16-bit signed integer
+                            const s = Math.max(-1, Math.min(1, inputData[i]));
+                            pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                        }
+
+                        // Convert Int16Array to base64
+                        const uint8Array = new Uint8Array(pcmData.buffer);
+                        const base64Audio = btoa(String.fromCharCode(...uint8Array));
+
+                        // Send raw PCM audio to backend
+                        meetingAssistantWs.send(JSON.stringify({
+                            type: 'audio',
+                            audio: base64Audio
+                        }));
+                    }
+                };
+
+                // Connect audio pipeline: microphone -> processor -> destination
+                source.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+
+                console.log('✓ Audio capture started (raw PCM, 16kHz, Int16)');
+
+            } catch (error) {
+                console.error('Failed to start audio capture:', error);
+                alert(`Failed to start audio: ${error.message}`);
+            }
+        }
+
+        function stopAudioCapture() {
+            // Disconnect and clean up ScriptProcessor
+            if (scriptProcessor) {
+                scriptProcessor.disconnect();
+                scriptProcessor = null;
+            }
+
+            // Close AudioContext
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            // Stop all media stream tracks
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+
+            console.log('✓ Audio capture stopped');
+        }
+
+        function addTranscriptItem(data) {
+            const container = document.getElementById('transcriptContainer');
+            const placeholder = container.querySelector('.suggestion-placeholder');
+            if (placeholder) placeholder.remove();
+
+            const item = document.createElement('div');
+            item.className = `transcript-item ${data.isUser ? 'user' : ''}`;
+            item.innerHTML = `
+                <div class="transcript-speaker">${data.speaker}${data.isUser ? ' (You)' : ''}</div>
+                <div class="transcript-text">${data.text}</div>
+                <div class="transcript-timestamp">${new Date(data.timestamp).toLocaleTimeString()}</div>
+            `;
+
+            container.appendChild(item);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function addSuggestions(suggestions) {
+            const container = document.getElementById('suggestionsContainer');
+            const placeholder = container.querySelector('.suggestion-placeholder');
+            if (placeholder) placeholder.remove();
+
+            suggestions.forEach(sugg => {
+                // Client-side deduplication
+                const normalized = sugg.message.toLowerCase().replace(/[^\w\s]/g, '').trim().substring(0, 80);
+                if (recentSuggestions.has(normalized)) {
+                    console.log('Skipping duplicate suggestion:', sugg.message.substring(0, 40) + '...');
+                    return; // Skip duplicate
+                }
+                recentSuggestions.add(normalized);
+
+                // Auto-cleanup after 60 seconds
+                setTimeout(() => recentSuggestions.delete(normalized), 60000);
+
+                const item = document.createElement('div');
+                item.className = `suggestion-item ${sugg.severity}`;
+                item.innerHTML = `
+                    <div class="suggestion-type">${sugg.type}</div>
+                    <div class="suggestion-message">${sugg.message}</div>
+                `;
+
+                container.insertBefore(item, container.firstChild);
+
+                // Keep only last 15 suggestions (reduced from 20 to prevent clutter)
+                const items = container.querySelectorAll('.suggestion-item');
+                if (items.length > 15) {
+                    items[items.length - 1].remove();
+                }
+            });
+        }
+
+        function stopMeetingAssistant() {
+            if (meetingAssistantWs) {
+                meetingAssistantWs.send(JSON.stringify({ type: 'stop' }));
+                meetingAssistantWs.close();
+                meetingAssistantWs = null;
+            }
+
+            stopAudioCapture();
+
+            document.getElementById('meetingAssistantContainer').style.display = 'none';
+            document.getElementById('enterMeetingButton').disabled = false;
+            document.getElementById('enterMeetingButton').textContent = '🎤 Entering Meeting';
+
+            // Clear content
+            document.getElementById('transcriptContainer').innerHTML = '<div class="suggestion-placeholder">Session ended</div>';
+            document.getElementById('suggestionsContainer').innerHTML = '<div class="suggestion-placeholder">Session ended</div>';
+        }
+
+        // Show speaker mapping modal
+        function showSpeakerMappingModal() {
+            const modal = document.getElementById('speakerMappingModal');
+            const listContainer = document.getElementById('speakerMappingList');
+
+            // Build dropdown options from meeting attendees
+            const attendees = meetingBrief?.attendees || [];
+            const options = [
+                '<option value="You">You</option>',
+                ...attendees.map(att => `<option value="${att.name}">${att.name} (${att.email})</option>`)
+            ];
+
+            // Create a mapping UI for each detected speaker
+            listContainer.innerHTML = Array.from(detectedSpeakers).map(speakerId => `
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500;">Speaker ${speakerId}:</label>
+                    <select id="speaker-${speakerId}-mapping" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
+                        ${options.join('')}
+                    </select>
+                </div>
+            `).join('');
+
+            modal.style.display = 'flex';
+        }
+
+        // Confirm speaker mapping and send to server
+        function confirmSpeakerMapping() {
+            detectedSpeakers.forEach(speakerId => {
+                const select = document.getElementById(`speaker-${speakerId}-mapping`);
+                const name = select.value;
+                speakerMappings.set(speakerId, name);
+
+                // Send mapping to server
+                if (meetingAssistantWs && meetingAssistantWs.readyState === WebSocket.OPEN) {
+                    meetingAssistantWs.send(JSON.stringify({
+                        type: 'map_speaker',
+                        speakerId,
+                        name
+                    }));
+                }
+            });
+
+            // Close modal
+            document.getElementById('speakerMappingModal').style.display = 'none';
+
+            // Update all existing transcript items with new labels
+            updateTranscriptLabels();
+        }
+
+        // Update transcript labels after mapping
+        function updateTranscriptLabels() {
+            const items = document.querySelectorAll('.transcript-item');
+            items.forEach(item => {
+                const speakerDiv = item.querySelector('.transcript-speaker');
+                if (speakerDiv) {
+                    const speakerText = speakerDiv.textContent;
+                    // Extract speaker ID from "Speaker X" format
+                    const match = speakerText.match(/Speaker (\d+)/);
+                    if (match) {
+                        const speakerId = parseInt(match[1]);
+                        const mappedName = speakerMappings.get(speakerId);
+                        if (mappedName) {
+                            const isYou = mappedName === 'You';
+                            speakerDiv.textContent = mappedName + (isYou ? '' : '');
+                            if (isYou) {
+                                item.classList.add('user');
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Clear all suggestions
+        function clearSuggestions() {
+            document.getElementById('suggestionsContainer').innerHTML = '<div class="suggestion-placeholder">Suggestions cleared. Listening...</div>';
+            recentSuggestions.clear();
+        }
+
+        window.enterMeeting = enterMeeting;
+        window.stopMeetingAssistant = stopMeetingAssistant;
+        window.confirmSpeakerMapping = confirmSpeakerMapping;
+        window.clearSuggestions = clearSuggestions;
+
     </script>
 </body>
 </html>

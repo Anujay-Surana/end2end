@@ -60,13 +60,14 @@ git push -u origin main
 1. Click on your deployed service
 2. Go to the **"Variables"** tab
 3. Click **"+ New Variable"**
-4. Add all four environment variables:
+4. Add all five environment variables:
 
 ```
 GOOGLE_CLIENT_ID=your_google_client_id_here
 GOOGLE_CLIENT_SECRET=your_google_client_secret_here
 OPENAI_API_KEY=your_openai_api_key_here
 PARALLEL_API_KEY=your_parallel_api_key_here
+DEEPGRAM_API_KEY=your_deepgram_api_key_here
 ```
 
 **Important:** Use your actual API keys from the `.env` file (NOT checked into git)

@@ -1,18 +1,78 @@
 const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const WebSocket = require('ws');
+const { createClient } = require('@deepgram/sdk');
 const Parallel = require('parallel-web');
 const fetch = require('node-fetch');
 require('dotenv').config();
 
 const app = express();
-const PORT = 3000;
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+const PORT = process.env.PORT || 8000;
+
+// ===== ENVIRONMENT VARIABLE VALIDATION =====
+console.log('\n🔍 Validating environment variables...');
+
+const requiredEnvVars = {
+    'OPENAI_API_KEY': process.env.OPENAI_API_KEY,
+    'PARALLEL_API_KEY': process.env.PARALLEL_API_KEY,
+    'DEEPGRAM_API_KEY': process.env.DEEPGRAM_API_KEY
+};
+
+const missingVars = [];
+const invalidVars = [];
+
+for (const [name, value] of Object.entries(requiredEnvVars)) {
+    if (!value) {
+        missingVars.push(name);
+    } else if (value.length < 10 || value === 'your_key_here' || value.includes('your_') || value.includes('_here')) {
+        invalidVars.push(name);
+    }
+}
+
+if (missingVars.length > 0) {
+    console.error(`\n❌ Missing required environment variables: ${missingVars.join(', ')}`);
+    console.error('Please add them to your .env file and restart the server.\n');
+    process.exit(1);
+}
+
+if (invalidVars.length > 0) {
+    console.error(`\n⚠️  Invalid/placeholder values detected: ${invalidVars.join(', ')}`);
+    console.error('Please update these with your actual API keys in the .env file.\n');
+    process.exit(1);
+}
+
+console.log('✅ All required environment variables are set\n');
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 
 // Initialize Parallel AI client
 const parallelClient = new Parallel({
     apiKey: process.env.PARALLEL_API_KEY
 });
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// Initialize Deepgram client with explicit options
+let deepgram;
+try {
+    deepgram = createClient(DEEPGRAM_API_KEY, {
+        global: {
+            fetch: { options: { url: 'https://api.deepgram.com' } }
+        }
+    });
+    console.log('✅ Deepgram client initialized');
+    console.log(`   Using API endpoint: https://api.deepgram.com`);
+} catch (error) {
+    console.error('❌ Failed to initialize Deepgram client:', error.message);
+    console.error('Please check your DEEPGRAM_API_KEY in the .env file.\n');
+    process.exit(1);
+}
+
+// Store active meeting contexts (in-memory cache for fast access)
+const activeMeetingContexts = new Map();
 
 // Enable CORS for our frontend
 app.use(cors());
@@ -619,22 +679,544 @@ Return ONLY a JSON array of 4-6 action items. Each should demonstrate understand
     }
 });
 
+// ===== REAL-TIME MEETING ASSISTANT WEBSOCKET =====
+
+wss.on('connection', (ws) => {
+    console.log('🎤 New meeting assistant connection');
+
+    let deepgramConnection = null;
+    let deepgramState = 'not_initialized'; // not_initialized, connecting, ready, error, closed
+    let meetingContext = null;
+    let transcriptBuffer = [];
+    let audioBuffer = []; // Buffer audio until Deepgram is ready
+    let lastAnalysisTime = Date.now();
+    let userEmail = null;
+    let speakerMap = new Map();
+    let keepAliveInterval = null;
+    let connectionTimeout = null;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 3;
+    const MAX_AUDIO_BUFFER_SIZE = 20; // Buffer max 20 chunks (~10 seconds at 500ms chunks)
+
+    // Suggestion deduplication tracking
+    const recentSuggestionHashes = new Set();
+    const SUGGESTION_DEDUP_WINDOW_MS = 60000; // 60 seconds
+
+    // Function to initialize Deepgram connection
+    function initializeDeepgram() {
+        if (deepgramConnection) {
+            try {
+                deepgramConnection.finish();
+            } catch (e) {
+                console.error('Error closing existing Deepgram connection:', e);
+            }
+        }
+
+        deepgramState = 'connecting';
+        console.log('🔌 Initializing Deepgram connection...');
+
+        try {
+            deepgramConnection = deepgram.listen.live({
+                model: 'nova-2',
+                language: 'en',
+                encoding: 'linear16', // Raw PCM audio (Int16)
+                sample_rate: 16000,
+                channels: 1,
+                smart_format: true,
+                punctuate: false, // Reduces latency (no look-ahead)
+                diarize: true,
+                interim_results: true, // Enable for <300ms latency
+                vad_events: true, // Voice activity detection
+                utterance_end_ms: 1000,
+                endpointing: 300
+            });
+
+            // Set connection timeout
+            connectionTimeout = setTimeout(() => {
+                if (deepgramState === 'connecting') {
+                    console.error('⏱️  Deepgram connection timeout');
+                    handleDeepgramError(new Error('Connection timeout'));
+                }
+            }, 10000);
+
+            deepgramConnection.on('open', () => {
+                clearTimeout(connectionTimeout);
+                deepgramState = 'ready';
+                reconnectAttempts = 0;
+                console.log('✓ Deepgram connection opened');
+
+                // Flush buffered audio
+                if (audioBuffer.length > 0) {
+                    console.log(`📤 Flushing ${audioBuffer.length} buffered audio chunks`);
+                    audioBuffer.forEach(chunk => {
+                        if (deepgramConnection.getReadyState() === 1) {
+                            deepgramConnection.send(chunk);
+                        }
+                    });
+                    audioBuffer = [];
+                }
+
+                // Start keep-alive
+                startKeepAlive();
+
+                // Notify frontend
+                ws.send(JSON.stringify({
+                    type: 'deepgram_ready',
+                    message: 'Transcription service ready'
+                }));
+            });
+
+            deepgramConnection.on('Results', async (data) => {
+                const transcript = data.channel?.alternatives?.[0];
+                if (!transcript || !transcript.transcript) return;
+
+                const text = transcript.transcript;
+                const words = transcript.words || [];
+                const confidence = transcript.confidence;
+
+                // Extract speaker info
+                let speaker = 'Unknown';
+                let speakerId = null;
+                if (words.length > 0 && words[0].speaker !== undefined) {
+                    speakerId = words[0].speaker;
+                    // Use mapped name if available, otherwise generic "Speaker X"
+                    speaker = speakerMap.get(speakerId) || `Speaker ${speakerId}`;
+                }
+
+                // Detect if this is the user speaking
+                // Check both mapped name and if speakerMap indicates this is the user
+                const isUser = (speakerMap.get(speakerId) === 'You') ||
+                              (userEmail && speaker.toLowerCase().includes(userEmail.split('@')[0].toLowerCase()));
+
+                // Send transcription to frontend
+                ws.send(JSON.stringify({
+                    type: 'transcript',
+                    speaker,
+                    text,
+                    confidence,
+                    isUser,
+                    speakerId, // Include raw speaker ID for mapping
+                    timestamp: Date.now()
+                }));
+
+                // Add to buffer for analysis (circular buffer)
+                transcriptBuffer.push({ speaker, text, isUser, timestamp: Date.now() });
+                if (transcriptBuffer.length > 30) {
+                    transcriptBuffer = transcriptBuffer.slice(-30);
+                }
+
+                // Analyze every ~5 seconds or when buffer has 5+ utterances
+                const now = Date.now();
+                if ((now - lastAnalysisTime > 5000 && transcriptBuffer.length > 0) ||
+                    transcriptBuffer.length >= 5) {
+
+                    lastAnalysisTime = now;
+
+                    // Analyze transcript with AI (async, don't block)
+                    analyzeTranscript(
+                        transcriptBuffer.slice(-10),
+                        meetingContext,
+                        ws,
+                        recentSuggestionHashes
+                    ).catch(err => {
+                        console.error('Analysis error:', err);
+                    });
+                }
+
+                // Reset keep-alive timer (we have activity)
+                startKeepAlive();
+            });
+
+            deepgramConnection.on('error', (err) => {
+                console.error('Deepgram error:', err);
+                handleDeepgramError(err);
+            });
+
+            deepgramConnection.on('close', () => {
+                console.log('Deepgram connection closed');
+                clearTimeout(connectionTimeout);
+                stopKeepAlive();
+
+                if (deepgramState !== 'closed' && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    console.log(`🔄 Attempting to reconnect (${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})...`);
+                    reconnectAttempts++;
+                    setTimeout(() => {
+                        if (deepgramState !== 'closed') {
+                            initializeDeepgram();
+                        }
+                    }, Math.min(1000 * Math.pow(2, reconnectAttempts), 8000));
+                } else {
+                    deepgramState = 'closed';
+                }
+            });
+
+        } catch (error) {
+            console.error('Failed to create Deepgram connection:', error);
+            handleDeepgramError(error);
+        }
+    }
+
+    function handleDeepgramError(err) {
+        clearTimeout(connectionTimeout);
+        stopKeepAlive();
+        deepgramState = 'error';
+
+        console.error('Deepgram error details:', err.message || err);
+
+        ws.send(JSON.stringify({
+            type: 'error',
+            message: 'Transcription service error. Please try again.',
+            canRetry: reconnectAttempts < MAX_RECONNECT_ATTEMPTS
+        }));
+
+        // Auto-retry if under limit
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++;
+            setTimeout(() => {
+                if (deepgramState !== 'closed') {
+                    initializeDeepgram();
+                }
+            }, Math.min(1000 * Math.pow(2, reconnectAttempts), 8000));
+        }
+    }
+
+    function startKeepAlive() {
+        stopKeepAlive();
+        keepAliveInterval = setInterval(() => {
+            if (deepgramConnection && deepgramConnection.getReadyState() === 1) {
+                try {
+                    deepgramConnection.keepAlive();
+                    console.log('💓 Keep-alive sent to Deepgram');
+                } catch (e) {
+                    console.error('Keep-alive failed:', e);
+                }
+            }
+        }, 5000);
+    }
+
+    function stopKeepAlive() {
+        if (keepAliveInterval) {
+            clearInterval(keepAliveInterval);
+            keepAliveInterval = null;
+        }
+    }
+
+    ws.on('message', async (message) => {
+        try {
+            const data = JSON.parse(message);
+
+            // Initialize meeting context
+            if (data.type === 'init') {
+                console.log(`📋 Initializing meeting context for: ${data.meetingId}`);
+                meetingContext = data.context;
+                userEmail = data.userEmail;
+
+                // Don't auto-map speakers - wait for user to map them
+                // Speaker map starts empty, will be populated via 'map_speaker' messages
+
+                // Store in global cache
+                activeMeetingContexts.set(data.meetingId, meetingContext);
+
+                // Don't initialize Deepgram yet - wait for first audio
+                ws.send(JSON.stringify({
+                    type: 'ready',
+                    message: 'Meeting assistant initialized. Start speaking to begin transcription.'
+                }));
+            }
+
+            // Map speaker ID to name
+            else if (data.type === 'map_speaker') {
+                const { speakerId, name } = data;
+                speakerMap.set(speakerId, name);
+                console.log(`👤 Mapped Speaker ${speakerId} → ${name}`);
+
+                ws.send(JSON.stringify({
+                    type: 'speaker_mapped',
+                    speakerId,
+                    name
+                }));
+            }
+
+            // Forward audio to Deepgram (lazy initialize on first audio)
+            else if (data.type === 'audio') {
+                const audioChunk = Buffer.from(data.audio, 'base64');
+
+                // Initialize Deepgram on first audio packet
+                if (deepgramState === 'not_initialized') {
+                    initializeDeepgram();
+                }
+
+                // Buffer audio if Deepgram isn't ready yet
+                if (deepgramState === 'connecting' || deepgramState === 'error') {
+                    if (audioBuffer.length < MAX_AUDIO_BUFFER_SIZE) {
+                        audioBuffer.push(audioChunk);
+                        console.log(`📦 Buffering audio (${audioBuffer.length}/${MAX_AUDIO_BUFFER_SIZE})`);
+                    } else {
+                        // Buffer full, drop oldest
+                        audioBuffer.shift();
+                        audioBuffer.push(audioChunk);
+                    }
+                }
+                // Send immediately if ready
+                else if (deepgramState === 'ready' && deepgramConnection) {
+                    if (deepgramConnection.getReadyState() === 1) {
+                        deepgramConnection.send(audioChunk);
+                        startKeepAlive(); // Reset keep-alive timer
+                    } else {
+                        // Connection closed unexpectedly
+                        console.warn('⚠️  Deepgram not ready, buffering...');
+                        audioBuffer.push(audioChunk);
+                        if (deepgramState === 'ready') {
+                            deepgramState = 'connecting';
+                            initializeDeepgram();
+                        }
+                    }
+                }
+            }
+
+            // Stop meeting
+            else if (data.type === 'stop') {
+                deepgramState = 'closed';
+                stopKeepAlive();
+                clearTimeout(connectionTimeout);
+
+                if (deepgramConnection) {
+                    try {
+                        deepgramConnection.finish();
+                    } catch (e) {
+                        console.error('Error finishing Deepgram:', e);
+                    }
+                    deepgramConnection = null;
+                }
+
+                console.log('Meeting assistant stopped');
+            }
+
+        } catch (error) {
+            console.error('WebSocket message error:', error);
+            ws.send(JSON.stringify({
+                type: 'error',
+                message: error.message
+            }));
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('Meeting assistant disconnected');
+        if (deepgramConnection) {
+            deepgramConnection.finish();
+        }
+    });
+});
+
+// Helper: Create hash for suggestion deduplication
+function hashSuggestion(suggestion) {
+    // Create a simple hash from message content (case-insensitive, normalized)
+    const normalized = suggestion.message.toLowerCase().replace(/[^\w\s]/g, '').trim();
+    return normalized.substring(0, 100); // Use first 100 chars as hash
+}
+
+// Helper: Check if suggestion is generic/low-quality
+function isGenericSuggestion(message) {
+    const genericPatterns = [
+        /seems? (unsure|uncertain|confused)/i,
+        /clarify (who|what|roles|identity)/i,
+        /expressed? uncertainty/i,
+        /using ['"](i think|maybe)['"]/i
+    ];
+    return genericPatterns.some(pattern => pattern.test(message));
+}
+
+// Analyze transcript and provide real-time suggestions
+async function analyzeTranscript(buffer, context, ws, recentSuggestionHashes) {
+    if (buffer.length === 0) return;
+
+    const recentText = buffer.map(b => `${b.speaker}: ${b.text}`).join('\n');
+    const userStatements = buffer.filter(b => b.isUser).map(b => b.text).join(' ');
+
+    try {
+        // Enhanced GPT-4o analysis with anti-spam instructions
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o',
+                messages: [{
+                    role: 'system',
+                    content: `You are a real-time meeting assistant. Analyze the conversation and provide SPECIFIC, ACTIONABLE feedback.
+
+CRITICAL QUALITY RULES:
+1. Only suggest if you have CONCRETE, SPECIFIC information to share
+2. NO generic observations like "seems uncertain" or "clarify identity"
+3. NO obvious statements (e.g., "India is second most populous" when user just said it)
+4. Focus on HIGH-VALUE suggestions: corrections, non-obvious context, specific facts
+5. Maximum 2-3 suggestions per analysis - quality over quantity
+
+Your job:
+1. Detect MEANINGFUL uncertainty that needs verification (not casual speech)
+2. Fact-check specific claims using meeting context
+3. Suggest SPECIFIC, relevant information from context that user wouldn't know
+4. Correct factual errors with sources
+
+Meeting Context:
+${JSON.stringify(context).substring(0, 5000)}
+
+Return JSON with this structure:
+{
+  "suggestions": [{"type": "uncertainty|fact|correction|context", "message": "specific actionable message", "severity": "info|warning|error"}]
+}
+
+Each suggestion must be:
+- 20-80 words (not too short, not too long)
+- Specific and actionable
+- Non-obvious information
+- Worth interrupting the conversation for
+
+If nothing meets these criteria, return empty array: {"suggestions": []}`
+                }, {
+                    role: 'user',
+                    content: `Recent conversation:\n${recentText}\n\nUser statements to analyze: ${userStatements || 'None yet'}`
+                }],
+                temperature: 0.3,
+                max_tokens: 400,
+                stream: false
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`GPT error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        const content = result.choices[0].message.content;
+
+        // Parse suggestions
+        let suggestions = [];
+        try {
+            const parsed = JSON.parse(content.replace(/```json/g, '').replace(/```/g, '').trim());
+            suggestions = parsed.suggestions || [];
+        } catch (e) {
+            console.error('Failed to parse suggestions:', e);
+        }
+
+        // Expanded web search triggers
+        const hedgeWords = ['think', 'maybe', 'probably', 'might', 'seem', 'appear', 'suppose', 'possibly', 'believe', 'guess', 'wonder'];
+        const factualPatterns = /\b(revenue|growth|team|product|plan|launch|users|customers|population|country|company|founded|CEO|raised|funding)\b/i;
+
+        const hasHedge = hedgeWords.some(word => userStatements.toLowerCase().includes(word));
+        const hasFactualClaim = factualPatterns.test(userStatements);
+
+        // Enhanced web search for fact verification
+        if (userStatements && (hasHedge || hasFactualClaim)) {
+            // Extract potential facts to verify
+            const factQueries = await craftSearchQueries(
+                `Extract 2-3 specific factual claims from: "${userStatements}". Create precise search queries to verify these facts.`
+            );
+
+            if (factQueries.length > 0) {
+                const searchResult = await parallelClient.beta.search({
+                    objective: `Verify factual claims from meeting discussion`,
+                    search_queries: factQueries.slice(0, 3),
+                    mode: 'one-shot',
+                    max_results: 6,
+                    max_chars_per_result: 2500
+                });
+
+                if (searchResult.results && searchResult.results.length > 0) {
+                    const verification = await synthesizeResults(
+                        `Based on these search results, verify or correct the statement: "${userStatements}".
+
+Rules:
+- Only return verification if you have HIGH CONFIDENCE
+- Return 1-2 sentences with specific facts/numbers
+- If results are unclear or contradictory, return "Cannot verify"
+- If statement is obviously correct, skip it`,
+                        searchResult.results,
+                        200
+                    );
+
+                    // Strict filtering for web search results
+                    const lowConfidenceIndicators = ['cannot verify', 'unclear', 'no results', 'not found', 'insufficient', 'contradictory'];
+                    const hasLowConfidence = lowConfidenceIndicators.some(ind =>
+                        verification?.toLowerCase().includes(ind)
+                    );
+
+                    if (verification && !hasLowConfidence && verification.length > 20) {
+                        suggestions.push({
+                            type: 'fact',
+                            message: verification,
+                            severity: 'info'
+                        });
+                    }
+                }
+            }
+        }
+
+        // Filter and deduplicate suggestions
+        const filteredSuggestions = suggestions.filter(sugg => {
+            // Quality checks
+            if (!sugg.message || sugg.message.length < 20 || sugg.message.length > 300) {
+                return false;
+            }
+
+            // Filter generic suggestions
+            if (isGenericSuggestion(sugg.message)) {
+                return false;
+            }
+
+            // Deduplication check
+            const hash = hashSuggestion(sugg);
+            if (recentSuggestionHashes.has(hash)) {
+                return false; // Duplicate
+            }
+
+            // Add to dedup set with timestamp
+            recentSuggestionHashes.add(hash);
+            // Auto-cleanup old hashes after 60 seconds
+            setTimeout(() => recentSuggestionHashes.delete(hash), 60000);
+
+            return true;
+        });
+
+        // Limit to top 3 suggestions per analysis
+        const topSuggestions = filteredSuggestions.slice(0, 3);
+
+        // Send suggestions to frontend
+        if (topSuggestions.length > 0) {
+            ws.send(JSON.stringify({
+                type: 'suggestions',
+                suggestions: topSuggestions,
+                timestamp: Date.now()
+            }));
+        }
+
+    } catch (error) {
+        console.error('Analysis error:', error);
+    }
+}
+
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         message: 'Proxy server is running',
-        parallelApiConfigured: !!process.env.PARALLEL_API_KEY
+        parallelApiConfigured: !!process.env.PARALLEL_API_KEY,
+        deepgramConfigured: !!process.env.DEEPGRAM_API_KEY
     });
 });
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`\n🚀 Proxy server running on http://localhost:${PORT}`);
     console.log(`📡 Parallel AI API key: ${process.env.PARALLEL_API_KEY ? '✓ Configured' : '✗ Missing'}`);
+    console.log(`🎤 Deepgram API key: ${process.env.DEEPGRAM_API_KEY ? '✓ Configured' : '✗ Missing'}`);
     console.log(`\nAvailable endpoints:`);
     console.log(`  POST /api/parallel-search   - Web search`);
     console.log(`  POST /api/parallel-extract  - Extract from URLs`);
     console.log(`  POST /api/parallel-research - Deep research tasks`);
     console.log(`  POST /api/prep-meeting      - Generate meeting brief`);
+    console.log(`  WS   /ws/meeting-stream     - Real-time meeting assistant`);
     console.log(`  GET  /health                - Health check\n`);
 });
