@@ -72,9 +72,6 @@ try {
     process.exit(1);
 }
 
-// Store active meeting contexts (in-memory cache for fast access)
-const activeMeetingContexts = new Map();
-
 // Enable CORS for our frontend
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Increase limit for large context
@@ -960,9 +957,6 @@ wss.on('connection', (ws) => {
 
                 // Don't auto-map speakers - wait for user to map them
                 // Speaker map starts empty, will be populated via 'map_speaker' messages
-
-                // Store in global cache
-                activeMeetingContexts.set(data.meetingId, meetingContext);
 
                 // Don't initialize Deepgram yet - wait for first audio
                 ws.send(JSON.stringify({

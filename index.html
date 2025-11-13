@@ -1711,6 +1711,7 @@
             accessToken = null;
             userEmail = null;
             userProfile = null;
+            interactiveBrief = null; // Clear meeting brief data to prevent leakage
             if (countdownInterval) {
                 clearInterval(countdownInterval);
             }
@@ -4259,8 +4260,10 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         }
 
         function initializeInteractiveWebSocket() {
-            // Use same WebSocket server for interactive prep
-            interactivePrepWs = new WebSocket('ws://localhost:8080');
+            // Dynamic WebSocket URL for Railway deployment
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsHost = window.location.host;
+            interactivePrepWs = new WebSocket(`${wsProtocol}//${wsHost}`);
 
             interactivePrepWs.onopen = () => {
                 console.log('✅ Interactive prep WebSocket connected');
