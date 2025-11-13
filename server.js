@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 3000;
 
 // ===== ENVIRONMENT VARIABLE VALIDATION =====
 console.log('\n🔍 Validating environment variables...');
