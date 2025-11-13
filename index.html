@@ -1309,6 +1309,94 @@
             padding: 40px 20px;
             font-style: italic;
         }
+
+        /* Interactive Prep Chat Styles */
+        .chat-message {
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .chat-message.user {
+            align-items: flex-end;
+        }
+
+        .chat-message.assistant {
+            align-items: flex-start;
+        }
+
+        .chat-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .chat-message.user .chat-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .chat-message.assistant .chat-bubble {
+            background: white;
+            color: #333;
+            border: 1px solid #e5e7eb;
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-timestamp {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 4px;
+            padding: 0 4px;
+        }
+
+        .chat-tool-call {
+            font-size: 12px;
+            color: #667eea;
+            font-style: italic;
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            border-left: 3px solid #667eea;
+        }
+
+        .chat-loading {
+            display: inline-flex;
+            gap: 4px;
+            padding: 12px 16px;
+        }
+
+        .chat-loading-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #9ca3af;
+            animation: bounce 1.4s infinite;
+        }
+
+        .chat-loading-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .chat-loading-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-10px); }
+        }
     </style>
 </head>
 <body>
@@ -1345,6 +1433,7 @@
                 <button class="back-button" onclick="showCalendarView()">← Back to Calendar</button>
                 <div style="display: flex; gap: 10px;">
                     <button class="prep-button" id="prepMeButton" onclick="prepareForMeeting()">Prep Me</button>
+                    <button class="prep-button" id="interactivePrepButton" onclick="startInteractivePrep()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">💬 Interactive Prep</button>
                     <button class="enter-meeting-button" id="enterMeetingButton" onclick="enterMeeting()" style="display: none;">🎤 Entering Meeting</button>
                 </div>
             </div>
@@ -1455,6 +1544,80 @@
                     <button class="enter-meeting-button" onclick="confirmSpeakerMapping()" style="width: 100%; margin-top: 20px;">
                         Continue
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interactive Prep Chat Interface -->
+        <div id="interactivePrepOverlay" class="prep-modal" style="display: none;">
+            <div class="prep-modal-content" style="max-width: 1400px; max-height: 90vh; display: flex; flex-direction: row; gap: 0;">
+                <!-- Meeting Brief Sidebar -->
+                <div style="width: 400px; border-right: 2px solid #e5e7eb; display: flex; flex-direction: column; background: #f9fafb;">
+                    <div style="padding: 16px; border-bottom: 2px solid #e5e7eb; background: white;">
+                        <h3 style="margin: 0; font-size: 16px; color: #1f2937;">📋 Meeting Brief</h3>
+                    </div>
+                    <div id="interactiveBriefContent" style="flex: 1; overflow-y: auto; padding: 20px; font-size: 13px;">
+                        <div style="text-align: center; color: #999; padding: 40px 20px;">
+                            Loading brief...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Interface -->
+                <div style="flex: 1; display: flex; flex-direction: column;">
+                    <div class="prep-modal-header" style="flex-shrink: 0;">
+                        <span>💬 Interactive Prep Assistant</span>
+                        <button class="prep-modal-close" onclick="closeInteractivePrep()">&times;</button>
+                    </div>
+
+                    <div style="padding: 20px; flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                        <div style="color: #666; font-size: 14px; margin-bottom: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px;">
+                            <strong id="interactiveMeetingTitle"></strong>
+                            <div style="font-size: 13px; margin-top: 4px;" id="interactiveMeetingTime"></div>
+                        </div>
+
+                        <!-- Chat History -->
+                        <div id="chatHistory" style="flex: 1; overflow-y: auto; margin-bottom: 16px; padding: 16px; background: #fafafa; border-radius: 8px; min-height: 300px;">
+                            <div class="chat-placeholder" style="text-align: center; color: #999; padding: 40px 20px;">
+                                <div style="font-size: 24px; margin-bottom: 12px;">💬</div>
+                                <div>Ask me anything about this meeting...</div>
+                                <div style="font-size: 13px; margin-top: 8px;">Try: "Tell me about the attendees" or "What documents are attached?"</div>
+                            </div>
+                        </div>
+
+                    <!-- Input Area -->
+                    <div style="flex-shrink: 0;">
+                        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                            <input
+                                type="text"
+                                id="chatInput"
+                                placeholder="Type a message or use voice..."
+                                style="flex: 1; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px;"
+                                onkeypress="if(event.key==='Enter') sendChatMessage()"
+                            />
+                            <button
+                                id="voiceInputBtn"
+                                onclick="toggleVoiceInput()"
+                                style="padding: 12px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;"
+                                title="Voice input"
+                            >
+                                🎤
+                            </button>
+                            <button
+                                onclick="sendChatMessage()"
+                                style="padding: 12px 20px; background: #764ba2; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;"
+                            >
+                                Send
+                            </button>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; font-size: 13px; color: #666;">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="voiceOutputToggle" checked />
+                                <span>Voice responses</span>
+                            </label>
+                            <span id="chatStatus" style="margin-left: auto;"></span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -3900,6 +4063,767 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         window.stopMeetingAssistant = stopMeetingAssistant;
         window.confirmSpeakerMapping = confirmSpeakerMapping;
         window.clearSuggestions = clearSuggestions;
+
+        // ===== INTERACTIVE PREP FUNCTIONS =====
+
+        let interactivePrepWs = null;
+        let interactiveBrief = null;
+        let chatMessagesArray = []; // Renamed to avoid conflict with DOM element id
+        let isVoiceActive = false;
+        let isSpeaking = false;
+        let chatAudioContext = null;
+        let chatScriptProcessor = null;
+        let chatMediaStream = null;
+        let conversationHistory = [];
+        let voiceConversationMode = false; // True = continuous conversation, False = single utterance
+        let currentAIUtterance = null; // For TTS interruption
+
+        async function startInteractivePrep() {
+            const button = document.getElementById('interactivePrepButton');
+            button.disabled = true;
+            button.textContent = '⏳ Preparing...';
+
+            try {
+                const meeting = currentMeeting;
+                if (!meeting) {
+                    throw new Error('No meeting selected');
+                }
+
+                const attendees = meeting.attendees || [];
+                const attendeeEmails = attendees.map(att => att.email).filter(Boolean);
+
+                // Fetch local context (use cached if available)
+                let emails = currentEmails;
+                let files = currentFiles;
+
+                if (emails.length === 0) {
+                    emails = await fetchPastEmails(attendeeEmails);
+                }
+                if (files.length === 0) {
+                    files = await fetchDriveFiles(attendeeEmails);
+                }
+
+                // Fetch file contents
+                const filesWithContent = await fetchDriveFileContents(files.slice(0, 5));
+
+                const response = await fetch('/api/prep-meeting', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        meeting,
+                        attendees,
+                        emails: emails.slice(0, 15).map(e => ({
+                            subject: e.subject,
+                            snippet: e.snippet,
+                            from: e.from,
+                            body: e.body || e.snippet,
+                            date: e.date
+                        })),
+                        files: filesWithContent.map(f => ({
+                            name: f.name,
+                            mimeType: f.mimeType,
+                            modifiedTime: f.modifiedTime,
+                            id: f.id,
+                            content: f.content || ''
+                        }))
+                    })
+                });
+
+                if (!response.ok) throw new Error('Failed to generate meeting prep');
+
+                interactiveBrief = await response.json();
+
+                // Add meeting info to brief for context
+                interactiveBrief.meeting = meeting;
+
+                // Format meeting time
+                const startTime = new Date(meeting.start.dateTime || meeting.start.date);
+                const endTime = new Date(meeting.end.dateTime || meeting.end.date);
+                const timeStr = `${startTime.toLocaleDateString()} ${startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+
+                // Populate the brief sidebar
+                populateBriefSidebar(interactiveBrief);
+
+                // Open chat interface
+                document.getElementById('interactiveMeetingTitle').textContent = meeting.summary;
+                document.getElementById('interactiveMeetingTime').textContent = timeStr;
+                document.getElementById('interactivePrepOverlay').style.display = 'flex';
+
+                // Initialize WebSocket connection for interactive prep
+                initializeInteractiveWebSocket();
+
+                // Add initial AI greeting
+                addChatMessage('assistant', `Hi! I've prepared all the context for your meeting "${meeting.summary}". Ask me anything about the attendees, agenda, related documents, or any other preparation you need.`);
+
+            } catch (error) {
+                console.error('Error starting interactive prep:', error);
+                alert('Failed to start interactive prep: ' + error.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = '💬 Interactive Prep';
+            }
+        }
+
+        function populateBriefSidebar(brief) {
+            const container = document.getElementById('interactiveBriefContent');
+
+            let html = '';
+
+            // Summary
+            if (brief.summary) {
+                html += `
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 8px 0; color: #1f2937; font-size: 14px;">📝 Summary</h4>
+                        <p style="margin: 0; color: #4b5563; line-height: 1.6;">${brief.summary}</p>
+                    </div>
+                `;
+            }
+
+            // Attendees
+            if (brief.attendees && brief.attendees.length > 0) {
+                html += `
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 12px 0; color: #1f2937; font-size: 14px;">👥 Attendees (${brief.attendees.length})</h4>
+                `;
+                brief.attendees.forEach(att => {
+                    html += `
+                        <div style="margin-bottom: 12px; padding: 10px; background: white; border-radius: 6px; border-left: 3px solid #667eea;">
+                            <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">${att.name}</div>
+                            <div style="font-size: 12px; color: #6b7280; margin-bottom: 6px;">${att.title || att.email}</div>
+                            ${att.keyFacts && att.keyFacts.length > 0 ? `
+                                <ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 12px; color: #4b5563;">
+                                    ${att.keyFacts.map(fact => `<li style="margin-bottom: 4px;">${fact}</li>`).join('')}
+                                </ul>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+            }
+
+            // Action Items
+            if (brief.actionItems && brief.actionItems.length > 0) {
+                html += `
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 12px 0; color: #1f2937; font-size: 14px;">✅ Action Items</h4>
+                        <ul style="margin: 0; padding-left: 18px; color: #4b5563; line-height: 1.6;">
+                            ${brief.actionItems.map(item => `<li style="margin-bottom: 8px;">${item}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            // Recommendations
+            if (brief.recommendations && brief.recommendations.length > 0) {
+                html += `
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 12px 0; color: #1f2937; font-size: 14px;">💡 Recommendations</h4>
+                        <ul style="margin: 0; padding-left: 18px; color: #4b5563; line-height: 1.6;">
+                            ${brief.recommendations.map(rec => `<li style="margin-bottom: 8px;">${rec}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            // Email Analysis
+            if (brief.emailAnalysis && brief.emailAnalysis.length > 20) {
+                html += `
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 8px 0; color: #1f2937; font-size: 14px;">📧 Email Context</h4>
+                        <p style="margin: 0; color: #4b5563; line-height: 1.6; font-size: 12px;">${brief.emailAnalysis}</p>
+                    </div>
+                `;
+            }
+
+            // Document Analysis
+            if (brief.documentAnalysis && brief.documentAnalysis.length > 20) {
+                html += `
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 8px 0; color: #1f2937; font-size: 14px;">📄 Document Insights</h4>
+                        <p style="margin: 0; color: #4b5563; line-height: 1.6; font-size: 12px;">${brief.documentAnalysis}</p>
+                    </div>
+                `;
+            }
+
+            // Company Research
+            if (brief.companyResearch && brief.companyResearch.length > 20) {
+                html += `
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 8px 0; color: #1f2937; font-size: 14px;">🏢 Company Context</h4>
+                        <p style="margin: 0; color: #4b5563; line-height: 1.6; font-size: 12px;">${brief.companyResearch}</p>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html || '<div style="text-align: center; color: #999; padding: 40px 20px;">No brief data available</div>';
+        }
+
+        function initializeInteractiveWebSocket() {
+            // Use same WebSocket server for interactive prep
+            interactivePrepWs = new WebSocket('ws://localhost:8080');
+
+            interactivePrepWs.onopen = () => {
+                console.log('✅ Interactive prep WebSocket connected');
+
+                // Send initial context
+                interactivePrepWs.send(JSON.stringify({
+                    type: 'interactive_prep_init',
+                    meetingBrief: interactiveBrief
+                }));
+
+                updateChatStatus('Connected', '#10b981');
+            };
+
+            interactivePrepWs.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'interactive_response') {
+                    // AI response received
+                    addChatMessage('assistant', data.message, data.toolCall);
+
+                    // Speak response if voice output enabled
+                    const voiceEnabled = document.getElementById('voiceOutputToggle').checked;
+                    if (voiceEnabled && data.message) {
+                        speakText(data.message);
+                    }
+                }
+                else if (data.type === 'interactive_error') {
+                    addChatMessage('system', `Error: ${data.message}`);
+                }
+                // Voice Conversation events
+                else if (data.type === 'voice_ready') {
+                    console.log('✅ Voice conversation ready');
+                    updateChatStatus('Voice conversation ready', '#10b981');
+                }
+                else if (data.type === 'voice_transcript') {
+                    // Live transcript from user
+                    console.log('📝 Transcript:', data.text);
+                    // Could show interim results in UI
+                }
+                else if (data.type === 'ai_response') {
+                    // AI response in voice conversation mode
+                    addChatMessage('assistant', data.text);
+                    // Speak the response
+                    speakText(data.text);
+                }
+                else if (data.type === 'stop_tts') {
+                    // User interrupted - stop speaking
+                    if (currentAIUtterance) {
+                        window.speechSynthesis.cancel();
+                        currentAIUtterance = null;
+                    }
+                }
+                else if (data.type === 'state_change') {
+                    // Update UI based on conversation state
+                    const stateLabels = {
+                        'listening': 'Listening...',
+                        'processing': 'Thinking...',
+                        'speaking': 'Speaking...',
+                        'interrupted': 'Interrupted'
+                    };
+                    updateChatStatus(stateLabels[data.state] || 'Connected', '#10b981');
+                }
+                else if (data.type === 'function_call') {
+                    // Web search indicator
+                    console.log('🔍 Function call:', data.function, data.query);
+                    updateChatStatus(`Searching: ${data.query}`, '#3b82f6');
+                }
+            };
+
+            interactivePrepWs.onerror = (error) => {
+                console.error('Interactive prep WebSocket error:', error);
+                updateChatStatus('Connection error', '#ef4444');
+            };
+
+            interactivePrepWs.onclose = () => {
+                console.log('Interactive prep WebSocket closed');
+                updateChatStatus('Disconnected', '#6b7280');
+            };
+        }
+
+        function closeInteractivePrep() {
+            // Stop any ongoing speech
+            stopTTS();
+
+            // Stop voice input if active
+            if (isVoiceActive) {
+                if (voiceConversationMode) {
+                    stopVoiceConversation();
+                } else {
+                    stopChatVoiceInput();
+                }
+            }
+
+            // Close WebSocket
+            if (interactivePrepWs && interactivePrepWs.readyState === WebSocket.OPEN) {
+                interactivePrepWs.close();
+            }
+
+            // Clear state
+            interactivePrepWs = null;
+            interactiveBrief = null;
+            chatMessagesArray = [];
+            conversationHistory = [];
+            voiceConversationMode = false;
+
+            // Clear chat UI
+            document.getElementById('chatHistory').innerHTML = `
+                <div class="chat-placeholder" style="text-align: center; color: #999; padding: 40px 20px;">
+                    <div style="font-size: 24px; margin-bottom: 12px;">💬</div>
+                    <div>Ask me anything about this meeting...</div>
+                    <div style="font-size: 13px; margin-top: 8px;">Try: "Tell me about the attendees" or "What documents are attached?"</div>
+                </div>
+            `;
+            document.getElementById('chatInput').value = '';
+
+            // Close overlay
+            document.getElementById('interactivePrepOverlay').style.display = 'none';
+        }
+
+        function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+            if (!interactivePrepWs || interactivePrepWs.readyState !== WebSocket.OPEN) {
+                alert('Not connected to server');
+                return;
+            }
+
+            // Add user message to UI
+            addChatMessage('user', message);
+
+            // Add to conversation history
+            conversationHistory.push({ role: 'user', content: message });
+
+            // Clear input
+            input.value = '';
+
+            // Show loading indicator
+            showChatLoading();
+
+            // Send to backend
+            interactivePrepWs.send(JSON.stringify({
+                type: 'interactive_message',
+                message: message,
+                conversationHistory: conversationHistory
+            }));
+        }
+
+        async function toggleVoiceInput() {
+            if (!isVoiceActive) {
+                // Check if we should use conversation mode or single utterance mode
+                // Use conversation mode by default for better UX
+                voiceConversationMode = true;
+
+                if (voiceConversationMode) {
+                    await startVoiceConversation();
+                } else {
+                    await startChatVoiceInput();
+                }
+            } else {
+                if (voiceConversationMode) {
+                    stopVoiceConversation();
+                } else {
+                    stopChatVoiceInput();
+                }
+            }
+        }
+
+        async function startChatVoiceInput() {
+            try {
+                const button = document.getElementById('voiceInputBtn');
+                button.style.background = '#ef4444';
+                button.textContent = '⏺️';
+                updateChatStatus('Listening...', '#ef4444');
+
+                // Request microphone access
+                chatMediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+
+                // Set up audio context
+                chatAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const source = chatAudioContext.createMediaStreamSource(chatMediaStream);
+                chatScriptProcessor = chatAudioContext.createScriptProcessor(4096, 1, 1);
+
+                chatScriptProcessor.onaudioprocess = (e) => {
+                    if (!isVoiceActive) return;
+
+                    const float32Audio = e.inputBuffer.getChannelData(0);
+                    const int16Audio = new Int16Array(float32Audio.length);
+
+                    for (let i = 0; i < float32Audio.length; i++) {
+                        const s = Math.max(-1, Math.min(1, float32Audio[i]));
+                        int16Audio[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+
+                    if (interactivePrepWs && interactivePrepWs.readyState === WebSocket.OPEN) {
+                        interactivePrepWs.send(JSON.stringify({
+                            type: 'interactive_voice_data',
+                            audio: Array.from(int16Audio)
+                        }));
+                    }
+                };
+
+                source.connect(chatScriptProcessor);
+                chatScriptProcessor.connect(chatAudioContext.destination);
+
+                isVoiceActive = true;
+
+                // Send voice start signal
+                if (interactivePrepWs && interactivePrepWs.readyState === WebSocket.OPEN) {
+                    interactivePrepWs.send(JSON.stringify({
+                        type: 'interactive_voice_start'
+                    }));
+                }
+
+            } catch (error) {
+                console.error('Error starting voice input:', error);
+                alert('Failed to access microphone: ' + error.message);
+                stopChatVoiceInput();
+            }
+        }
+
+        function stopChatVoiceInput() {
+            const button = document.getElementById('voiceInputBtn');
+            button.style.background = '#667eea';
+            button.textContent = '🎤';
+            updateChatStatus('Connected', '#10b981');
+
+            isVoiceActive = false;
+
+            if (chatScriptProcessor) {
+                chatScriptProcessor.disconnect();
+                chatScriptProcessor = null;
+            }
+
+            if (chatAudioContext) {
+                chatAudioContext.close();
+                chatAudioContext = null;
+            }
+
+            if (chatMediaStream) {
+                chatMediaStream.getTracks().forEach(track => track.stop());
+                chatMediaStream = null;
+            }
+
+            // Send voice stop signal
+            if (interactivePrepWs && interactivePrepWs.readyState === WebSocket.OPEN) {
+                interactivePrepWs.send(JSON.stringify({
+                    type: 'interactive_voice_stop'
+                }));
+            }
+        }
+
+        // ===== VOICE CONVERSATION MODE (Continuous back-and-forth) =====
+
+        async function startVoiceConversation() {
+            try {
+                const button = document.getElementById('voiceInputBtn');
+                button.style.background = '#ef4444';
+                button.textContent = '🔴 Stop';
+                updateChatStatus('Starting voice conversation...', '#ef4444');
+
+                // Request microphone access
+                chatMediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+                // Set up audio context for streaming
+                chatAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const source = chatAudioContext.createMediaStreamSource(chatMediaStream);
+                chatScriptProcessor = chatAudioContext.createScriptProcessor(4096, 1, 1);
+
+                chatScriptProcessor.onaudioprocess = (e) => {
+                    if (!isVoiceActive) return;
+
+                    const float32Audio = e.inputBuffer.getChannelData(0);
+                    const int16Audio = new Int16Array(float32Audio.length);
+
+                    // Convert float32 to int16
+                    for (let i = 0; i < float32Audio.length; i++) {
+                        const s = Math.max(-1, Math.min(1, float32Audio[i]));
+                        int16Audio[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+
+                    // Stream audio to backend
+                    if (interactivePrepWs && interactivePrepWs.readyState === WebSocket.OPEN) {
+                        // Convert to base64 for transmission
+                        const audioArray = Array.from(int16Audio);
+                        const base64Audio = btoa(String.fromCharCode.apply(null, new Uint8Array(int16Audio.buffer)));
+
+                        interactivePrepWs.send(JSON.stringify({
+                            type: 'voice_conversation_audio',
+                            audio: base64Audio
+                        }));
+                    }
+                };
+
+                source.connect(chatScriptProcessor);
+                chatScriptProcessor.connect(chatAudioContext.destination);
+
+                isVoiceActive = true;
+
+                // Initialize voice conversation on backend
+                if (interactivePrepWs && interactivePrepWs.readyState === WebSocket.OPEN) {
+                    interactivePrepWs.send(JSON.stringify({
+                        type: 'voice_conversation_start'
+                    }));
+                }
+
+                console.log('✅ Voice conversation started');
+
+            } catch (error) {
+                console.error('Error starting voice conversation:', error);
+                alert('Failed to start voice conversation: ' + error.message);
+                stopVoiceConversation();
+            }
+        }
+
+        function stopVoiceConversation() {
+            const button = document.getElementById('voiceInputBtn');
+            button.style.background = '#667eea';
+            button.textContent = '🎤';
+            updateChatStatus('Connected', '#10b981');
+
+            isVoiceActive = false;
+
+            // Stop audio processing
+            if (chatScriptProcessor) {
+                chatScriptProcessor.disconnect();
+                chatScriptProcessor = null;
+            }
+
+            if (chatAudioContext) {
+                chatAudioContext.close();
+                chatAudioContext = null;
+            }
+
+            if (chatMediaStream) {
+                chatMediaStream.getTracks().forEach(track => track.stop());
+                chatMediaStream = null;
+            }
+
+            // Stop any ongoing speech
+            if (currentAIUtterance) {
+                window.speechSynthesis.cancel();
+                currentAIUtterance = null;
+            }
+
+            // Notify backend to stop voice conversation
+            if (interactivePrepWs && interactivePrepWs.readyState === WebSocket.OPEN) {
+                interactivePrepWs.send(JSON.stringify({
+                    type: 'voice_conversation_stop'
+                }));
+            }
+
+            console.log('🛑 Voice conversation stopped');
+        }
+
+        function addChatMessage(role, content, toolCall = null) {
+            const chatHistory = document.getElementById('chatHistory');
+            const placeholder = chatHistory.querySelector('.chat-placeholder');
+            if (placeholder) placeholder.remove();
+
+            // Remove loading indicator
+            const loading = chatHistory.querySelector('.chat-loading-message');
+            if (loading) loading.remove();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${role}`;
+
+            if (role === 'system') {
+                messageDiv.innerHTML = `
+                    <div class="chat-bubble" style="background: #fef3c7; color: #92400e; border: 1px solid #fbbf24;">
+                        ${content}
+                    </div>
+                `;
+            } else {
+                let bubbleContent = content;
+
+                // Add tool call indicator if present
+                if (toolCall) {
+                    bubbleContent = `
+                        <div class="chat-tool-call" style="background: #f0f9ff; border-left: 3px solid #3b82f6; padding: 8px; margin-bottom: 8px; border-radius: 6px; font-size: 13px;">
+                            <strong>🔍 Web Search:</strong> ${toolCall.query || 'Searching...'}
+                        </div>
+                        ${content}
+                    `;
+                }
+
+                messageDiv.innerHTML = `
+                    <div class="chat-bubble">${bubbleContent}</div>
+                    <div class="chat-timestamp" style="font-size: 11px; color: #9ca3af; margin-top: 4px;">
+                        ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                `;
+            }
+
+            chatHistory.appendChild(messageDiv);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+
+            // Add to history if not system message
+            if (role !== 'system') {
+                chatMessagesArray.push({ role, content });
+            }
+        }
+
+        function showChatLoading() {
+            const chatHistory = document.getElementById('chatHistory');
+
+            // Remove existing loading indicator
+            const existing = chatHistory.querySelector('.chat-loading-message');
+            if (existing) existing.remove();
+
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'chat-message assistant chat-loading-message';
+            loadingDiv.innerHTML = `
+                <div class="chat-loading">
+                    <div class="chat-loading-dot" style="animation-delay: 0s"></div>
+                    <div class="chat-loading-dot" style="animation-delay: 0.2s"></div>
+                    <div class="chat-loading-dot" style="animation-delay: 0.4s"></div>
+                </div>
+            `;
+            chatHistory.appendChild(loadingDiv);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        function updateChatStatus(text, color) {
+            const status = document.getElementById('chatStatus');
+            status.textContent = text;
+            status.style.color = color;
+        }
+
+        // Audio queue for TTS playback
+        let ttsAudioQueue = [];
+        let currentTTSAudio = null;
+        let isTTSPlaying = false;
+
+        async function speakText(text) {
+            // Stop any ongoing speech
+            stopTTS();
+
+            try {
+                isSpeaking = true;
+                updateChatStatus('Generating speech...', '#3b82f6');
+
+                // Call our backend TTS endpoint (which proxies OpenAI)
+                const response = await fetch('/api/tts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text })
+                });
+
+                if (!response.ok) {
+                    throw new Error('TTS generation failed');
+                }
+
+                // Get audio blob
+                const audioBlob = await response.blob();
+                const audioUrl = URL.createObjectURL(audioBlob);
+
+                // Play audio
+                currentTTSAudio = new Audio(audioUrl);
+                currentAIUtterance = currentTTSAudio;
+
+                currentTTSAudio.onplay = () => {
+                    isSpeaking = true;
+                    isTTSPlaying = true;
+                    updateChatStatus('Speaking...', '#10b981');
+                };
+
+                currentTTSAudio.onended = () => {
+                    isSpeaking = false;
+                    isTTSPlaying = false;
+                    currentTTSAudio = null;
+                    currentAIUtterance = null;
+                    URL.revokeObjectURL(audioUrl);
+                    updateChatStatus('Connected', '#10b981');
+                };
+
+                currentTTSAudio.onerror = (error) => {
+                    console.error('Audio playback error:', error);
+                    isSpeaking = false;
+                    isTTSPlaying = false;
+                    currentTTSAudio = null;
+                    currentAIUtterance = null;
+                    updateChatStatus('Connected', '#10b981');
+                };
+
+                await currentTTSAudio.play();
+
+            } catch (error) {
+                console.error('TTS error:', error);
+                // Fallback to Web Speech API
+                console.log('Falling back to Web Speech API');
+                fallbackToWebSpeech(text);
+            }
+        }
+
+        function fallbackToWebSpeech(text) {
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.1;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+
+            utterance.onstart = () => {
+                isSpeaking = true;
+                currentAIUtterance = utterance;
+            };
+
+            utterance.onend = () => {
+                isSpeaking = false;
+                currentAIUtterance = null;
+            };
+
+            utterance.onerror = (error) => {
+                console.error('Speech synthesis error:', error);
+                isSpeaking = false;
+                currentAIUtterance = null;
+            };
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function stopTTS() {
+            // Stop HTML5 audio
+            if (currentTTSAudio) {
+                currentTTSAudio.pause();
+                currentTTSAudio.currentTime = 0;
+                currentTTSAudio = null;
+            }
+
+            // Stop Web Speech API fallback
+            if (window.speechSynthesis.speaking) {
+                window.speechSynthesis.cancel();
+            }
+
+            currentAIUtterance = null;
+            isSpeaking = false;
+            isTTSPlaying = false;
+        }
+
+        // Export functions
+        window.startInteractivePrep = startInteractivePrep;
+        window.closeInteractivePrep = closeInteractivePrep;
+        window.sendChatMessage = sendChatMessage;
+        window.toggleVoiceInput = toggleVoiceInput;
 
     </script>
 </body>

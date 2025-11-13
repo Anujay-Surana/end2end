@@ -5,13 +5,14 @@ const WebSocket = require('ws');
 const { createClient } = require('@deepgram/sdk');
 const Parallel = require('parallel-web');
 const fetch = require('node-fetch');
+const VoiceConversationManager = require('./services/voiceConversation');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // ===== ENVIRONMENT VARIABLE VALIDATION =====
 console.log('\n🔍 Validating environment variables...');
@@ -80,6 +81,52 @@ app.use(express.json({ limit: '50mb' })); // Increase limit for large context
 
 // Serve static files (frontend)
 app.use(express.static(__dirname));
+
+// TTS endpoint - uses OpenAI TTS
+app.post('/api/tts', async (req, res) => {
+    try {
+        const { text } = req.body;
+
+        if (!text || text.length === 0) {
+            return res.status(400).json({ error: 'Text is required' });
+        }
+
+        console.log(`🔊 TTS request: ${text.substring(0, 50)}...`);
+
+        // Call OpenAI TTS API
+        const response = await fetch('https://api.openai.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: 'tts-1',
+                voice: 'nova', // Warm, expressive female voice
+                input: text.substring(0, 4096), // OpenAI limit
+                speed: 1.1
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`OpenAI TTS error: ${response.status}`);
+        }
+
+        // Stream audio back to client
+        const audioBuffer = await response.arrayBuffer();
+        res.set('Content-Type', 'audio/mpeg');
+        res.send(Buffer.from(audioBuffer));
+
+        console.log('✓ TTS generated successfully');
+
+    } catch (error) {
+        console.error('TTS error:', error);
+        res.status(500).json({
+            error: 'TTS generation failed',
+            message: error.message
+        });
+    }
+});
 
 // Search endpoint - uses Parallel AI search
 app.post('/api/parallel-search', async (req, res) => {
@@ -974,6 +1021,180 @@ wss.on('connection', (ws) => {
                 }
             }
 
+            // Interactive Prep: Initialize
+            else if (data.type === 'interactive_prep_init') {
+                console.log('💬 Interactive prep initialized');
+                ws.interactivePrepContext = data.meetingBrief;
+                ws.isInteractiveMode = true;
+                ws.interactiveConversation = [];
+                ws.interactiveDeepgram = null;
+                ws.interactiveVoiceBuffer = '';
+            }
+
+            // Interactive Prep: Text message
+            else if (data.type === 'interactive_message') {
+                if (!ws.isInteractiveMode || !ws.interactivePrepContext) {
+                    ws.send(JSON.stringify({
+                        type: 'interactive_error',
+                        message: 'Interactive prep not initialized'
+                    }));
+                    return;
+                }
+
+                console.log('💬 User message:', data.message);
+
+                // Process message with GPT-4o and web search
+                try {
+                    const response = await handleInteractiveMessage(
+                        data.message,
+                        ws.interactivePrepContext,
+                        data.conversationHistory || []
+                    );
+
+                    ws.send(JSON.stringify({
+                        type: 'interactive_response',
+                        message: response.message,
+                        toolCall: response.toolCall || null
+                    }));
+                } catch (error) {
+                    console.error('Error processing interactive message:', error);
+                    ws.send(JSON.stringify({
+                        type: 'interactive_error',
+                        message: 'Failed to process message: ' + error.message
+                    }));
+                }
+            }
+
+            // Interactive Prep: Voice start
+            else if (data.type === 'interactive_voice_start') {
+                console.log('🎤 Interactive voice started');
+
+                // Initialize Deepgram for voice transcription
+                const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+                const dgConnection = deepgram.listen.live({
+                    model: 'nova-2',
+                    language: 'en',
+                    smart_format: true,
+                    interim_results: true,
+                    utterance_end_ms: 1500,
+                    encoding: 'linear16',
+                    sample_rate: 16000
+                });
+
+                dgConnection.on('open', () => {
+                    console.log('✅ Interactive Deepgram connected');
+                });
+
+                dgConnection.on('Results', (data) => {
+                    const transcript = data.channel?.alternatives?.[0]?.transcript;
+                    if (transcript && data.is_final) {
+                        ws.interactiveVoiceBuffer += transcript + ' ';
+                        console.log('🎤 Voice transcript:', transcript);
+                    }
+                });
+
+                dgConnection.on('UtteranceEnd', async () => {
+                    if (ws.interactiveVoiceBuffer.trim()) {
+                        const userMessage = ws.interactiveVoiceBuffer.trim();
+                        ws.interactiveVoiceBuffer = '';
+
+                        console.log('💬 Voice message complete:', userMessage);
+
+                        // Process as text message
+                        try {
+                            const response = await handleInteractiveMessage(
+                                userMessage,
+                                ws.interactivePrepContext,
+                                ws.interactiveConversation || []
+                            );
+
+                            ws.send(JSON.stringify({
+                                type: 'interactive_response',
+                                message: response.message,
+                                toolCall: response.toolCall || null
+                            }));
+                        } catch (error) {
+                            console.error('Error processing voice message:', error);
+                            ws.send(JSON.stringify({
+                                type: 'interactive_error',
+                                message: 'Failed to process voice: ' + error.message
+                            }));
+                        }
+                    }
+                });
+
+                dgConnection.on('error', (error) => {
+                    console.error('Interactive Deepgram error:', error);
+                });
+
+                ws.interactiveDeepgram = dgConnection;
+            }
+
+            // Interactive Prep: Voice audio data
+            else if (data.type === 'interactive_voice_data') {
+                if (ws.interactiveDeepgram) {
+                    const audioChunk = Buffer.from(new Int16Array(data.audio).buffer);
+                    if (ws.interactiveDeepgram.getReadyState() === 1) {
+                        ws.interactiveDeepgram.send(audioChunk);
+                    }
+                }
+            }
+
+            // Interactive Prep: Voice stop
+            else if (data.type === 'interactive_voice_stop') {
+                console.log('🎤 Interactive voice stopped');
+                if (ws.interactiveDeepgram) {
+                    ws.interactiveDeepgram.finish();
+                    ws.interactiveDeepgram = null;
+                }
+                ws.interactiveVoiceBuffer = '';
+            }
+
+            // Voice Conversation: Start conversational voice mode
+            else if (data.type === 'voice_conversation_start') {
+                console.log('💬 Starting voice conversation mode');
+
+                if (!ws.interactivePrepContext) {
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: 'Interactive prep context not initialized'
+                    }));
+                    return;
+                }
+
+                // Create voice conversation manager
+                ws.voiceConversationManager = new VoiceConversationManager(
+                    ws.interactivePrepContext,
+                    userEmail,
+                    parallelClient,
+                    OPENAI_API_KEY
+                );
+
+                // Connect the manager to the WebSocket
+                await ws.voiceConversationManager.connect(ws);
+
+                console.log('✅ Voice conversation initialized');
+            }
+
+            // Voice Conversation: Audio data streaming
+            else if (data.type === 'voice_conversation_audio') {
+                if (ws.voiceConversationManager) {
+                    const audioChunk = Buffer.from(data.audio, 'base64');
+                    ws.voiceConversationManager.sendAudio(audioChunk);
+                } else {
+                    console.warn('⚠️  Voice conversation not initialized');
+                }
+            }
+
+            // Voice Conversation: Stop
+            else if (data.type === 'voice_conversation_stop') {
+                console.log('🛑 Stopping voice conversation');
+                if (ws.voiceConversationManager) {
+                    ws.voiceConversationManager.disconnect();
+                    ws.voiceConversationManager = null;
+                }
+            }
+
             // Stop meeting
             else if (data.type === 'stop') {
                 deepgramState = 'closed';
@@ -988,6 +1209,13 @@ wss.on('connection', (ws) => {
                     }
                     deepgramConnection = null;
                 }
+
+                // Clean up interactive mode if active
+                if (ws.interactiveDeepgram) {
+                    ws.interactiveDeepgram.finish();
+                    ws.interactiveDeepgram = null;
+                }
+                ws.isInteractiveMode = false;
 
                 console.log('Meeting assistant stopped');
             }
@@ -1006,6 +1234,20 @@ wss.on('connection', (ws) => {
         if (deepgramConnection) {
             deepgramConnection.finish();
         }
+
+        // Clean up voice conversation manager
+        if (ws.voiceConversationManager) {
+            ws.voiceConversationManager.disconnect();
+            ws.voiceConversationManager = null;
+        }
+
+        // Clean up interactive mode
+        if (ws.interactiveDeepgram) {
+            ws.interactiveDeepgram.finish();
+            ws.interactiveDeepgram = null;
+        }
+
+        stopKeepAlive();
     });
 });
 
@@ -1195,6 +1437,160 @@ Rules:
 
     } catch (error) {
         console.error('Analysis error:', error);
+    }
+}
+
+// Handle interactive prep message with GPT-4o and function calling
+async function handleInteractiveMessage(userMessage, meetingContext, conversationHistory) {
+    console.log('🤖 Processing interactive message with GPT-4o');
+
+    // Build conversation messages
+    const messages = [
+        {
+            role: 'system',
+            content: `You are an AI meeting preparation assistant. You have access to comprehensive meeting context and can search the web for additional information when needed.
+
+Meeting Context:
+${JSON.stringify(meetingContext, null, 2)}
+
+Your capabilities:
+1. Answer questions about the meeting (attendees, agenda, documents, etc.)
+2. Provide insights and recommendations for meeting preparation
+3. Search the web for current information when needed using the web_search tool
+
+Guidelines:
+- Be conversational and helpful
+- Provide specific, actionable advice
+- Reference the meeting context when relevant
+- Use web search for facts you're uncertain about or for current information
+- Keep responses concise but informative (2-4 sentences unless more detail is requested)`
+        },
+        ...conversationHistory.map(msg => ({
+            role: msg.role,
+            content: msg.content
+        }))
+    ];
+
+    // Define web search tool
+    const tools = [
+        {
+            type: 'function',
+            function: {
+                name: 'web_search',
+                description: 'Search the web for current information. Use this when you need up-to-date facts, company information, or details not in the meeting context.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        query: {
+                            type: 'string',
+                            description: 'The search query (be specific and focused)'
+                        },
+                        num_results: {
+                            type: 'number',
+                            description: 'Number of results to return (1-5)',
+                            default: 3
+                        }
+                    },
+                    required: ['query']
+                }
+            }
+        }
+    ];
+
+    try {
+        // First GPT-4o call with function calling
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o',
+                messages: messages,
+                tools: tools,
+                tool_choice: 'auto',
+                temperature: 0.7,
+                max_tokens: 500
+            })
+        });
+
+        const data = await response.json();
+        const assistantMessage = data.choices[0].message;
+
+        // Check if tool call was made
+        if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+            const toolCall = assistantMessage.tool_calls[0];
+
+            if (toolCall.function.name === 'web_search') {
+                const args = JSON.parse(toolCall.function.arguments);
+                console.log('🔍 Web search requested:', args.query);
+
+                // Execute web search using Parallel AI
+                const searchResult = await parallelClient.beta.search({
+                    objective: args.query,
+                    search_queries: [args.query],
+                    mode: 'one-shot',
+                    max_results: args.num_results || 3,
+                    max_chars_per_result: 2000
+                });
+
+                // Synthesize search results
+                let searchSummary = 'No relevant results found.';
+                if (searchResult.results && searchResult.results.length > 0) {
+                    const resultsText = searchResult.results.map((r, i) =>
+                        `Result ${i + 1}: ${r.title}\n${r.snippet || r.content?.substring(0, 300)}...`
+                    ).join('\n\n');
+
+                    searchSummary = await synthesizeResults(
+                        `Summarize these search results for the query "${args.query}" in 2-3 clear sentences:`,
+                        searchResult.results,
+                        400
+                    );
+                }
+
+                // Second GPT-4o call with search results
+                const finalResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${OPENAI_API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-4o',
+                        messages: [
+                            ...messages,
+                            assistantMessage,
+                            {
+                                role: 'tool',
+                                tool_call_id: toolCall.id,
+                                content: searchSummary
+                            }
+                        ],
+                        temperature: 0.7,
+                        max_tokens: 500
+                    })
+                });
+
+                const finalData = await finalResponse.json();
+                const finalMessage = finalData.choices[0].message.content;
+
+                return {
+                    message: finalMessage,
+                    toolCall: { query: args.query }
+                };
+            }
+        }
+
+        // No tool call, return direct response
+        return {
+            message: assistantMessage.content,
+            toolCall: null
+        };
+
+    } catch (error) {
+        console.error('Error in handleInteractiveMessage:', error);
+        throw error;
     }
 }
 
