@@ -271,11 +271,205 @@ Rules:
     }
 }
 
+// ===== CONTEXT FETCHING HELPERS =====
+
+/**
+ * Extract keywords from meeting title and description
+ */
+function extractKeywords(title, description = '') {
+    const text = `${title} ${description}`.toLowerCase();
+    const stopWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
+                       'meeting', 'discussion', 'call', 'review', 'session', 'sync', 'chat', 'talk'];
+
+    const words = text
+        .split(/[\s\-_,\.;:()[\]{}]+/)
+        .filter(w => w.length > 3 && !stopWords.includes(w))
+        .filter(w => !/^\d+$/.test(w)); // Remove pure numbers
+
+    // Return unique words, max 5
+    return [...new Set(words)].slice(0, 5);
+}
+
+/**
+ * Fetch Gmail messages using user's access token
+ */
+async function fetchGmailMessages(accessToken, query, maxResults = 100) {
+    try {
+        console.log(`  📧 Gmail query: ${query.substring(0, 150)}...`);
+
+        // Step 1: Get message IDs
+        const listResponse = await fetch(
+            `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`,
+            {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            }
+        );
+
+        if (!listResponse.ok) {
+            throw new Error(`Gmail API error: ${listResponse.status}`);
+        }
+
+        const listData = await listResponse.json();
+        const messageIds = listData.messages || [];
+
+        console.log(`  ✓ Found ${messageIds.length} message IDs`);
+
+        if (messageIds.length === 0) {
+            return [];
+        }
+
+        // Step 2: Fetch full message details (top 30 for performance)
+        const fetchLimit = Math.min(messageIds.length, 30);
+        const messagePromises = messageIds.slice(0, fetchLimit).map(async (msg) => {
+            const msgResponse = await fetch(
+                `https://www.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
+                {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                }
+            );
+
+            if (!msgResponse.ok) {
+                return null;
+            }
+
+            return msgResponse.json();
+        });
+
+        const messages = (await Promise.all(messagePromises)).filter(Boolean);
+
+        console.log(`  ✓ Fetched ${messages.length} full messages`);
+
+        // Step 3: Parse and format messages
+        return messages.map(msg => {
+            const headers = msg.payload?.headers || [];
+            const getHeader = (name) => headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+
+            let body = '';
+            if (msg.payload?.parts) {
+                const textPart = msg.payload.parts.find(p => p.mimeType === 'text/plain');
+                if (textPart?.body?.data) {
+                    body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+                }
+            } else if (msg.payload?.body?.data) {
+                body = Buffer.from(msg.payload.body.data, 'base64').toString('utf-8');
+            }
+
+            return {
+                id: msg.id,
+                subject: getHeader('Subject'),
+                from: getHeader('From'),
+                to: getHeader('To'),
+                date: getHeader('Date'),
+                snippet: msg.snippet || '',
+                body: body.substring(0, 5000) // Limit body size
+            };
+        });
+
+    } catch (error) {
+        console.error('  ❌ Error fetching Gmail messages:', error.message);
+        return [];
+    }
+}
+
+/**
+ * Fetch Google Drive files using user's access token
+ */
+async function fetchDriveFiles(accessToken, query, maxResults = 50) {
+    try {
+        console.log(`  📁 Drive query: ${query.substring(0, 150)}...`);
+
+        const response = await fetch(
+            `https://www.googleapis.com/drive/v3/files?` +
+            `q=${encodeURIComponent(query)}&` +
+            `fields=files(id,name,mimeType,modifiedTime,owners,size,webViewLink,iconLink)&` +
+            `orderBy=modifiedTime desc&` +
+            `pageSize=${maxResults}`,
+            {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(`Drive API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const files = data.files || [];
+
+        console.log(`  ✓ Found ${files.length} Drive files`);
+
+        return files.map(file => ({
+            id: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            size: file.size || 0,
+            modifiedTime: file.modifiedTime,
+            owner: file.owners && file.owners.length > 0 ? file.owners[0].displayName || file.owners[0].emailAddress : 'Unknown',
+            ownerEmail: file.owners && file.owners.length > 0 ? file.owners[0].emailAddress : '',
+            url: file.webViewLink,
+            iconLink: file.iconLink
+        }));
+
+    } catch (error) {
+        console.error('  ❌ Error fetching Drive files:', error.message);
+        return [];
+    }
+}
+
+/**
+ * Fetch Drive file contents
+ */
+async function fetchDriveFileContents(accessToken, files) {
+    const filesWithContent = [];
+
+    for (const file of files.slice(0, 5)) { // Limit to 5 files for performance
+        try {
+            let content = '';
+
+            // Handle different file types
+            if (file.mimeType === 'application/vnd.google-apps.document') {
+                // Google Doc - export as plain text
+                const response = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain`,
+                    {
+                        headers: { 'Authorization': `Bearer ${accessToken}` }
+                    }
+                );
+                if (response.ok) {
+                    content = await response.text();
+                }
+            } else if (file.mimeType === 'application/pdf' || file.mimeType === 'text/plain') {
+                // PDF or text file - get binary content
+                const response = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+                    {
+                        headers: { 'Authorization': `Bearer ${accessToken}` }
+                    }
+                );
+                if (response.ok) {
+                    content = await response.text();
+                }
+            }
+
+            if (content) {
+                filesWithContent.push({
+                    ...file,
+                    content: content.substring(0, 20000) // Limit content size
+                });
+            }
+        } catch (error) {
+            console.error(`  ⚠️  Error fetching content for ${file.name}:`, error.message);
+        }
+    }
+
+    return filesWithContent;
+}
+
 // ===== MEETING PREP ENDPOINT =====
 
 app.post('/api/prep-meeting', async (req, res) => {
     try {
-        const { meeting, attendees, emails, files } = req.body;
+        const { meeting, attendees, accessToken } = req.body;
 
         console.log(`\n📋 Preparing brief for: ${meeting.summary}`);
 
@@ -287,9 +481,79 @@ app.post('/api/prep-meeting', async (req, res) => {
             context: ''
         };
 
+        // Extract keywords from meeting title/description for enhanced context fetching
+        const keywords = extractKeywords(meeting.summary, meeting.description || '');
+        console.log(`  🔑 Extracted keywords: ${keywords.join(', ')}`);
+
+        // Fetch emails and files server-side with enhanced queries
+        let emails = [];
+        let files = [];
+
+        if (accessToken && attendees && attendees.length > 0) {
+            const attendeeEmails = attendees.map(a => a.email).filter(Boolean);
+            const domains = [...new Set(attendeeEmails.map(e => e.split('@')[1]))];
+
+            // Calculate date range (6 months ago)
+            const sixMonthsAgo = new Date();
+            sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+            const afterDate = sixMonthsAgo.toISOString().split('T')[0].replace(/-/g, '/');
+
+            // Build enhanced Gmail query
+            const attendeeQueries = attendeeEmails.map(email => `from:${email} OR to:${email}`).join(' OR ');
+            const domainQueries = domains.map(d => `from:*@${d}`).join(' OR ');
+
+            let keywordQuery = '';
+            if (keywords.length > 0) {
+                const keywordParts = keywords.slice(0, 3).map(k => `subject:"${k}" OR "${k}"`).join(' OR ');
+                keywordQuery = ` OR (${keywordParts})`;
+            }
+
+            const gmailQuery = `(${attendeeQueries} OR ${domainQueries}${keywordQuery}) after:${afterDate}`;
+
+            console.log(`  📧 Fetching emails with enhanced query...`);
+            emails = await fetchGmailMessages(accessToken, gmailQuery, 100);
+            console.log(`  ✓ Fetched ${emails.length} emails`);
+
+            // Build enhanced Drive query
+            const permQueries = attendeeEmails.map(email => `'${email}' in readers or '${email}' in writers`).join(' or ');
+            const permQuery = `(${permQueries}) and modifiedTime > '${sixMonthsAgo.toISOString()}'`;
+
+            let nameQuery = '';
+            if (keywords.length > 0) {
+                const nameKeywords = keywords.slice(0, 3).map(k => `name contains '${k}'`).join(' or ');
+                nameQuery = `(${nameKeywords}) and modifiedTime > '${sixMonthsAgo.toISOString()}'`;
+            }
+
+            console.log(`  📁 Fetching Drive files with enhanced queries...`);
+
+            // Fetch both permission-based and name-based files in parallel
+            const [permFiles, nameFiles] = await Promise.all([
+                fetchDriveFiles(accessToken, permQuery, 50),
+                nameQuery ? fetchDriveFiles(accessToken, nameQuery, 30) : Promise.resolve([])
+            ]);
+
+            // Merge and deduplicate files by ID
+            const fileMap = new Map();
+            [...permFiles, ...nameFiles].forEach(file => {
+                if (!fileMap.has(file.id)) {
+                    fileMap.set(file.id, file);
+                }
+            });
+            files = Array.from(fileMap.values());
+
+            console.log(`  ✓ Fetched ${files.length} unique Drive files (${permFiles.length} from permissions, ${nameFiles.length} from keywords)`);
+
+            // Fetch file contents
+            if (files.length > 0) {
+                console.log(`  📄 Fetching content for top ${Math.min(files.length, 5)} files...`);
+                files = await fetchDriveFileContents(accessToken, files);
+                console.log(`  ✓ Fetched content for ${files.length} files`);
+            }
+        }
+
         // Research attendees - prioritize local context, then web
         const attendeePromises = attendees.slice(0, 6).map(async (att) => {
-            const name = att.displayName || att.email.split('@')[0];
+            let name = att.displayName || att.email.split('@')[0];
             const domain = att.email.split('@')[1];
             const company = domain.split('.')[0];
 
@@ -305,11 +569,25 @@ app.post('/api/prep-meeting', async (req, res) => {
             let title = company;
             let source = 'local'; // Track data source
 
-            // STEP 1: Extract info from local context (emails)
+            // STEP 1: Extract full name from email headers if available
             const attendeeEmails = emails ? emails.filter(e =>
                 e.from?.toLowerCase().includes(att.email.toLowerCase()) ||
                 e.snippet?.toLowerCase().includes(name.toLowerCase())
             ) : [];
+
+            // Try to extract full name from "From" header (format: "Full Name <email@domain.com>")
+            if (attendeeEmails.length > 0) {
+                const fromHeader = attendeeEmails[0].from;
+                const nameMatch = fromHeader?.match(/^([^<]+)(?=\s*<)/);
+                if (nameMatch && nameMatch[1].trim()) {
+                    const extractedName = nameMatch[1].trim().replace(/"/g, '');
+                    // Only use if it's a proper full name (has space or is longer than original)
+                    if (extractedName.includes(' ') || extractedName.length > name.length) {
+                        console.log(`    📛 Extracted full name from email: "${extractedName}" (was: "${name}")`);
+                        name = extractedName;
+                    }
+                }
+            }
 
             if (attendeeEmails.length > 0) {
                 console.log(`    📧 Found ${attendeeEmails.length} emails from ${name}`);
@@ -343,25 +621,27 @@ If emails don't contain professional info, return empty array: []`,
                 }
             }
 
-            // STEP 2: Always do web search to supplement
-            console.log(`    🌐 Supplementing with web search...`);
+            // STEP 2: ALWAYS do web search to supplement
+            console.log(`    🌐 Performing web search...`);
 
-            // Craft queries with email domain for disambiguation
-            const queries = await craftSearchQueries(
-                `${name} ${att.email} ${domain}. Find current role and professional background. Include email domain to find the RIGHT person.`
-            );
+            // Build highly specific search queries with strong company/domain signals
+            // CRITICAL: Always include domain/company to avoid finding wrong person
+            const queries = [];
 
-            if (queries.length === 0) {
-                queries.push(
-                    `"${name}" ${domain} LinkedIn`,
-                    `"${name}" ${att.email}`,
-                    `${name} ${company}`
-                );
-            }
+            // Query 1: Name + domain (most reliable - directly tied to email)
+            queries.push(`"${name}" site:linkedin.com ${domain}`);
+
+            // Query 2: Name + company LinkedIn
+            queries.push(`"${name}" ${company} site:linkedin.com`);
+
+            // Query 3: Name + email (ultra specific)
+            queries.push(`"${name}" "${att.email}"`);
+
+            console.log(`    🔎 Search queries: ${queries.join(' | ')}`);
 
             const searchResult = await parallelClient.beta.search({
-                objective: `Find professional information about ${name} at ${domain}`,
-                search_queries: queries.slice(0, 3),
+                objective: `Find LinkedIn profile and professional info for ${name} who works at ${company} (${att.email}). ONLY return results that mention ${domain} or ${company}.`,
+                search_queries: queries,
                 mode: 'one-shot',
                 max_results: 8,
                 max_chars_per_result: 2500
@@ -369,60 +649,60 @@ If emails don't contain professional info, return empty array: []`,
 
             console.log(`    ✓ Found ${searchResult.results?.length || 0} web results`);
 
+            let relevantResults = [];
             if (searchResult.results && searchResult.results.length > 0) {
-                // Adjust confidence based on whether we have local context
-                const hasLocalContext = keyFacts.length > 0;
+                // CRITICAL: Filter results to ONLY include those that mention domain or company
+                // This prevents finding wrong people with the same name
+                relevantResults = searchResult.results.filter(r => {
+                    const textToSearch = `${r.title || ''} ${r.excerpt || ''} ${r.url || ''} ${(r.excerpts || []).join(' ')}`.toLowerCase();
+                    const mentionsDomain = textToSearch.includes(domain.toLowerCase());
+                    const mentionsCompany = textToSearch.includes(company.toLowerCase());
+                    return mentionsDomain || mentionsCompany;
+                });
 
-                // Check if results mention the email domain
-                const domainMentioned = searchResult.results.some(r =>
-                    r.url?.includes(domain) ||
-                    r.excerpts?.some(ex => ex.toLowerCase().includes(domain.toLowerCase()))
-                );
+                console.log(`    🔍 Filtered to ${relevantResults.length}/${searchResult.results.length} results mentioning ${domain} or ${company}`);
 
-                const confidenceLevel = hasLocalContext ? 'strict' : (domainMentioned ? 'moderate' : 'lenient');
-                console.log(`    🎯 Confidence level: ${confidenceLevel}`);
+                if (relevantResults.length > 0) {
+                    // Extract info from filtered results
+                    const webSynthesis = await callGPT([{
+                        role: 'system',
+                        content: `Extract 2-4 professional facts about ${name} from ${company} (${att.email}).
 
-                let confidencePrompt = '';
-                if (confidenceLevel === 'strict') {
-                    confidencePrompt = `CRITICAL: Only include info if you're CONFIDENT it's about THIS specific person at ${domain}. If unsure, return empty array: []`;
-                } else if (confidenceLevel === 'moderate') {
-                    confidencePrompt = `Extract info about ${name} from ${domain}. Prioritize results mentioning ${domain}. If results seem to be about a different person with same name, return empty array: []`;
-                } else {
-                    confidencePrompt = `Extract professional info about ${name}. The email is ${att.email}. Include basic professional info found. If results are clearly about a different person, return empty array: []`;
-                }
+These results have been pre-filtered to mention ${domain} or ${company}, so they should be about the correct person.
 
-                const webSynthesis = await synthesizeResults(
-                    `${confidencePrompt}
+Return JSON array: ["fact 1", "fact 2", ...]
 
-Return JSON array of 2-4 specific, professional facts.
+If results are ambiguous or clearly about someone else, return: []`
+                    }, {
+                        role: 'user',
+                        content: `Web search results:\n${JSON.stringify(relevantResults.slice(0, 5), null, 2)}`
+                    }], 600);
 
-Example format: ["Software Engineer at ${company}", "Previously worked at X", "Expertise in Y"]`,
-                    searchResult.results,
-                    600
-                );
-
-                try {
-                    let clean = webSynthesis?.replace(/```json/g, '').replace(/```/g, '').trim();
-                    const parsed = JSON.parse(clean);
-                    if (Array.isArray(parsed) && parsed.length > 0) {
-                        // Add web facts
-                        const webFacts = parsed.filter(f => f && f.length > 10);
-                        keyFacts.push(...webFacts);
-                        source = hasLocalContext ? 'local+web' : 'web';
-                        console.log(`    ✓ Added ${webFacts.length} facts from web`);
-                    } else {
-                        console.log(`    ⚠️  GPT returned empty array (low confidence)`);
+                    try {
+                        let clean = webSynthesis?.replace(/```json/g, '').replace(/```/g, '').trim();
+                        const parsed = JSON.parse(clean);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            // Add web facts
+                            const webFacts = parsed.filter(f => f && f.length > 10);
+                            keyFacts.push(...webFacts);
+                            source = keyFacts.length > webFacts.length ? 'local+web' : 'web';
+                            console.log(`    ✓ Added ${webFacts.length} facts from filtered web results`);
+                        } else {
+                            console.log(`    ⚠️  No usable facts from web results`);
+                        }
+                    } catch (e) {
+                        console.log(`    ⚠️  Failed to parse web results: ${e.message}`);
                     }
-                } catch (e) {
-                    console.log(`    ⚠️  Failed to parse web results: ${e.message}`);
+                } else {
+                    console.log(`    ⚠️  No results mentioned ${domain} or ${company} - skipping to avoid wrong person`);
                 }
             } else {
                 console.log(`    ⚠️  No web results found`);
             }
 
-            // Try to extract title from web results
-            if (searchResult.results?.[0]?.excerpts) {
-                const excerpt = searchResult.results[0].excerpts.join(' ');
+            // Try to extract title from filtered web results (if any)
+            if (relevantResults && relevantResults.length > 0 && relevantResults[0]?.excerpts) {
+                const excerpt = relevantResults[0].excerpts.join(' ');
                 const titleMatch = excerpt.match(new RegExp(`${name}[^,.]*(CEO|CTO|VP|Director|Head|Manager|Engineer|Designer|Lead|Founder|Partner|Analyst|Specialist|Coordinator)[^,.]{0,30}`, 'i'));
                 if (titleMatch && excerpt.includes(domain)) {
                     title = titleMatch[0].trim();
@@ -477,35 +757,105 @@ Be specific and informative. Focus on what matters for preparation.`,
 
         // Action items will be generated AFTER all context is gathered
 
-        // Generate email analysis - meeting-specific
+        // Generate email analysis - meeting-specific with DEEP analysis
         console.log(`  📧 Analyzing email threads for meeting context...`);
         let emailAnalysis = '';
         if (emails && emails.length > 0) {
-            const emailSummary = await synthesizeResults(
-                `You are preparing for a meeting titled "${meeting.summary}". Analyze these email threads and extract ONLY information directly relevant to THIS SPECIFIC MEETING.
+            console.log(`  📊 Performing deep email analysis on ${emails.length} emails...`);
 
-Focus on:
-- Discussions, decisions, or context about the meeting topic
-- Action items or deliverables mentioned that relate to this meeting
-- Important context shared between attendees about the meeting subject
-- Any preparation, documents, or topics mentioned for discussion
+            // CRITICAL: Filter emails to ONLY those directly relevant to THIS meeting
+            // Exclude: newsletters, event announcements, generic updates, unrelated topics
+            const relevanceCheck = await callGPT([{
+                role: 'system',
+                content: `You are filtering emails for meeting prep. Meeting: "${meeting.summary}"
 
-IGNORE:
-- General company updates unrelated to this meeting
-- Event invitations or social activities
-- Administrative emails (unless directly about this meeting)
-- Generic community announcements
+STRICT FILTERING RULES:
+1. ONLY include emails that directly relate to THIS specific meeting's topic and attendees
+2. EXCLUDE: newsletters, event announcements, product updates, webinars, social events
+3. EXCLUDE: emails that just happen to be from the same company/domain
+4. INCLUDE: direct correspondence with attendees, shared documents, meeting planning, topic discussion
 
-Return a 3-5 sentence paragraph. If emails don't contain relevant meeting context, say "No directly relevant email discussions found about this meeting topic."
+Return JSON array of email indices (0-based) that are DIRECTLY relevant:
+{"relevant_indices": [0, 3, 7, ...]}
 
-Be specific - quote or reference actual email content when relevant.`,
-                emails.slice(0, 15),
-                600
-            );
-            emailAnalysis = emailSummary || 'No email activity found.';
+If NONE are directly relevant, return: {"relevant_indices": []}`
+            }, {
+                role: 'user',
+                content: `Emails to filter:\n${emails.slice(0, 20).map((e, i) => `[${i}] Subject: ${e.subject}\nFrom: ${e.from}\nSnippet: ${e.snippet.substring(0, 200)}`).join('\n\n')}`
+            }], 800);
+
+            let relevantIndices = [];
+            try {
+                const parsed = JSON.parse(relevanceCheck.replace(/```json/g, '').replace(/```/g, '').trim());
+                relevantIndices = parsed.relevant_indices || [];
+            } catch (e) {
+                console.log(`  ⚠️  Failed to parse relevance check, using all emails`);
+                relevantIndices = emails.slice(0, 20).map((_, i) => i);
+            }
+
+            console.log(`  🔍 Filtered to ${relevantIndices.length}/${Math.min(emails.length, 20)} relevant emails`);
+
+            if (relevantIndices.length === 0) {
+                emailAnalysis = `No email threads found directly related to "${meeting.summary}". Email activity exists but appears to be general correspondence rather than meeting-specific discussion.`;
+            } else {
+                const relevantEmails = relevantIndices.map(i => emails[i]).filter(Boolean);
+
+                // PASS 1: Extract key topics, decisions, and action items from RELEVANT emails only
+                const topicsExtraction = await callGPT([{
+                    role: 'system',
+                    content: `Extract ALL key topics, decisions, action items, and important context from these emails related to meeting "${meeting.summary}".
+
+Return a detailed JSON object with:
+{
+  "topics": ["topic 1", "topic 2", ...],
+  "decisions": ["decision 1", "decision 2", ...],
+  "actionItems": ["action 1", "action 2", ...],
+  "keyContext": ["context point 1", "context point 2", ...]
+}
+
+Be thorough - extract EVERYTHING relevant. Each point should be specific (15-60 words).`
+                }, {
+                    role: 'user',
+                    content: `Emails:\n${relevantEmails.map(e => `Subject: ${e.subject}\nFrom: ${e.from}\nDate: ${e.date}\nBody: ${(e.body || e.snippet).substring(0, 1000)}`).join('\n\n---\n\n')}`
+                }], 1200);
+
+            let extractedData = { topics: [], decisions: [], actionItems: [], keyContext: [] };
+            try {
+                extractedData = JSON.parse(topicsExtraction.replace(/```json/g, '').replace(/```/g, '').trim());
+            } catch (e) {
+                console.log(`  ⚠️  Failed to parse topics extraction, continuing...`);
+            }
+
+            // PASS 2: Synthesize into narrative
+            const emailSummary = await callGPT([{
+                role: 'system',
+                content: `You are creating a comprehensive email analysis section for meeting prep. Synthesize the extracted data into a detailed, informative paragraph (6-10 sentences).
+
+Extracted Data:
+${JSON.stringify(extractedData, null, 2)}
+
+Guidelines:
+- Start with the MOST important context
+- Include specific details: names, dates, document references, numbers
+- Quote or paraphrase key email content
+- Connect related points to show the narrative
+- Be specific and concrete - avoid vague statements
+- Focus on insights that will help in the meeting
+
+Write as if briefing an executive before a critical meeting. Every sentence should add value.`
+            }, {
+                role: 'user',
+                content: `Meeting: ${meeting.summary}\n\nCreate comprehensive email analysis paragraph.`
+            }], 800);
+
+                emailAnalysis = emailSummary?.trim() || 'Limited email context available for this meeting.';
+                console.log(`  ✓ Email analysis: ${emailAnalysis.length} chars from ${relevantEmails.length} relevant emails`);
+            }
+        } else {
+            emailAnalysis = 'No email activity found in the past 6 months.';
         }
 
-        // Generate document/file analysis - meeting-specific with content
+        // Generate document/file analysis - meeting-specific with DEEP content analysis
         console.log(`  📄 Analyzing document content for meeting relevance...`);
         let documentAnalysis = '';
         if (files && files.length > 0) {
@@ -513,86 +863,152 @@ Be specific - quote or reference actual email content when relevant.`,
             const filesWithContent = files.filter(f => f.content && f.content.length > 100);
 
             if (filesWithContent.length > 0) {
-                const docSummary = await synthesizeResults(
-                    `You are preparing for a meeting titled "${meeting.summary}".
+                console.log(`  📊 Deep analysis of ${filesWithContent.length} documents with content...`);
 
-Analyze the ACTUAL CONTENT of these documents and extract insights relevant to THIS SPECIFIC MEETING.
+                // PASS 1: Extract key information from EACH document
+                const docInsights = await Promise.all(
+                    filesWithContent.slice(0, 5).map(async (file) => {
+                        const insight = await callGPT([{
+                            role: 'system',
+                            content: `Analyze this document for meeting "${meeting.summary}". Extract 3-7 KEY INSIGHTS.
 
-For each document:
-- Summarize key points that relate to the meeting topic
-- Quote or reference specific sections that are relevant
-- Explain how this content connects to meeting objectives
-- Note any data, decisions, or action items mentioned
+Return JSON array of insights:
+["insight 1", "insight 2", ...]
 
-IGNORE documents unrelated to the meeting topic.
+Each insight should:
+- Be specific (include numbers, dates, names, decisions)
+- Be 20-80 words
+- Quote or reference specific content
+- Explain relevance to the meeting
 
-Return a 4-7 sentence paragraph with SPECIFIC insights from the document content (not vague descriptions).`,
-                    filesWithContent.map(f => ({
-                        name: f.name,
-                        content: f.content.substring(0, 15000), // First 15k chars per doc
-                        mimeType: f.mimeType
-                    })),
-                    800
+Focus on: decisions, data, action items, proposals, problems, solutions, timelines.`
+                        }, {
+                            role: 'user',
+                            content: `Document: "${file.name}"\n\nContent:\n${file.content.substring(0, 12000)}`
+                        }], 900);
+
+                        try {
+                            const parsed = JSON.parse(insight.replace(/```json/g, '').replace(/```/g, '').trim());
+                            return { fileName: file.name, insights: Array.isArray(parsed) ? parsed : [] };
+                        } catch (e) {
+                            return { fileName: file.name, insights: [] };
+                        }
+                    })
                 );
-                documentAnalysis = docSummary || 'No meeting-relevant content found in documents.';
+
+                // PASS 2: Synthesize all document insights into coherent narrative
+                const allInsights = docInsights.filter(d => d.insights.length > 0);
+
+                if (allInsights.length > 0) {
+                    const docNarrative = await callGPT([{
+                        role: 'system',
+                        content: `You are creating a comprehensive document analysis for meeting prep. Synthesize these document insights into a detailed paragraph (6-12 sentences).
+
+Document Insights:
+${JSON.stringify(allInsights, null, 2)}
+
+Guidelines:
+- Organize by importance and relevance to meeting "${meeting.summary}"
+- Reference specific documents by name
+- Include concrete details: numbers, dates, decisions, proposals
+- Connect insights across documents if relevant
+- Highlight any conflicts or discrepancies
+- Focus on actionable information for the meeting
+
+Write as if briefing an executive. Every sentence should provide specific, valuable information.`
+                    }, {
+                        role: 'user',
+                        content: `Create comprehensive document analysis for meeting: ${meeting.summary}`
+                    }], 1000);
+
+                    documentAnalysis = docNarrative?.trim() || 'Document analysis in progress.';
+                    console.log(`  ✓ Document analysis: ${documentAnalysis.length} chars from ${allInsights.length} docs`);
+                } else {
+                    documentAnalysis = `Analyzed ${filesWithContent.length} documents but found limited content directly relevant to "${meeting.summary}". Documents available: ${filesWithContent.map(f => f.name).join(', ')}.`;
+                }
             } else if (files.length > 0) {
                 // Fallback to title-based analysis if no content
-                documentAnalysis = `Found ${files.length} documents: ${files.map(f => f.name).slice(0, 3).join(', ')}. Unable to access content for detailed analysis.`;
+                documentAnalysis = `Found ${files.length} potentially relevant documents: ${files.map(f => f.name).slice(0, 5).join(', ')}${files.length > 5 ? ` and ${files.length - 5} more` : ''}. Unable to access full content for detailed analysis.`;
             }
+        } else {
+            documentAnalysis = 'No relevant documents found in Drive.';
         }
 
-        // Generate company/context research - extract from LOCAL context only
-        console.log(`  🏢 Analyzing company context from local sources...`);
+        // Generate company/context research - DEEP extraction from LOCAL context
+        console.log(`  🏢 Analyzing company intelligence from local sources...`);
         let companyResearch = '';
 
-        // Extract company names mentioned in emails and documents
-        const localCompanyContext = [];
-        if (emails && emails.length > 0) {
-            emails.slice(0, 10).forEach(e => {
-                const text = `${e.subject} ${e.body || e.snippet}`.toLowerCase();
-                // Look for common company indicators
-                if (text.includes('kordn8')) localCompanyContext.push('Kordn8');
-            });
-        }
+        if ((emails && emails.length > 0) || (files && files.length > 0)) {
+            console.log(`  📊 Extracting company intelligence from emails and documents...`);
 
-        if (files && files.length > 0) {
-            files.forEach(f => {
-                if (f.content) {
-                    const text = f.content.toLowerCase();
-                    if (text.includes('kordn8')) localCompanyContext.push('Kordn8');
-                }
-            });
-        }
+            // PASS 1: Extract ALL company-related information
+            const companyExtraction = await callGPT([{
+                role: 'system',
+                content: `Extract ALL company-related intelligence from these emails and documents for meeting "${meeting.summary}".
 
-        // If we found company mentions in local context, extract insights
-        if (localCompanyContext.length > 0 || (emails && emails.length > 0)) {
-            const uniqueCompanies = [...new Set(localCompanyContext)];
-            console.log(`  📊 Found company mentions: ${uniqueCompanies.join(', ') || 'extracting from context'}`);
+Return detailed JSON:
+{
+  "companyUpdates": ["update 1", "update 2", ...],
+  "productDevelopments": ["development 1", "development 2", ...],
+  "businessMetrics": ["metric 1", "metric 2", ...],
+  "strategicContext": ["context 1", "context 2", ...],
+  "teamChanges": ["change 1", "change 2", ...],
+  "challenges": ["challenge 1", "challenge 2", ...]
+}
 
-            const companyContext = await synthesizeResults(
-                `Extract any company-related context, business updates, or organizational information mentioned in these emails and documents for meeting "${meeting.summary}".
+Be thorough - extract EVERYTHING related to company/business context. Include specifics: numbers, dates, names, products.`
+            }, {
+                role: 'user',
+                content: `Emails (top 15):\n${emails?.slice(0, 15).map(e => `Subject: ${e.subject}\nFrom: ${e.from}\nBody: ${(e.body || e.snippet).substring(0, 800)}`).join('\n\n---\n\n')}\n\nDocuments:\n${files?.filter(f => f.content).slice(0, 3).map(f => `Document: ${f.name}\nContent: ${f.content.substring(0, 3000)}`).join('\n\n---\n\n')}`
+            }], 1200);
 
-Focus on:
-- Company goals, objectives, or strategy mentioned
-- Product or service developments discussed
-- Team changes, hiring, or organizational updates
-- Business metrics, milestones, or challenges mentioned
-- Any competitive or market context discussed
+            let companyData = {
+                companyUpdates: [],
+                productDevelopments: [],
+                businessMetrics: [],
+                strategicContext: [],
+                teamChanges: [],
+                challenges: []
+            };
 
-Return a 2-4 sentence paragraph. If no substantive company context is found, return "No specific company developments discussed in available context."
+            try {
+                companyData = JSON.parse(companyExtraction.replace(/```json/g, '').replace(/```/g, '').trim());
+            } catch (e) {
+                console.log(`  ⚠️  Failed to parse company extraction, continuing...`);
+            }
 
-Be specific and reference actual content - avoid speculation.`,
-                {
-                    emails: emails?.slice(0, 10).map(e => ({ subject: e.subject, body: e.body || e.snippet })),
-                    documents: files?.filter(f => f.content).slice(0, 3).map(f => ({ name: f.name, excerpt: f.content?.substring(0, 2000) })),
-                    meetingTitle: meeting.summary
-                },
-                500
-            );
+            // PASS 2: Synthesize into executive intelligence brief
+            const hasData = Object.values(companyData).some(arr => arr && arr.length > 0);
 
-            companyResearch = companyContext || 'No specific company developments discussed in available context.';
+            if (hasData) {
+                const companyNarrative = await callGPT([{
+                    role: 'system',
+                    content: `Create a comprehensive company intelligence brief (5-8 sentences) from this extracted data.
+
+Company Data:
+${JSON.stringify(companyData, null, 2)}
+
+Guidelines:
+- Start with the most strategic/important information
+- Include specific details: numbers, dates, product names, metrics
+- Connect related points to show business narrative
+- Highlight any challenges or opportunities
+- Focus on information that provides advantage in meeting "${meeting.summary}"
+- Be concrete and specific - avoid vague statements
+
+Write as if briefing an executive on critical company intelligence before a high-stakes meeting.`
+                }, {
+                    role: 'user',
+                    content: `Create company intelligence brief for meeting: ${meeting.summary}`
+                }], 800);
+
+                companyResearch = companyNarrative?.trim() || 'Company intelligence analysis in progress.';
+                console.log(`  ✓ Company intel: ${companyResearch.length} chars`);
+            } else {
+                companyResearch = 'No substantive company or business context found in available emails and documents.';
+            }
         } else {
-            companyResearch = 'No company context available from emails or documents.';
+            companyResearch = 'No company context available - no emails or documents to analyze.';
         }
 
         // Generate strategic recommendations - deeply contextualized
