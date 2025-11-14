@@ -56,16 +56,11 @@ const parallelClient = new Parallel({
     apiKey: process.env.PARALLEL_API_KEY
 });
 
-// Initialize Deepgram client with explicit options
+// Initialize Deepgram client (simple initialization - SDK handles endpoints)
 let deepgram;
 try {
-    deepgram = createClient(DEEPGRAM_API_KEY, {
-        global: {
-            fetch: { options: { url: 'https://api.deepgram.com' } }
-        }
-    });
+    deepgram = createClient(DEEPGRAM_API_KEY);
     console.log('✅ Deepgram client initialized');
-    console.log(`   Using API endpoint: https://api.deepgram.com`);
 } catch (error) {
     console.error('❌ Failed to initialize Deepgram client:', error.message);
     console.error('Please check your DEEPGRAM_API_KEY in the .env file.\n');
@@ -249,16 +244,29 @@ async function synthesizeResults(prompt, data, maxTokens = 500) {
     try {
         const result = await callGPT([{
             role: 'system',
-            content: `You are an executive briefing expert. Extract meaningful, verified information from the provided data.
+            content: `You are an executive briefing expert. Your task is to extract and synthesize information from data based on the specific prompt provided.
 
-Rules:
-1. ONLY include facts directly supported by the data provided
-2. Be specific and concrete - include numbers, dates, companies, titles, achievements
-3. Each fact should be complete and clear (15-80 words is ideal)
-4. Skip generic statements like "experienced professional" or "works in tech"
-5. Focus on recent activities, achievements, roles, and specific expertise
-6. If data quality is poor, return fewer high-quality facts rather than padding with fluff
-7. Return information that would be genuinely useful in a business meeting context`
+CORE PRINCIPLES:
+1. **Verify before including**: ONLY include information directly supported by the provided data
+2. **Be specific**: Include numbers, dates, names, companies, titles, concrete details
+3. **Context-appropriate length**:
+   - For fact extraction: 15-80 words per fact
+   - For narrative synthesis: Follow prompt guidance (typically 6-12 sentences)
+4. **Quality over quantity**: Return fewer high-quality insights rather than padding with generic statements
+5. **Skip obvious/generic**: No "experienced professional", "works in tech", "team member" unless there's specific detail
+6. **Business relevance**: Focus on information useful for meeting preparation and decision-making
+
+OUTPUT FORMAT:
+- Follow the prompt's explicit output format instructions (JSON array, paragraph, etc.)
+- If prompt asks for JSON, return valid JSON only (no markdown code blocks unless you strip them)
+- If prompt asks for narrative, write cohesive prose
+- If data is insufficient for quality output, acknowledge it explicitly
+
+VALIDATION CHECKS:
+- Does each statement have evidence in the data?
+- Would this information actually help in a meeting context?
+- Is this specific enough to be actionable?
+- Have I followed the prompt's specific instructions?`
         }, {
             role: 'user',
             content: `${prompt}\n\nData:\n${JSON.stringify(data).substring(0, 12000)}`
@@ -269,6 +277,30 @@ Rules:
         console.error('Error synthesizing:', error);
         return null;
     }
+}
+
+/**
+ * Safely parse JSON that may be wrapped in markdown code blocks
+ * Only strips backticks at the START and END, not throughout the content
+ */
+function safeParseJSON(text) {
+    if (!text) return null;
+
+    let cleaned = text.trim();
+
+    // Remove markdown code blocks ONLY at start/end (not in the middle of content)
+    // This prevents corrupting JSON that contains backticks in its content
+    if (cleaned.startsWith('```')) {
+        // Remove opening code block (```json or just ```)
+        cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '');
+    }
+
+    if (cleaned.endsWith('```')) {
+        // Remove closing code block
+        cleaned = cleaned.replace(/\n?```\s*$/, '');
+    }
+
+    return JSON.parse(cleaned.trim());
 }
 
 // ===== CONTEXT FETCHING HELPERS =====
@@ -600,31 +632,42 @@ app.post('/api/prep-meeting', async (req, res) => {
             if (attendeeEmails.length > 0) {
                 console.log(`    📧 Found ${attendeeEmails.length} emails from ${name}`);
                 const localSynthesis = await synthesizeResults(
-                    `Analyze emails from ${name} (${att.email}) to extract key professional context for meeting "${meeting.summary}".
+                    `Analyze emails FROM ${name} (${att.email}) to extract professional context for meeting "${meeting.summary}".
+
+CRITICAL SCOPE CLARIFICATION:
+- These emails are ONLY those SENT BY ${name} (FROM: ${att.email})
+- NOT emails that merely mention ${name} or are TO ${name}
+- Extract insights about ${name}'s role, work, and communication from what THEY wrote
 
 Extract and prioritize:
-1. **Working relationship**: How do they work with the meeting organizer? Collaborative history? Decision authority?
-2. **Current projects/progress**: What are they working on? What's the status? Any blockers or recent wins?
-3. **Role and expertise**: Their position, responsibilities, areas of expertise
-4. **Meeting-specific context**: References to agenda items, questions asked, documents shared
-5. **Communication style**: Do they prefer details or summaries? Direct or diplomatic?
+1. **Working relationship**: How do they collaborate with others? Who do they work with? Collaborative history?
+2. **Current projects/progress**: What are they working on? Status updates they've shared? Blockers or wins?
+3. **Role and expertise**: Their position, responsibilities, expertise (as demonstrated in their emails)
+4. **Meeting-specific context**: References to this meeting's topic, agenda items, documents they shared
+5. **Communication style**: Do they write detailed emails or brief ones? Technical or high-level?
 
-Return ONLY a JSON array of 3-6 specific, actionable facts. Include dates/specifics when available.
+VALIDATION:
+- Only extract facts directly supported by ${name}'s emails
+- Include email dates for context (e.g., "mentioned in Dec 15 email")
+- Focus on information relevant to meeting "${meeting.summary}"
+- Skip generic observations
 
-Examples:
-- "Working together on Kordn8 MVP for 3+ months based on Nov-Jan email threads"
-- "Blocked on UX design approval - mentioned in Dec 15 email, still unresolved as of Jan 10"
-- "Prefers detailed technical discussions - often asks follow-up questions in email threads"
-- "Requested agenda document for this meeting on Jan 8"
+OUTPUT FORMAT:
+Return ONLY a JSON array of 3-6 specific facts. Each fact should be 15-80 words with concrete details.
 
-If emails lack substantive professional context, return: []`,
+GOOD EXAMPLES:
+["Sent 'Kordn8 MVP Functions Report' on Nov 9 detailing current limitations in authentication and payment modules", "Requested approval on UX wireframes in Dec 15 email, indicating they're blocked on design decisions", "Communicates with technical detail - recent emails include code snippets and architecture diagrams"]
+
+BAD EXAMPLES (do NOT generate):
+["Works at Company X", "Experienced professional", "Team member on the project"]
+
+If ${name}'s emails lack substantive professional context, return: []`,
                     attendeeEmails.slice(0, 15),
                     600
                 );
 
                 try {
-                    let clean = localSynthesis?.replace(/```json/g, '').replace(/```/g, '').trim();
-                    const parsed = JSON.parse(clean);
+                    const parsed = safeParseJSON(localSynthesis);
                     if (Array.isArray(parsed) && parsed.length > 0) {
                         keyFacts = parsed.filter(f => f && f.length > 10);
                         console.log(`    ✓ Extracted ${keyFacts.length} facts from emails`);
@@ -700,8 +743,7 @@ If results are ambiguous or clearly about someone else, return: []`
                     }], 600);
 
                     try {
-                        let clean = webSynthesis?.replace(/```json/g, '').replace(/```/g, '').trim();
-                        const parsed = JSON.parse(clean);
+                        const parsed = safeParseJSON(webSynthesis);
                         if (Array.isArray(parsed) && parsed.length > 0) {
                             // Add web facts
                             const webFacts = parsed.filter(f => f && f.length > 10);
@@ -781,6 +823,7 @@ Be specific and informative. Focus on what matters for preparation.`,
         // Generate email analysis - meeting-specific with DEEP analysis
         console.log(`  📧 Analyzing email threads for meeting context...`);
         let emailAnalysis = '';
+        let relevantEmails = []; // Declare at higher scope for timeline use
         if (emails && emails.length > 0) {
             console.log(`  📊 Performing deep email analysis on ${emails.length} emails...`);
 
@@ -790,27 +833,33 @@ Be specific and informative. Focus on what matters for preparation.`,
                 role: 'system',
                 content: `You are filtering emails for meeting prep. Meeting: "${meeting.summary}"
 
-BALANCED FILTERING GUIDELINES:
-✅ INCLUDE most emails EXCEPT obvious spam:
-- Direct correspondence with attendees (discussions, questions, updates)
-- Shared documents, links, or attachments related to work
-- Meeting planning, scheduling, or follow-ups
-- Project updates, progress reports, or status emails
-- General business correspondence that provides relationship context
-- Emails discussing companies, products, or topics relevant to attendees
+SELECTIVE FILTERING - Only include emails with DIRECT relevance to this specific meeting.
 
-❌ EXCLUDE only obvious spam/irrelevant:
-- Marketing newsletters and promotional emails
-- Event announcements for webinars/conferences
-- Automated notifications (calendar, system alerts)
-- Social event invitations unrelated to work
+✅ INCLUDE ONLY IF:
+1. **Direct meeting relevance**: Email explicitly discusses this meeting's topic, agenda, or objectives
+2. **Direct attendee correspondence**: Recent (last 90 days) direct exchanges with meeting attendees about relevant work topics
+3. **Shared meeting materials**: Documents, slides, or resources explicitly for this meeting
+4. **Project context**: Updates about projects/initiatives that are the PRIMARY focus of this meeting
+5. **Recent decisions**: Decisions made in last 30 days that directly impact this meeting's agenda
 
-IMPORTANT: When in doubt, INCLUDE the email. Business context is valuable even if not directly about this specific meeting.
+❌ EXCLUDE:
+- Generic project updates not specific to this meeting's focus
+- Old emails (>90 days) unless they contain critical historical decisions
+- Marketing newsletters, promotional emails, event announcements
+- Automated notifications (calendar, system alerts, CI/CD reports)
+- Social/casual correspondence unrelated to meeting topic
+- General business correspondence that doesn't relate to meeting objectives
+- Emails that only tangentially mention attendees or topics
 
-Return JSON array of email indices (0-based) that should be INCLUDED:
+QUALITY OVER QUANTITY:
+- Target 20-30% inclusion rate (only the most relevant emails)
+- When in doubt, EXCLUDE - irrelevant context is worse than missing context
+- Each included email should add specific, actionable context for THIS meeting
+
+Return JSON with email indices to INCLUDE:
 {"relevant_indices": [0, 3, 7, ...]}
 
-Be generous - aim to include 50-70% of emails unless they're clearly spam.`
+Example: For a "Q4 Budget Review" meeting, INCLUDE budget spreadsheets and Q4 spending updates, but EXCLUDE general project status emails unless they specifically discuss budget implications.`
             }, {
                 role: 'user',
                 content: `Emails to filter:\n${emails.slice(0, 20).map((e, i) => `[${i}] Subject: ${e.subject}\nFrom: ${e.from}\nSnippet: ${e.snippet.substring(0, 200)}`).join('\n\n')}`
@@ -818,7 +867,7 @@ Be generous - aim to include 50-70% of emails unless they're clearly spam.`
 
             let relevantIndices = [];
             try {
-                const parsed = JSON.parse(relevanceCheck.replace(/```json/g, '').replace(/```/g, '').trim());
+                const parsed = safeParseJSON(relevanceCheck);
                 relevantIndices = parsed.relevant_indices || [];
             } catch (e) {
                 console.log(`  ⚠️  Failed to parse relevance check, using all emails`);
@@ -827,16 +876,13 @@ Be generous - aim to include 50-70% of emails unless they're clearly spam.`
 
             console.log(`  🔍 Filtered to ${relevantIndices.length}/${Math.min(emails.length, 20)} relevant emails`);
 
-            // FALLBACK: If filter rejected everything, use most recent emails as context
             if (relevantIndices.length === 0) {
-                console.log(`  ⚠️  All emails filtered out - using fallback (10 most recent emails for context)`);
-                relevantIndices = emails.slice(0, 10).map((_, i) => i);
-            }
-
-            if (relevantIndices.length === 0) {
+                // No relevant emails found - use generic message
+                // NOTE: We do NOT use fallback emails for timeline to avoid polluting it with irrelevant items
+                console.log(`  ⚠️  No emails passed relevance filter for this meeting`);
                 emailAnalysis = `No email threads found directly related to "${meeting.summary}". Email activity exists but appears to be general correspondence rather than meeting-specific discussion.`;
             } else {
-                const relevantEmails = relevantIndices.map(i => emails[i]).filter(Boolean);
+                relevantEmails = relevantIndices.map(i => emails[i]).filter(Boolean);
 
                 // PASS 1: Extract key topics, decisions, and action items from RELEVANT emails only
                 const topicsExtraction = await callGPT([{
@@ -871,7 +917,7 @@ Even "routine" business emails reveal working relationships and progress - extra
 
             let extractedData = { workingRelationships: [], projectProgress: [], blockers: [], decisions: [], actionItems: [], topics: [], keyContext: [] };
             try {
-                extractedData = JSON.parse(topicsExtraction.replace(/```json/g, '').replace(/```/g, '').trim());
+                extractedData = safeParseJSON(topicsExtraction);
             } catch (e) {
                 console.log(`  ⚠️  Failed to parse topics extraction, continuing...`);
             }
@@ -917,9 +963,10 @@ DO NOT write generic summaries. Extract and synthesize REAL working context.`
         // Generate document/file analysis - meeting-specific with DEEP content analysis
         console.log(`  📄 Analyzing document content for meeting relevance...`);
         let documentAnalysis = '';
+        let filesWithContent = []; // Declare at higher scope for timeline use
         if (files && files.length > 0) {
             // Filter files with content
-            const filesWithContent = files.filter(f => f.content && f.content.length > 100);
+            filesWithContent = files.filter(f => f.content && f.content.length > 100);
 
             if (filesWithContent.length > 0) {
                 console.log(`  📊 Deep analysis of ${filesWithContent.length} documents with content...`);
@@ -947,7 +994,7 @@ Focus on: decisions, data, action items, proposals, problems, solutions, timelin
                         }], 900);
 
                         try {
-                            const parsed = JSON.parse(insight.replace(/```json/g, '').replace(/```/g, '').trim());
+                            const parsed = safeParseJSON(insight);
                             return { fileName: file.name, insights: Array.isArray(parsed) ? parsed : [] };
                         } catch (e) {
                             return { fileName: file.name, insights: [] };
@@ -1031,7 +1078,7 @@ Be thorough - extract EVERYTHING related to company/business context. Include sp
             };
 
             try {
-                companyData = JSON.parse(companyExtraction.replace(/```json/g, '').replace(/```/g, '').trim());
+                companyData = safeParseJSON(companyExtraction);
             } catch (e) {
                 console.log(`  ⚠️  Failed to parse company extraction, continuing...`);
             }
@@ -1130,13 +1177,17 @@ Example tone:
 
 Write as if briefing someone before a critical meeting where understanding the relationship dynamics could make the difference between success and failure.`;
 
-            relationshipAnalysis = await synthesizeResults([{
-                role: 'system',
-                content: relationshipPrompt
-            }, {
-                role: 'user',
-                content: `Analyze the relationships for meeting: ${meeting.summary}`
-            }], null, 1200);
+            // Pass the prompt as a string and the data to analyze
+            relationshipAnalysis = await synthesizeResults(
+                relationshipPrompt,
+                {
+                    meetingTitle: meeting.summary,
+                    emails: relevantEmails,
+                    documents: filesWithContent,
+                    attendees: attendees
+                },
+                1200
+            );
 
             relationshipAnalysis = relationshipAnalysis?.trim() || 'Insufficient context to analyze working relationships. More email history or documents needed.';
             console.log(`  ✓ Relationship analysis: ${relationshipAnalysis.length} chars`);
@@ -1145,14 +1196,20 @@ Write as if briefing someone before a critical meeting where understanding the r
         }
 
         // ============================================================================
-        // TIMELINE BUILDING - Extract all interactions chronologically
+        // TIMELINE BUILDING - Extract RELEVANT interactions chronologically
         // ============================================================================
-        console.log(`  📅 Building interaction timeline...`);
+        console.log(`  📅 Building interaction timeline from relevant context...`);
         const timeline = [];
 
-        // Extract email events
-        if (emails && emails.length > 0) {
-            emails.forEach(email => {
+        // Use only RELEVANT emails for timeline (those that passed the meeting-specific filter)
+        // This ensures timeline shows only interactions related to THIS meeting
+        const timelineEmails = emailAnalysis && emailAnalysis !== 'No email activity found in the past 6 months.'
+            ? (relevantEmails || [])
+            : [];
+
+        // Extract email events from RELEVANT emails only
+        if (timelineEmails && timelineEmails.length > 0) {
+            timelineEmails.forEach(email => {
                 const emailDate = email.date ? new Date(email.date) : null;
                 if (emailDate && !isNaN(emailDate.getTime())) {
                     // Extract participants from email
@@ -1174,12 +1231,13 @@ Write as if briefing someone before a critical meeting where understanding the r
                     });
                 }
             });
-            console.log(`    ✓ Added ${emails.length} email events to timeline`);
+            console.log(`    ✓ Added ${timelineEmails.length} relevant email events to timeline`);
         }
 
-        // Extract document events
-        if (files && files.length > 0) {
-            files.forEach(file => {
+        // Extract document events from files WITH CONTENT (already filtered for relevance)
+        const timelineFiles = filesWithContent || files?.filter(f => f.content) || [];
+        if (timelineFiles && timelineFiles.length > 0) {
+            timelineFiles.forEach(file => {
                 // Use modified time (most recent interaction)
                 const modifiedDate = file.modifiedTime ? new Date(file.modifiedTime) : null;
                 if (modifiedDate && !isNaN(modifiedDate.getTime())) {
@@ -1263,11 +1321,7 @@ Return ONLY a JSON array. If insufficient context for meaningful recommendations
 
         let parsedRecommendations = [];
         try {
-            let cleanRecs = recommendations
-                .replace(/```json/g, '')
-                .replace(/```/g, '')
-                .trim();
-            const parsed = JSON.parse(cleanRecs);
+            const parsed = safeParseJSON(recommendations);
             parsedRecommendations = Array.isArray(parsed) ? parsed.slice(0, 5) : [];
         } catch (e) {
             console.error(`  ⚠️  Failed to parse recommendations:`, e.message);
@@ -1280,9 +1334,12 @@ Return ONLY a JSON array. If insufficient context for meaningful recommendations
 
         // Generate action items LAST with full context
         console.log(`  📝 Generating action items with full context...`);
-        const actionPrompt = `You are preparing for the meeting: "${meeting.summary}"
+        const actionPrompt = `You are generating PREPARATION action items for the upcoming meeting: "${meeting.summary}"
 
-Based on ALL the context gathered below, suggest 4-6 HIGH-QUALITY, STRATEGIC action items to prepare effectively for THIS SPECIFIC MEETING.
+CRITICAL DISTINCTION:
+- These are PREP actions to do BEFORE the meeting (not actions TO TAKE during the meeting)
+- Focus on what the user should review, prepare, or think about in advance
+- Help them walk into the meeting fully prepared
 
 FULL CONTEXT:
 - Attendees: ${brief.attendees.map(a => `${a.name} (${a.keyFacts.join('; ')})`).join(' | ')}
@@ -1291,18 +1348,35 @@ FULL CONTEXT:
 - Company context: ${companyResearch}
 - Strategic recommendations: ${parsedRecommendations.join(' | ')}
 
-CRITICAL INSTRUCTIONS:
-1. Each action item must be DIRECTLY relevant to "${meeting.summary}" - NOT other meetings or calendar events
-2. Reference SPECIFIC documents, emails, or insights from the context above
-3. Make items substantive and detailed (20-60 words each)
-4. Focus on what will make THIS meeting successful
-5. Connect action items to the actual context provided (e.g., "Review the 'Kordn8 MVP Functions' document mentioned in emails")
-6. Avoid generic suggestions - be concrete and meeting-specific
+STRICT REQUIREMENTS:
+1. **Meeting-specific only**: Every action item must be DIRECTLY relevant to "${meeting.summary}"
+   - ❌ BAD: "Schedule a follow-up meeting" (this is for AFTER the meeting)
+   - ❌ BAD: "Review calendar for conflicts" (not specific to THIS meeting)
+   - ✅ GOOD: "Review the 'Q4 Budget Report' mentioned in emails to prepare questions about line item 47"
 
-Example format:
-["Review the 'Kordn8 MVP Functions Detailed Report' shared by Akshay on Nov 9, paying special attention to current limitations and gaps that need addressing, and prepare 2-3 specific questions about implementation priorities", "Based on the financial coordination emails with Continuum Labs, prepare a brief update on payment status and any outstanding invoicing questions that may come up in the meeting"]
+2. **Reference specific context**: Each item must cite actual documents, emails, or data from the context
+   - ❌ BAD: "Prepare talking points" (too vague)
+   - ✅ GOOD: "Based on Sarah's Dec 15 email about delayed UX approval, prepare 3 specific wireframe options to discuss"
 
-Return ONLY a JSON array of 4-6 action items. Each should demonstrate understanding of the meeting's context and purpose.`;
+3. **Actionable prep tasks**: Focus on review, analysis, preparation (not in-meeting actions)
+   - ✅ Examples: "Review document X", "Prepare questions about Y", "Analyze data from Z", "Think through approach for W"
+
+4. **Detailed and specific**: 25-70 words each with concrete details
+   - Include: what to review, why it matters, what to prepare
+   - Reference: specific documents, emails (with dates), data points
+
+5. **Quality filter**: Only include items that would GENUINELY help prepare for THIS meeting
+   - If context is sparse, return 2-3 high-quality items rather than padding with generic ones
+   - Skip obvious/generic prep like "be on time" or "review agenda"
+
+OUTPUT FORMAT:
+Return ONLY a JSON array of 3-6 action items (not more, not less).
+
+GOOD EXAMPLES:
+["Review the 'Kordn8 MVP Functions Detailed Report' shared by Akshay on Nov 9, focusing on sections 3-5 about current limitations, and prepare 2-3 specific questions about implementation priorities for the meeting discussion", "Analyze the 'Short Term User Stickiness' document (Dec 8) and prepare a brief perspective on which retention strategies align best with the team's current capacity constraints mentioned in recent emails"]
+
+BAD EXAMPLES (do NOT generate):
+["Attend the meeting on time", "Take notes during discussion", "Schedule follow-up meeting", "Review your calendar", "Prepare general talking points"]`;
 
         const actionResult = await synthesizeResults(
             actionPrompt,
@@ -1319,11 +1393,7 @@ Return ONLY a JSON array of 4-6 action items. Each should demonstrate understand
 
         let parsedActionItems = [];
         try {
-            let cleanAction = actionResult
-                .replace(/```json/g, '')
-                .replace(/```/g, '')
-                .trim();
-            const parsed = JSON.parse(cleanAction);
+            const parsed = safeParseJSON(actionResult);
             parsedActionItems = Array.isArray(parsed) ? parsed
                 .filter(item => item && typeof item === 'string' && item.length > 15)
                 .slice(0, 6) : [];
@@ -1446,7 +1516,7 @@ wss.on('connection', (ws) => {
                 }));
             });
 
-            deepgramConnection.on('Results', async (data) => {
+            deepgramConnection.on('Transcript', async (data) => {
                 const transcript = data.channel?.alternatives?.[0];
                 if (!transcript || !transcript.transcript) return;
 
@@ -1724,7 +1794,7 @@ wss.on('connection', (ws) => {
                     console.log('✅ Interactive Deepgram connected');
                 });
 
-                dgConnection.on('Results', (data) => {
+                dgConnection.on('Transcript', (data) => {
                     const transcript = data.channel?.alternatives?.[0]?.transcript;
                     if (transcript && data.is_final) {
                         ws.interactiveVoiceBuffer += transcript + ' ';
@@ -1933,36 +2003,52 @@ async function analyzeTranscript(buffer, context, ws, recentSuggestionHashes) {
                 model: 'gpt-4o',
                 messages: [{
                     role: 'system',
-                    content: `You are a real-time meeting assistant. Analyze the conversation and provide SPECIFIC, ACTIONABLE feedback.
+                    content: `You are a real-time meeting assistant. Your job is to provide CRITICAL, HIGH-VALUE suggestions ONLY when absolutely necessary.
 
-CRITICAL QUALITY RULES:
-1. Only suggest if you have CONCRETE, SPECIFIC information to share
-2. NO generic observations like "seems uncertain" or "clarify identity"
-3. NO obvious statements (e.g., "India is second most populous" when user just said it)
-4. Focus on HIGH-VALUE suggestions: corrections, non-obvious context, specific facts
-5. Maximum 2-3 suggestions per analysis - quality over quantity
+STRICT QUALITY THRESHOLD:
+- Default to returning EMPTY array {"suggestions": []}
+- Only suggest when you have CRITICAL information that would significantly change the conversation
+- Maximum 1-2 suggestions per analysis (prefer 0-1)
+- Think: "Would I interrupt a CEO's meeting to say this?" If no, don't suggest it.
 
-Your job:
-1. Detect MEANINGFUL uncertainty that needs verification (not casual speech)
-2. Fact-check specific claims using meeting context
-3. Suggest SPECIFIC, relevant information from context that user wouldn't know
-4. Correct factual errors with sources
+WHEN TO SUGGEST (rare cases only):
+1. **Factual Correction**: User states something demonstrably false from meeting context
+   - ✅ Example: User says "Sarah leads engineering" but context shows she's in design
+   - ❌ Counter-example: User says "I think it's around 50%" (casual uncertainty is OK)
 
-Meeting Context:
-${JSON.stringify(context).substring(0, 5000)}
+2. **Critical Missing Context**: User is unaware of CRUCIAL information that will derail the conversation
+   - ✅ Example: User discussing project timeline, but context shows project was cancelled last week
+   - ❌ Counter-example: "FYI, attendee John works at Company X" (nice-to-know, not critical)
 
-Return JSON with this structure:
-{
-  "suggestions": [{"type": "uncertainty|fact|correction|context", "message": "specific actionable message", "severity": "info|warning|error"}]
-}
+3. **Direct Question to AI**: User explicitly asks for information
+   - ✅ Example: "What was the budget we agreed on?"
+   - ❌ Counter-example: Rhetorical questions or thinking out loud
 
-Each suggestion must be:
-- 20-80 words (not too short, not too long)
-- Specific and actionable
-- Non-obvious information
-- Worth interrupting the conversation for
+NEVER SUGGEST:
+- Generic observations ("seems uncertain", "clarify roles")
+- Obvious facts user just stated ("Yes, India has 1.4B people")
+- Casual hedge words ("I think", "maybe" - this is normal speech!)
+- Background info unless it's CRITICAL to current discussion
+- Suggestions about communication style or meeting dynamics
+- Anything that isn't IMMEDIATELY actionable
 
-If nothing meets these criteria, return empty array: {"suggestions": []}`
+Meeting Context (COMPACT):
+Meeting: ${context?.summary || 'Unknown'}
+Attendees: ${context?.attendees?.map(a => a.name).join(', ') || 'Unknown'}
+
+DECISION PROCESS:
+1. Read the transcript carefully
+2. Ask: "Is there a CRITICAL factual error or missing information?"
+3. Ask: "Would this suggestion SIGNIFICANTLY change the outcome?"
+4. Ask: "Is this worth interrupting the conversation?"
+5. If any answer is "no" → return empty array
+
+OUTPUT FORMAT:
+{"suggestions": [{"type": "correction|critical_context", "message": "...", "severity": "warning|error"}]}
+
+TONE: Direct, specific, cite sources. Example: "According to the Nov 15 email, the budget was $50k, not $30k."
+
+DEFAULT: Return {"suggestions": []} unless you have CRITICAL information.`
                 }, {
                     role: 'user',
                     content: `Recent conversation:\n${recentText}\n\nUser statements to analyze: ${userStatements || 'None yet'}`
@@ -1983,7 +2069,7 @@ If nothing meets these criteria, return empty array: {"suggestions": []}`
         // Parse suggestions
         let suggestions = [];
         try {
-            const parsed = JSON.parse(content.replace(/```json/g, '').replace(/```/g, '').trim());
+            const parsed = safeParseJSON(content);
             suggestions = parsed.suggestions || [];
         } catch (e) {
             console.error('Failed to parse suggestions:', e);
