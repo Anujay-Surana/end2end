@@ -590,12 +590,18 @@ app.post('/api/prep-meeting', async (req, res) => {
             const permQueries = attendeeEmails.map(email => `'${email}' in readers or '${email}' in writers`).join(' or ');
             const permQuery = `(${permQueries}) and modifiedTime > '${twoYearsAgo.toISOString()}'`;
 
-            // NEW: Domain-wide file query - fetch files owned/authored by ANYONE at attendee domains
-            // This captures team documents, company resources, and colleague files
-            const domainFileQueries = domains.map(d =>
-                `from:'${d}' and modifiedTime > '${twoYearsAgo.toISOString()}'`
-            ).join(' or ');
-            const domainQuery = domainFileQueries ? `(${domainFileQueries})` : '';
+            // NEW: Domain-wide file query - search for files from attendee domains
+            // Note: Drive API doesn't support domain-wide owner search directly
+            // Instead, we'll use fullText search for domain names + aggressive keyword matching
+            // This captures team documents mentioning the companies/domains
+            const domainSearchTerms = [
+                ...domains.map(d => d.split('.')[0]), // company names (e.g., "kordn8", "tonik")
+                ...attendees.map(a => a.name.split(' ')[0]).filter(Boolean) // First names
+            ].filter(Boolean);
+
+            const domainQuery = domainSearchTerms.length > 0
+                ? `(${domainSearchTerms.map(term => `fullText contains '${term}'`).join(' or ')}) and modifiedTime > '${twoYearsAgo.toISOString()}'`
+                : '';
 
             let nameQuery = '';
             if (keywords.length > 0) {
@@ -839,36 +845,8 @@ If results are ambiguous or clearly about someone else, return: []`
         // Keep all attendees
         brief.attendees = (await Promise.all(attendeePromises)).filter(a => a !== null);
 
-        console.log(`\n  📊 Generating meeting summary...`);
-
-        // Generate executive summary with more context
-        const summaryData = {
-            meeting: {
-                title: meeting.summary,
-                description: meeting.description,
-                attendees: brief.attendees.map(a => ({ name: a.name, title: a.title, facts: a.keyFacts }))
-            },
-            recentEmails: emails?.slice(0, 5).map(e => ({
-                subject: e.subject,
-                snippet: e.snippet
-            })),
-            files: files?.slice(0, 3).map(f => ({ name: f.name }))
-        };
-
-        brief.summary = await synthesizeResults(
-            `Write 2-3 concise sentences summarizing this meeting's context and purpose.
-
-Include:
-- Meeting topic and objective
-- Key participants and their relevance
-- Important context from emails/recent activity
-
-Be specific and informative. Focus on what matters for preparation.`,
-            summaryData,
-            400
-        );
-
-        // Action items will be generated AFTER all context is gathered
+        // NOTE: Summary generation moved to END of pipeline (after all analysis completes)
+        // This ensures summary has access to deep email/document/relationship analysis
 
         // Generate email analysis - meeting-specific with DEEP analysis
         console.log(`  📧 Analyzing email threads for meeting context...`);
@@ -1524,6 +1502,79 @@ BAD EXAMPLES (do NOT generate):
                     .slice(0, 6) : [];
         }
 
+        // ============================================================================
+        // GENERATE EXECUTIVE SUMMARY - LAST STEP with full context
+        // ============================================================================
+        console.log(`\n  📊 Generating executive summary with complete context...`);
+
+        brief.summary = await synthesizeResults(
+            `You are creating an executive summary for the meeting: "${meeting.summary}"
+
+CONTEXT: You have access to comprehensive analysis of emails, documents, attendee research, and company intelligence. Your task is to distill this into a compelling 3-4 sentence summary that truly prepares someone for this meeting.
+
+CRITICAL REQUIREMENTS:
+
+1. **Be SPECIFIC**: Reference actual people, documents, dates, or decisions from the analysis
+   - ❌ BAD: "Team members will discuss the project"
+   - ✅ GOOD: "Dobrochna (Tonik Product Lead) and Akshay (Kordn8 Engineering) will resolve..."
+
+2. **Include TIMELINE CONTEXT**: Ground the meeting in recent history
+   - ❌ BAD: "The meeting is about the roadmap"
+   - ✅ GOOD: "Based on 23 email threads over 3 months..." or "Since the Dec 15 decision..."
+
+3. **Reference CONCRETE ARTIFACTS**: Cite actual documents, emails, or data points
+   - ❌ BAD: "Recent updates will be reviewed"
+   - ✅ GOOD: "The 'Kordn8 MVP Functions Report' (Nov 9) details current limitations..."
+
+4. **Highlight WORKING DYNAMICS**: Show the relationships and tensions (if any)
+   - ❌ BAD: "Stakeholders will align on priorities"
+   - ✅ GOOD: "The core tension is between feature velocity (Sarah's priority) and technical debt (Mike's concern)..."
+
+5. **Connect to STRATEGIC CONTEXT**: Why does this meeting matter NOW?
+   - ❌ BAD: "Progress will be discussed"
+   - ✅ GOOD: "With the Jan 30 launch deadline approaching, this meeting is critical to..."
+
+STRUCTURE (3-4 sentences):
+- Sentence 1: WHO is meeting and WHAT is the core purpose (with specific context)
+- Sentence 2: KEY CONTEXT from emails/docs that frames the discussion (cite specific sources)
+- Sentence 3: CURRENT STATE and any tensions/blockers (from relationship analysis)
+- Sentence 4 (optional): WHY THIS MATTERS NOW (timeline pressure, decisions needed)
+
+GOOD EXAMPLE:
+"This meeting brings together Dobrochna (Tonik Product Lead) and Akshay (Kordn8 Engineering) to finalize the Q4 MVP scope that has been under active discussion since their Nov 9 kickoff documented in the 'Kordn8 MVP Functions Detailed Report'. Based on 23 email threads over 3 months, the primary focus is completing the authentication module Akshay finished in January while resolving the UX design approval that has been pending since Akshay's Dec 15 wireframe submission. Their communication pattern shows collaborative but structured exchanges (2-3 emails/week), with Dobrochna providing strategic direction and Akshay handling implementation, though Akshay's Jan 8 request for a detailed agenda suggests he's seeking clarity on priorities. With the Feb product launch approaching, this meeting is critical to unblock the design approval bottleneck and align on the final feature set."
+
+BAD EXAMPLE (too generic):
+"This meeting is about discussing the Kordn8 project status. Team members will review recent progress and align on next steps. The attendees will discuss priorities and make decisions."
+
+OUTPUT: Write 3-4 sentences following the structure above, using SPECIFIC details from the analysis to create a strategic briefing that would prepare someone to walk into this meeting with full context.`,
+            {
+                meeting: {
+                    title: meeting.summary,
+                    description: meeting.description || '',
+                    startTime: meeting.start?.dateTime || meeting.start?.date || ''
+                },
+                attendees: brief.attendees.map(a => ({
+                    name: a.name,
+                    title: a.title,
+                    company: a.company,
+                    keyFacts: a.keyFacts?.slice(0, 3) || []
+                })),
+                emailAnalysis: emailAnalysis?.substring(0, 2000) || 'No email context available',
+                documentAnalysis: documentAnalysis?.substring(0, 2000) || 'No document analysis available',
+                companyResearch: companyResearch?.substring(0, 1500) || 'No company research available',
+                relationshipAnalysis: relationshipAnalysis?.substring(0, 2000) || 'No relationship analysis available',
+                recentTimeline: limitedTimeline.slice(0, 8).map(t => ({
+                    date: t.date,
+                    type: t.type,
+                    description: t.description
+                })),
+                topRecommendations: parsedRecommendations.slice(0, 3)
+            },
+            600
+        );
+
+        console.log(`  ✓ Executive summary: ${brief.summary?.length || 0} chars`);
+
         // Assemble comprehensive brief
         brief.emailAnalysis = emailAnalysis;
         brief.documentAnalysis = documentAnalysis;
@@ -1533,7 +1584,7 @@ BAD EXAMPLES (do NOT generate):
         brief.recommendations = parsedRecommendations;
         brief.actionItems = parsedActionItems;
 
-        console.log(`✓ Comprehensive brief generated with ${brief.attendees.length} attendees`);
+        console.log(`\n✅ Comprehensive brief generated with ${brief.attendees.length} attendees, ${limitedTimeline.length} timeline events`);
         res.json(brief);
 
     } catch (error) {
