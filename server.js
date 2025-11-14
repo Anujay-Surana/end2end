@@ -493,10 +493,13 @@ app.post('/api/prep-meeting', async (req, res) => {
             const attendeeEmails = attendees.map(a => a.email).filter(Boolean);
             const domains = [...new Set(attendeeEmails.map(e => e.split('@')[1]))];
 
-            // Calculate date range (6 months ago)
-            const sixMonthsAgo = new Date();
-            sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-            const afterDate = sixMonthsAgo.toISOString().split('T')[0].replace(/-/g, '/');
+            // CHANGE: Go back 2 YEARS (not 6 months) to get full relationship history
+            // Working relationships can span years, and we need that context
+            const twoYearsAgo = new Date();
+            twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+            const afterDate = twoYearsAgo.toISOString().split('T')[0].replace(/-/g, '/');
+
+            console.log(`  📅 Fetching context from the past 2 years (since ${afterDate})`);
 
             // Build enhanced Gmail query
             const attendeeQueries = attendeeEmails.map(email => `from:${email} OR to:${email}`).join(' OR ');
@@ -514,14 +517,14 @@ app.post('/api/prep-meeting', async (req, res) => {
             emails = await fetchGmailMessages(accessToken, gmailQuery, 100);
             console.log(`  ✓ Fetched ${emails.length} emails`);
 
-            // Build enhanced Drive query
+            // Build enhanced Drive query (also 2 years back)
             const permQueries = attendeeEmails.map(email => `'${email}' in readers or '${email}' in writers`).join(' or ');
-            const permQuery = `(${permQueries}) and modifiedTime > '${sixMonthsAgo.toISOString()}'`;
+            const permQuery = `(${permQueries}) and modifiedTime > '${twoYearsAgo.toISOString()}'`;
 
             let nameQuery = '';
             if (keywords.length > 0) {
                 const nameKeywords = keywords.slice(0, 3).map(k => `name contains '${k}'`).join(' or ');
-                nameQuery = `(${nameKeywords}) and modifiedTime > '${sixMonthsAgo.toISOString()}'`;
+                nameQuery = `(${nameKeywords}) and modifiedTime > '${twoYearsAgo.toISOString()}'`;
             }
 
             console.log(`  📁 Fetching Drive files with enhanced queries...`);
@@ -553,60 +556,70 @@ app.post('/api/prep-meeting', async (req, res) => {
 
         // Research attendees - prioritize local context, then web
         const attendeePromises = attendees.slice(0, 6).map(async (att) => {
-            let name = att.displayName || att.email.split('@')[0];
             const domain = att.email.split('@')[1];
             const company = domain.split('.')[0];
 
             // Skip resource calendars (conference rooms)
             if (att.email.includes('@resource.calendar.google.com')) {
-                console.log(`  ⏭️  Skipping resource calendar: ${name}`);
+                console.log(`  ⏭️  Skipping resource calendar: ${att.displayName || att.email}`);
                 return null;
             }
 
+            // STEP 1: Determine best name to use (prioritize: Calendar displayName → Email From header → Email username)
+            let name = att.displayName || att.email.split('@')[0];
+
             console.log(`  🔍 Researching: ${name} (${att.email})`);
+            console.log(`    📋 Calendar display name: ${att.displayName || 'Not provided'}`);
 
             let keyFacts = [];
             let title = company;
             let source = 'local'; // Track data source
 
-            // STEP 1: Extract full name from email headers if available
+            // STEP 2: Extract full name from email headers if Calendar displayName wasn't provided or is incomplete
+            // CRITICAL: Only match emails FROM this specific attendee (not just mentioning them)
             const attendeeEmails = emails ? emails.filter(e =>
-                e.from?.toLowerCase().includes(att.email.toLowerCase()) ||
-                e.snippet?.toLowerCase().includes(name.toLowerCase())
+                e.from?.toLowerCase().includes(att.email.toLowerCase())
             ) : [];
 
             // Try to extract full name from "From" header (format: "Full Name <email@domain.com>")
-            if (attendeeEmails.length > 0) {
+            if (attendeeEmails.length > 0 && (!att.displayName || !att.displayName.includes(' '))) {
                 const fromHeader = attendeeEmails[0].from;
                 const nameMatch = fromHeader?.match(/^([^<]+)(?=\s*<)/);
                 if (nameMatch && nameMatch[1].trim()) {
                     const extractedName = nameMatch[1].trim().replace(/"/g, '');
                     // Only use if it's a proper full name (has space or is longer than original)
                     if (extractedName.includes(' ') || extractedName.length > name.length) {
-                        console.log(`    📛 Extracted full name from email: "${extractedName}" (was: "${name}")`);
+                        console.log(`    📛 Extracted full name from email: "${extractedName}" (was: "${name}") [from: ${att.email}]`);
                         name = extractedName;
                     }
                 }
+            } else if (att.displayName && att.displayName.includes(' ')) {
+                console.log(`    ✓ Using Calendar display name: "${att.displayName}"`);
             }
 
             if (attendeeEmails.length > 0) {
                 console.log(`    📧 Found ${attendeeEmails.length} emails from ${name}`);
                 const localSynthesis = await synthesizeResults(
-                    `Extract key professional information about ${name} (${att.email}) from these emails for meeting "${meeting.summary}".
+                    `Analyze emails from ${name} (${att.email}) to extract key professional context for meeting "${meeting.summary}".
 
-Focus on:
-- Their role or title if mentioned
-- Projects or work they're involved in
-- Expertise areas or responsibilities
-- Any context relevant to this meeting
+Extract and prioritize:
+1. **Working relationship**: How do they work with the meeting organizer? Collaborative history? Decision authority?
+2. **Current projects/progress**: What are they working on? What's the status? Any blockers or recent wins?
+3. **Role and expertise**: Their position, responsibilities, areas of expertise
+4. **Meeting-specific context**: References to agenda items, questions asked, documents shared
+5. **Communication style**: Do they prefer details or summaries? Direct or diplomatic?
 
-Return ONLY a JSON array of 2-4 specific facts. Only include facts directly stated in the emails.
+Return ONLY a JSON array of 3-6 specific, actionable facts. Include dates/specifics when available.
 
-Example: ["Leading the Kordn8 MVP development mentioned in Nov 9 email", "Requested UBM agenda document for this meeting"]
+Examples:
+- "Working together on Kordn8 MVP for 3+ months based on Nov-Jan email threads"
+- "Blocked on UX design approval - mentioned in Dec 15 email, still unresolved as of Jan 10"
+- "Prefers detailed technical discussions - often asks follow-up questions in email threads"
+- "Requested agenda document for this meeting on Jan 8"
 
-If emails don't contain professional info, return empty array: []`,
-                    attendeeEmails.slice(0, 10),
-                    400
+If emails lack substantive professional context, return: []`,
+                    attendeeEmails.slice(0, 15),
+                    600
                 );
 
                 try {
@@ -651,16 +664,24 @@ If emails don't contain professional info, return empty array: []`,
 
             let relevantResults = [];
             if (searchResult.results && searchResult.results.length > 0) {
-                // CRITICAL: Filter results to ONLY include those that mention domain or company
-                // This prevents finding wrong people with the same name
+                // Filter results to include those mentioning company name (more lenient than exact domain)
+                // This allows LinkedIn profiles mentioning "Tonik" to match, not just "tonik.com"
+                const companyNameOnly = company.toLowerCase();
+
                 relevantResults = searchResult.results.filter(r => {
                     const textToSearch = `${r.title || ''} ${r.excerpt || ''} ${r.url || ''} ${(r.excerpts || []).join(' ')}`.toLowerCase();
-                    const mentionsDomain = textToSearch.includes(domain.toLowerCase());
-                    const mentionsCompany = textToSearch.includes(company.toLowerCase());
-                    return mentionsDomain || mentionsCompany;
+
+                    // Check company name (lenient - partial match OK)
+                    const mentionsCompany = textToSearch.includes(companyNameOnly);
+
+                    // Also check if URL contains company name or LinkedIn profile pattern
+                    const urlHasCompany = r.url?.toLowerCase().includes(companyNameOnly);
+                    const isLinkedInProfile = r.url?.includes('linkedin.com/in/') || r.url?.includes('linkedin.com/company/');
+
+                    return mentionsCompany || (urlHasCompany && isLinkedInProfile);
                 });
 
-                console.log(`    🔍 Filtered to ${relevantResults.length}/${searchResult.results.length} results mentioning ${domain} or ${company}`);
+                console.log(`    🔍 Filtered to ${relevantResults.length}/${searchResult.results.length} results mentioning ${company}`);
 
                 if (relevantResults.length > 0) {
                     // Extract info from filtered results
@@ -668,7 +689,7 @@ If emails don't contain professional info, return empty array: []`,
                         role: 'system',
                         content: `Extract 2-4 professional facts about ${name} from ${company} (${att.email}).
 
-These results have been pre-filtered to mention ${domain} or ${company}, so they should be about the correct person.
+These results have been pre-filtered to mention ${company}, so they should be about the correct person.
 
 Return JSON array: ["fact 1", "fact 2", ...]
 
@@ -763,22 +784,33 @@ Be specific and informative. Focus on what matters for preparation.`,
         if (emails && emails.length > 0) {
             console.log(`  📊 Performing deep email analysis on ${emails.length} emails...`);
 
-            // CRITICAL: Filter emails to ONLY those directly relevant to THIS meeting
-            // Exclude: newsletters, event announcements, generic updates, unrelated topics
+            // Filter emails to those relevant to THIS meeting with BALANCED approach
+            // Goal: Include useful business context while excluding obvious spam/newsletters
             const relevanceCheck = await callGPT([{
                 role: 'system',
                 content: `You are filtering emails for meeting prep. Meeting: "${meeting.summary}"
 
-STRICT FILTERING RULES:
-1. ONLY include emails that directly relate to THIS specific meeting's topic and attendees
-2. EXCLUDE: newsletters, event announcements, product updates, webinars, social events
-3. EXCLUDE: emails that just happen to be from the same company/domain
-4. INCLUDE: direct correspondence with attendees, shared documents, meeting planning, topic discussion
+BALANCED FILTERING GUIDELINES:
+✅ INCLUDE most emails EXCEPT obvious spam:
+- Direct correspondence with attendees (discussions, questions, updates)
+- Shared documents, links, or attachments related to work
+- Meeting planning, scheduling, or follow-ups
+- Project updates, progress reports, or status emails
+- General business correspondence that provides relationship context
+- Emails discussing companies, products, or topics relevant to attendees
 
-Return JSON array of email indices (0-based) that are DIRECTLY relevant:
+❌ EXCLUDE only obvious spam/irrelevant:
+- Marketing newsletters and promotional emails
+- Event announcements for webinars/conferences
+- Automated notifications (calendar, system alerts)
+- Social event invitations unrelated to work
+
+IMPORTANT: When in doubt, INCLUDE the email. Business context is valuable even if not directly about this specific meeting.
+
+Return JSON array of email indices (0-based) that should be INCLUDED:
 {"relevant_indices": [0, 3, 7, ...]}
 
-If NONE are directly relevant, return: {"relevant_indices": []}`
+Be generous - aim to include 50-70% of emails unless they're clearly spam.`
             }, {
                 role: 'user',
                 content: `Emails to filter:\n${emails.slice(0, 20).map((e, i) => `[${i}] Subject: ${e.subject}\nFrom: ${e.from}\nSnippet: ${e.snippet.substring(0, 200)}`).join('\n\n')}`
@@ -795,6 +827,12 @@ If NONE are directly relevant, return: {"relevant_indices": []}`
 
             console.log(`  🔍 Filtered to ${relevantIndices.length}/${Math.min(emails.length, 20)} relevant emails`);
 
+            // FALLBACK: If filter rejected everything, use most recent emails as context
+            if (relevantIndices.length === 0) {
+                console.log(`  ⚠️  All emails filtered out - using fallback (10 most recent emails for context)`);
+                relevantIndices = emails.slice(0, 10).map((_, i) => i);
+            }
+
             if (relevantIndices.length === 0) {
                 emailAnalysis = `No email threads found directly related to "${meeting.summary}". Email activity exists but appears to be general correspondence rather than meeting-specific discussion.`;
             } else {
@@ -803,46 +841,67 @@ If NONE are directly relevant, return: {"relevant_indices": []}`
                 // PASS 1: Extract key topics, decisions, and action items from RELEVANT emails only
                 const topicsExtraction = await callGPT([{
                     role: 'system',
-                    content: `Extract ALL key topics, decisions, action items, and important context from these emails related to meeting "${meeting.summary}".
+                    content: `Deeply analyze these emails to extract ALL relevant context for meeting "${meeting.summary}".
 
-Return a detailed JSON object with:
+CRITICAL: Focus on RELATIONSHIPS, PROGRESS, and BLOCKERS - not just topics.
+
+Return a detailed JSON object:
 {
-  "topics": ["topic 1", "topic 2", ...],
-  "decisions": ["decision 1", "decision 2", ...],
-  "actionItems": ["action 1", "action 2", ...],
-  "keyContext": ["context point 1", "context point 2", ...]
+  "workingRelationships": ["Who works with whom? What's the collaborative history? Authority/decision-making dynamics?"],
+  "projectProgress": ["What's been accomplished? Current status? Timeline mentions? Milestones?"],
+  "blockers": ["What's blocking progress? Unresolved questions? Pending decisions? Dependencies?"],
+  "decisions": ["What decisions have been made? By whom? When? What's their impact?"],
+  "actionItems": ["Who needs to do what? By when? What's the current status?"],
+  "topics": ["Main discussion topics, agenda items, key themes"],
+  "keyContext": ["Other important context: document references, past meetings, external dependencies"]
 }
 
-Be thorough - extract EVERYTHING relevant. Each point should be specific (15-60 words).`
+Be THOROUGH and SPECIFIC:
+- Include names, dates, and document references
+- Note who said what and when
+- Identify patterns across multiple emails
+- Extract both explicit statements and implicit context
+- Each point should be 15-80 words with concrete details
+
+Even "routine" business emails reveal working relationships and progress - extract that value!`
                 }, {
                     role: 'user',
                     content: `Emails:\n${relevantEmails.map(e => `Subject: ${e.subject}\nFrom: ${e.from}\nDate: ${e.date}\nBody: ${(e.body || e.snippet).substring(0, 1000)}`).join('\n\n---\n\n')}`
                 }], 1200);
 
-            let extractedData = { topics: [], decisions: [], actionItems: [], keyContext: [] };
+            let extractedData = { workingRelationships: [], projectProgress: [], blockers: [], decisions: [], actionItems: [], topics: [], keyContext: [] };
             try {
                 extractedData = JSON.parse(topicsExtraction.replace(/```json/g, '').replace(/```/g, '').trim());
             } catch (e) {
                 console.log(`  ⚠️  Failed to parse topics extraction, continuing...`);
             }
 
-            // PASS 2: Synthesize into narrative
+            // PASS 2: Synthesize into narrative focused on working relationships and progress
             const emailSummary = await callGPT([{
                 role: 'system',
-                content: `You are creating a comprehensive email analysis section for meeting prep. Synthesize the extracted data into a detailed, informative paragraph (6-10 sentences).
+                content: `You are creating a comprehensive email analysis for meeting prep. Synthesize the extracted data into a detailed, insightful paragraph (8-12 sentences).
 
 Extracted Data:
 ${JSON.stringify(extractedData, null, 2)}
 
-Guidelines:
-- Start with the MOST important context
-- Include specific details: names, dates, document references, numbers
-- Quote or paraphrase key email content
-- Connect related points to show the narrative
-- Be specific and concrete - avoid vague statements
-- Focus on insights that will help in the meeting
+CRITICAL PRIORITIES (in order):
+1. **Working Relationships**: Start with HOW people work together - collaborative history, communication patterns, decision dynamics
+2. **Progress & Status**: What's been accomplished? What's the current state? Include timeline context
+3. **Blockers & Issues**: What's preventing progress? Unresolved questions? Pending decisions?
+4. **Decisions & Actions**: What's been decided? Who needs to do what?
+5. **Context**: Documents, past meetings, external factors
 
-Write as if briefing an executive before a critical meeting. Every sentence should add value.`
+Guidelines:
+- Write as if briefing an executive before a critical meeting
+- Be SPECIFIC: include names, dates, document names, numbers
+- Connect dots: show cause-effect, before-after, who-said-what
+- Avoid generic statements like "team is working on X" - say HOW and WHY
+- If data is sparse, acknowledge it but extract maximum value from what exists
+- Every sentence must add actionable insight
+
+Example tone: "Dobrochna and Akshay have been collaborating on the Kordn8 MVP since November, with Dobrochna leading product strategy and Akshay handling technical implementation (based on 12 email threads Nov-Jan). Progress has accelerated in January with completion of the authentication module, but UX design remains blocked pending Dobrochna's approval on wireframes sent Dec 15. The team requested a detailed agenda for this meeting on Jan 8, suggesting they're seeking clarity on next priorities..."
+
+DO NOT write generic summaries. Extract and synthesize REAL working context.`
             }, {
                 role: 'user',
                 content: `Meeting: ${meeting.summary}\n\nCreate comprehensive email analysis paragraph.`
@@ -1011,6 +1070,165 @@ Write as if briefing an executive on critical company intelligence before a high
             companyResearch = 'No company context available - no emails or documents to analyze.';
         }
 
+        // ============================================================================
+        // RELATIONSHIP ANALYSIS - Synthesize ALL context to understand working dynamics
+        // ============================================================================
+        console.log(`  🤝 Analyzing working relationships between attendees...`);
+        let relationshipAnalysis = '';
+
+        if (emails && emails.length > 0) {
+            // Synthesize relationship dynamics using ALL gathered context
+            const relationshipPrompt = `You are analyzing the working relationships between meeting attendees for: "${meeting.summary}"
+
+You have access to ALL gathered context:
+
+ATTENDEES:
+${brief.attendees.map(a => `- ${a.name} (${a.email})${a.role ? ` - ${a.role}` : ''}
+  Key facts: ${a.keyFacts.join('; ') || 'None gathered'}`).join('\n')}
+
+EMAIL ANALYSIS (${emails.length} emails analyzed):
+${emailAnalysis}
+
+DOCUMENT ANALYSIS (${files ? files.length : 0} documents):
+${documentAnalysis}
+
+COMPANY CONTEXT:
+${companyResearch}
+
+Your task is to deeply analyze the WORKING RELATIONSHIPS between these people. Answer these critical questions:
+
+1. **How do they know each other?**
+   - What's their collaborative history? How long have they been working together?
+   - What projects have they collaborated on?
+   - Include specific dates, email references, document mentions
+
+2. **What is their working dynamic?**
+   - Who makes decisions? Who implements? Who advises?
+   - Communication patterns: formal/informal, responsive/delayed, detailed/brief
+   - Trust level and rapport based on email tone and content
+
+3. **What are the power dynamics?**
+   - Who has authority? Who reports to whom (if apparent)?
+   - Who drives the agenda? Whose opinion carries weight?
+   - Any signs of organizational hierarchy or peer relationships?
+
+4. **Are there any unresolved issues or tensions?**
+   - Pending decisions that affect their relationship?
+   - Blockers or dependencies between them?
+   - Disagreements or different perspectives mentioned?
+   - Outstanding questions or concerns from either party?
+
+Write a comprehensive 8-12 sentence analysis that synthesizes ALL the context above. Be SPECIFIC:
+- Reference actual emails with dates/subjects when possible
+- Mention specific documents they've collaborated on
+- Quote or paraphrase key exchanges that reveal dynamics
+- Connect dots across multiple data points
+- If data is limited, acknowledge it but extract maximum insight
+
+Example tone:
+"Based on 15 email threads spanning November 2024 to January 2025, Dobrochna and Akshay have an active working relationship centered on the Kordn8 MVP project. Dobrochna appears to be in a leadership/decision-making role (requested detailed agenda Dec 15, approved wireframes Jan 3), while Akshay handles technical implementation (shared 'MVP Functions Detailed Report' Nov 9, sent build updates Dec 20). Their communication is collaborative and frequent (2-3 emails per week), with Akshay proactively sharing progress and Dobrochna providing strategic direction. However, there's a pending blocker: UX design approval has been delayed since Akshay's Dec 15 wireframe submission, with no response as of Jan 10 - this may be a discussion point for the meeting. The 'Short Term User Stickiness' document (Dec 8) shows shared concern about retention, suggesting aligned priorities. Email tone is professional but warm, indicating established rapport. No significant tensions evident, though Akshay's Jan 8 request for a detailed agenda suggests he prefers structure and clarity..."
+
+Write as if briefing someone before a critical meeting where understanding the relationship dynamics could make the difference between success and failure.`;
+
+            relationshipAnalysis = await synthesizeResults([{
+                role: 'system',
+                content: relationshipPrompt
+            }, {
+                role: 'user',
+                content: `Analyze the relationships for meeting: ${meeting.summary}`
+            }], null, 1200);
+
+            relationshipAnalysis = relationshipAnalysis?.trim() || 'Insufficient context to analyze working relationships. More email history or documents needed.';
+            console.log(`  ✓ Relationship analysis: ${relationshipAnalysis.length} chars`);
+        } else {
+            relationshipAnalysis = 'No relationship context available - no email history found to analyze working dynamics.';
+        }
+
+        // ============================================================================
+        // TIMELINE BUILDING - Extract all interactions chronologically
+        // ============================================================================
+        console.log(`  📅 Building interaction timeline...`);
+        const timeline = [];
+
+        // Extract email events
+        if (emails && emails.length > 0) {
+            emails.forEach(email => {
+                const emailDate = email.date ? new Date(email.date) : null;
+                if (emailDate && !isNaN(emailDate.getTime())) {
+                    // Extract participants from email
+                    const participants = [];
+                    if (email.from) {
+                        const fromMatch = email.from.match(/^([^<]+)(?=\s*<)|^([^@]+@[^>]+)$/);
+                        if (fromMatch) {
+                            participants.push(fromMatch[1]?.trim().replace(/"/g, '') || fromMatch[2]?.trim() || email.from);
+                        }
+                    }
+
+                    timeline.push({
+                        type: 'email',
+                        date: emailDate.toISOString(),
+                        timestamp: emailDate.getTime(),
+                        subject: email.subject || 'No subject',
+                        participants: participants,
+                        snippet: email.snippet?.substring(0, 150) || ''
+                    });
+                }
+            });
+            console.log(`    ✓ Added ${emails.length} email events to timeline`);
+        }
+
+        // Extract document events
+        if (files && files.length > 0) {
+            files.forEach(file => {
+                // Use modified time (most recent interaction)
+                const modifiedDate = file.modifiedTime ? new Date(file.modifiedTime) : null;
+                if (modifiedDate && !isNaN(modifiedDate.getTime())) {
+                    const owners = [];
+                    if (file.owners && file.owners.length > 0) {
+                        owners.push(...file.owners.map(o => o.displayName || o.emailAddress || 'Unknown'));
+                    }
+
+                    timeline.push({
+                        type: 'document',
+                        date: modifiedDate.toISOString(),
+                        timestamp: modifiedDate.getTime(),
+                        name: file.name || 'Unnamed document',
+                        participants: owners,
+                        action: 'modified',
+                        mimeType: file.mimeType
+                    });
+                }
+
+                // Also add creation time if different and available
+                const createdDate = file.createdTime ? new Date(file.createdTime) : null;
+                if (createdDate && !isNaN(createdDate.getTime()) &&
+                    createdDate.getTime() !== modifiedDate?.getTime()) {
+                    const owners = [];
+                    if (file.owners && file.owners.length > 0) {
+                        owners.push(...file.owners.map(o => o.displayName || o.emailAddress || 'Unknown'));
+                    }
+
+                    timeline.push({
+                        type: 'document',
+                        date: createdDate.toISOString(),
+                        timestamp: createdDate.getTime(),
+                        name: file.name || 'Unnamed document',
+                        participants: owners,
+                        action: 'created',
+                        mimeType: file.mimeType
+                    });
+                }
+            });
+            console.log(`    ✓ Added ${files.length} document events to timeline`);
+        }
+
+        // Sort by timestamp (most recent first)
+        timeline.sort((a, b) => b.timestamp - a.timestamp);
+
+        // Limit to 100 most recent events
+        const limitedTimeline = timeline.slice(0, 100);
+        console.log(`  ✓ Timeline built: ${limitedTimeline.length} events (sorted by most recent)`);
+
         // Generate strategic recommendations - deeply contextualized
         console.log(`  💡 Generating meeting-specific recommendations...`);
         const recommendations = await synthesizeResults(
@@ -1124,6 +1342,8 @@ Return ONLY a JSON array of 4-6 action items. Each should demonstrate understand
         brief.emailAnalysis = emailAnalysis;
         brief.documentAnalysis = documentAnalysis;
         brief.companyResearch = companyResearch;
+        brief.relationshipAnalysis = relationshipAnalysis;
+        brief.timeline = limitedTimeline;
         brief.recommendations = parsedRecommendations;
         brief.actionItems = parsedActionItems;
 
@@ -1434,11 +1654,20 @@ wss.on('connection', (ws) => {
             // Interactive Prep: Initialize
             else if (data.type === 'interactive_prep_init') {
                 console.log('💬 Interactive prep initialized');
+
+                // Clear any existing interactive mode state (prevents cross-meeting contamination)
+                if (ws.interactiveDeepgram) {
+                    ws.interactiveDeepgram.finish();
+                }
+
+                // Set new context
                 ws.interactivePrepContext = data.meetingBrief;
                 ws.isInteractiveMode = true;
                 ws.interactiveConversation = [];
                 ws.interactiveDeepgram = null;
                 ws.interactiveVoiceBuffer = '';
+
+                console.log(`   📝 Meeting context: ${data.meetingBrief?.summary?.substring(0, 50) || 'Unknown'}`);
             }
 
             // Interactive Prep: Text message
@@ -1656,6 +1885,12 @@ wss.on('connection', (ws) => {
             ws.interactiveDeepgram.finish();
             ws.interactiveDeepgram = null;
         }
+
+        // CRITICAL: Clear interactive prep context to prevent data leakage
+        ws.interactivePrepContext = null;
+        ws.isInteractiveMode = false;
+        ws.interactiveConversation = [];
+        ws.interactiveVoiceBuffer = '';
 
         stopKeepAlive();
     });

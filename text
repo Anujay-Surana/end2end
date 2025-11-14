@@ -1,0 +1,60 @@
+  GET  /health                - Health check
+
+
+📋 Preparing brief for: Finn <> Kordn8
+  🔑 Extracted keywords: finn, kordn8
+  📧 Fetching emails with enhanced query...
+  📧 Gmail query: (from:akshay@kordn8.ai OR to:akshay@kordn8.ai OR from:anujay@kordn8.ai OR to:anujay@kordn8.ai OR from:finn@southparkcommons.com OR to:finn@southparkco...
+  ✓ Found 100 message IDs
+  ✓ Fetched 30 full messages
+  ✓ Fetched 30 emails
+  📁 Fetching Drive files with enhanced queries...
+  📁 Drive query: ('akshay@kordn8.ai' in readers or 'akshay@kordn8.ai' in writers or 'anujay@kordn8.ai' in readers or 'anujay@kordn8.ai' in writers or 'finn@southparkco...
+  📁 Drive query: (name contains 'finn' or name contains 'kordn8') and modifiedTime > '2025-05-13T23:58:06.735Z'...
+  ✓ Found 7 Drive files
+  ✓ Found 15 Drive files
+  ✓ Fetched 15 unique Drive files (15 from permissions, 7 from keywords)
+  📄 Fetching content for top 5 files...
+  ✓ Fetched content for 5 files
+  🔍 Researching: akshay (akshay@kordn8.ai)
+    🌐 Performing web search...
+    🔎 Search queries: "akshay" site:linkedin.com kordn8.ai | "akshay" kordn8 site:linkedin.com | "akshay" "akshay@kordn8.ai"
+  🔍 Researching: anujay (anujay@kordn8.ai)
+    🌐 Performing web search...
+    🔎 Search queries: "anujay" site:linkedin.com kordn8.ai | "anujay" kordn8 site:linkedin.com | "anujay" "anujay@kordn8.ai"
+  🔍 Researching: finn (finn@southparkcommons.com)
+    🌐 Performing web search...
+    🔎 Search queries: "finn" site:linkedin.com southparkcommons.com | "finn" southparkcommons site:linkedin.com | "finn" "finn@southparkcommons.com"
+  🔍 Researching: prateek (prateek@southparkcommons.com)
+    🌐 Performing web search...
+    🔎 Search queries: "prateek" site:linkedin.com southparkcommons.com | "prateek" southparkcommons site:linkedin.com | "prateek" "prateek@southparkcommons.com"
+    ✓ Found 5 web results
+    🔍 Filtered to 1/5 results mentioning kordn8
+    ✓ Found 8 web results
+    🔍 Filtered to 2/8 results mentioning southparkcommons
+    ✓ Found 8 web results
+    🔍 Filtered to 1/8 results mentioning kordn8
+    ✓ Found 8 web results
+    🔍 Filtered to 3/8 results mentioning southparkcommons
+    ⚠️  No usable facts from web results
+  ✓ anujay: 0 facts (source: local)
+    ✓ Added 4 facts from filtered web results
+  ✓ prateek: 4 facts (source: web)
+    ⚠️  No usable facts from web results
+  ✓ akshay: 0 facts (source: local)
+    ✓ Added 4 facts from filtered web results
+  ✓ finn: 4 facts (source: web)
+
+  📊 Generating meeting summary...
+  📧 Analyzing email threads for meeting context...
+  📊 Performing deep email analysis on 30 emails...
+  🔍 Filtered to 7/20 relevant emails
+  ✓ Email analysis: 1394 chars from 7 relevant emails
+  📄 Analyzing document content for meeting relevance...
+  📊 Deep analysis of 4 documents with content...
+  ✓ Document analysis: 1760 chars from 4 docs
+  🏢 Analyzing company intelligence from local sources...
+  📊 Extracting company intelligence from emails and documents...
+
+
+the context is not going back far enough it must go as far back as required. it should aslo get hte display name of the poeple from the people reuiqred to get better info

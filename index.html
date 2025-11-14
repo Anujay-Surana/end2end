@@ -1397,6 +1397,184 @@
             0%, 60%, 100% { transform: translateY(0); }
             30% { transform: translateY(-10px); }
         }
+
+        /* ===== TIMELINE STYLES ===== */
+        .timeline-container {
+            position: relative;
+            padding: 20px 0;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .timeline-line {
+            position: absolute;
+            left: 30px;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: linear-gradient(180deg, #4285f4 0%, #34a853 50%, #fbbc04 100%);
+            opacity: 0.3;
+        }
+
+        .timeline-event {
+            position: relative;
+            padding-left: 70px;
+            margin-bottom: 30px;
+            animation: slideIn 0.4s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .timeline-marker {
+            position: absolute;
+            left: 21px;
+            top: 8px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 0 0 2px #e0e0e0;
+            z-index: 10;
+        }
+
+        .timeline-marker.email {
+            background: #4285f4;
+        }
+
+        .timeline-marker.document {
+            background: #ea4335;
+        }
+
+        .timeline-marker.meeting {
+            background: #34a853;
+        }
+
+        .timeline-event.recent .timeline-marker {
+            box-shadow: 0 0 0 2px #34a853, 0 0 10px rgba(52, 168, 83, 0.4);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                box-shadow: 0 0 0 2px #34a853, 0 0 10px rgba(52, 168, 83, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 0 2px #34a853, 0 0 20px rgba(52, 168, 83, 0.6);
+            }
+        }
+
+        .timeline-content {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s;
+        }
+
+        .timeline-content:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .timeline-type-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .timeline-type-badge.email {
+            background: #e8f0fe;
+            color: #4285f4;
+        }
+
+        .timeline-type-badge.document {
+            background: #fce8e6;
+            color: #ea4335;
+        }
+
+        .timeline-type-badge.meeting {
+            background: #e6f4ea;
+            color: #34a853;
+        }
+
+        .timeline-date {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .timeline-title {
+            margin: 0 0 8px 0;
+            font-size: 15px;
+            font-weight: 600;
+            color: #333;
+            line-height: 1.4;
+        }
+
+        .timeline-participants {
+            margin: 4px 0;
+            font-size: 13px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .timeline-snippet {
+            margin: 8px 0 0 0;
+            font-size: 13px;
+            color: #555;
+            line-height: 1.5;
+            padding: 10px;
+            background: #f9f9f9;
+            border-left: 3px solid #4285f4;
+            border-radius: 4px;
+        }
+
+        .timeline-action {
+            margin: 4px 0;
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .timeline-recent-badge {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 4px 8px;
+            background: #34a853;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Relationship Analysis Styles */
+        .relationship-analysis {
+            line-height: 1.8;
+            font-size: 15px;
+        }
     </style>
 </head>
 <body>
@@ -2160,6 +2338,22 @@
             currentEmails = [];
             currentAttachments = [];
             currentFiles = [];
+
+            // CRITICAL: Clear prep data to prevent cross-meeting contamination
+            meetingBrief = null;
+            currentMeetingId = null;
+            interactiveBrief = null;
+
+            // Close and clear prep modal if open
+            const prepModal = document.getElementById('prepModal');
+            prepModal.classList.remove('visible');
+            document.getElementById('prepModalBody').innerHTML = '';
+
+            // Hide "Enter Meeting" button until new prep is generated
+            const enterMeetingBtn = document.getElementById('enterMeetingButton');
+            if (enterMeetingBtn) {
+                enterMeetingBtn.style.display = 'none';
+            }
 
             currentMeeting = allEvents[index];
             document.getElementById('eventsContainer').classList.remove('visible');
@@ -3128,6 +3322,13 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         }
 
         async function prepareForMeeting() {
+            // CRITICAL: Prevent concurrent prep requests
+            if (prepRequestInProgress) {
+                console.log('Prep request already in progress');
+                return;
+            }
+            prepRequestInProgress = true;
+
             const button = document.getElementById('prepMeButton');
             button.disabled = true;
             button.textContent = 'Preparing...';
@@ -3175,6 +3376,10 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 meetingBrief = brief;
                 currentMeetingId = meeting.id;
 
+                // Add metadata for validation
+                meetingBrief._meetingId = meeting.id;
+                meetingBrief._generatedAt = Date.now();
+
                 // Render the clean brief
                 renderModernBrief(brief, meeting);
 
@@ -3195,6 +3400,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             } finally {
                 button.disabled = false;
                 button.textContent = 'Prep Me';
+                prepRequestInProgress = false;
             }
         }
 
@@ -3220,6 +3426,8 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     <!-- Tab Navigation -->
                     <div class="brief-tabs">
                         <button class="brief-tab-button active" onclick="switchBriefTab('attendees')">Attendees</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('relationships')">Relationships</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('timeline')">Timeline</button>
                         <button class="brief-tab-button" onclick="switchBriefTab('emails')">Email Analysis</button>
                         <button class="brief-tab-button" onclick="switchBriefTab('documents')">Documents</button>
                         <button class="brief-tab-button" onclick="switchBriefTab('company')">Company Intel</button>
@@ -3251,6 +3459,75 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                                 `).join('')}
                             </div>
                         ` : '<p>No attendee information available.</p>'}
+                    </div>
+
+                    <!-- Tab: Relationships -->
+                    <div id="brief-tab-relationships" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>🤝 Working Relationship Dynamics</h3>
+                            ${brief.relationshipAnalysis ? `
+                                <p class="analysis-text relationship-analysis">${brief.relationshipAnalysis}</p>
+                            ` : '<p style="color: #888;">No relationship analysis available.</p>'}
+                        </div>
+                    </div>
+
+                    <!-- Tab: Timeline -->
+                    <div id="brief-tab-timeline" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>📅 Interaction Timeline</h3>
+                            ${brief.timeline && brief.timeline.length > 0 ? `
+                                <div class="timeline-container">
+                                    <div class="timeline-line"></div>
+                                    ${brief.timeline.map((event, idx) => {
+                                        const eventDate = new Date(event.date);
+                                        const now = new Date();
+                                        const daysAgo = Math.floor((now - eventDate) / (1000 * 60 * 60 * 24));
+                                        const isRecent = daysAgo <= 7;
+
+                                        // Format date
+                                        const dateStr = eventDate.toLocaleDateString('en-US', {
+                                            month: 'short',
+                                            day: 'numeric',
+                                            year: 'numeric'
+                                        });
+                                        const timeStr = eventDate.toLocaleTimeString('en-US', {
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                        });
+
+                                        return `
+                                            <div class="timeline-event ${event.type} ${isRecent ? 'recent' : ''}" data-index="${idx}">
+                                                <div class="timeline-marker ${event.type}"></div>
+                                                <div class="timeline-content">
+                                                    <div class="timeline-header">
+                                                        <span class="timeline-type-badge ${event.type}">
+                                                            ${event.type === 'email' ? '📧 Email' : event.type === 'document' ? '📄 Document' : '📅 Meeting'}
+                                                        </span>
+                                                        <span class="timeline-date">${dateStr} • ${timeStr}</span>
+                                                    </div>
+                                                    ${event.type === 'email' ? `
+                                                        <h4 class="timeline-title">${event.subject}</h4>
+                                                        ${event.participants && event.participants.length > 0 ? `
+                                                            <p class="timeline-participants">From: ${event.participants.join(', ')}</p>
+                                                        ` : ''}
+                                                        ${event.snippet ? `
+                                                            <p class="timeline-snippet">${event.snippet}</p>
+                                                        ` : ''}
+                                                    ` : event.type === 'document' ? `
+                                                        <h4 class="timeline-title">${event.name}</h4>
+                                                        <p class="timeline-action">${event.action === 'created' ? 'Created' : 'Modified'}</p>
+                                                        ${event.participants && event.participants.length > 0 ? `
+                                                            <p class="timeline-participants">By: ${event.participants.join(', ')}</p>
+                                                        ` : ''}
+                                                    ` : ''}
+                                                    ${isRecent ? '<span class="timeline-recent-badge">Recent</span>' : ''}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            ` : '<p style="color: #888;">No interaction history available.</p>'}
+                        </div>
                     </div>
 
                     <!-- Tab: Email Analysis -->
@@ -3684,6 +3961,9 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             meetingBrief = null;
             currentMeetingId = null;
 
+            // Clear DOM content to prevent stale data display
+            document.getElementById('prepModalBody').innerHTML = '';
+
             document.getElementById('prepModal').classList.remove('visible');
         }
 
@@ -3714,6 +3994,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         let mediaStream = null;
         let meetingBrief = null;
         let currentMeetingId = null;
+        let prepRequestInProgress = false;
 
         // Speaker mapping state
         let detectedSpeakers = new Set();
@@ -3723,6 +4004,25 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
         async function enterMeeting() {
             try {
+                // CRITICAL: Validate meeting context before entering
+                if (!currentMeeting) {
+                    alert('Please select a meeting first.');
+                    return;
+                }
+
+                if (!meetingBrief || !currentMeetingId) {
+                    alert('Please generate a meeting prep first by clicking "Prep Me".');
+                    return;
+                }
+
+                if (currentMeetingId !== currentMeeting.id) {
+                    alert('Meeting prep is out of sync. Please generate a new prep for this meeting.');
+                    meetingBrief = null;
+                    currentMeetingId = null;
+                    document.getElementById('enterMeetingButton').style.display = 'none';
+                    return;
+                }
+
                 // Check browser compatibility
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                     alert('Your browser does not support audio recording. Please use Chrome, Firefox, or Safari.');
