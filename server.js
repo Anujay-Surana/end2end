@@ -350,26 +350,41 @@ async function fetchGmailMessages(accessToken, query, maxResults = 100) {
             return [];
         }
 
-        // Step 2: Fetch full message details (top 30 for performance)
-        const fetchLimit = Math.min(messageIds.length, 30);
-        const messagePromises = messageIds.slice(0, fetchLimit).map(async (msg) => {
-            const msgResponse = await fetch(
-                `https://www.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
-                {
-                    headers: { 'Authorization': `Bearer ${accessToken}` }
+        // Step 2: Fetch full message details for ALL messages (no 30-message cap)
+        // Process in batches of 20 to avoid rate limits
+        console.log(`  📧 Fetching full details for ALL ${messageIds.length} messages (batches of 20)...`);
+        const allMessages = [];
+
+        for (let i = 0; i < messageIds.length; i += 20) {
+            const batch = messageIds.slice(i, i + 20);
+            console.log(`     Processing email batch ${Math.floor(i / 20) + 1}/${Math.ceil(messageIds.length / 20)} (${batch.length} emails)...`);
+
+            const batchPromises = batch.map(async (msg) => {
+                try {
+                    const msgResponse = await fetch(
+                        `https://www.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
+                        {
+                            headers: { 'Authorization': `Bearer ${accessToken}` }
+                        }
+                    );
+
+                    if (!msgResponse.ok) {
+                        return null;
+                    }
+
+                    return msgResponse.json();
+                } catch (error) {
+                    console.error(`  ⚠️  Error fetching message ${msg.id}:`, error.message);
+                    return null;
                 }
-            );
+            });
 
-            if (!msgResponse.ok) {
-                return null;
-            }
+            const batchMessages = (await Promise.all(batchPromises)).filter(Boolean);
+            allMessages.push(...batchMessages);
+        }
 
-            return msgResponse.json();
-        });
-
-        const messages = (await Promise.all(messagePromises)).filter(Boolean);
-
-        console.log(`  ✓ Fetched ${messages.length} full messages`);
+        const messages = allMessages;
+        console.log(`  ✓ Fetched ${messages.length}/${messageIds.length} full messages`);
 
         // Step 3: Parse and format messages
         return messages.map(msg => {
@@ -393,7 +408,7 @@ async function fetchGmailMessages(accessToken, query, maxResults = 100) {
                 to: getHeader('To'),
                 date: getHeader('Date'),
                 snippet: msg.snippet || '',
-                body: body.substring(0, 5000) // Limit body size
+                body: body.substring(0, 15000) // Increased from 5k to 15k chars per email
             };
         });
 
@@ -454,46 +469,68 @@ async function fetchDriveFiles(accessToken, query, maxResults = 50) {
 async function fetchDriveFileContents(accessToken, files) {
     const filesWithContent = [];
 
-    for (const file of files.slice(0, 5)) { // Limit to 5 files for performance
-        try {
-            let content = '';
+    // REMOVED CAP: Process ALL files found (no artificial 5-file limit)
+    // Process in batches of 10 to avoid timeouts, but fetch ALL files
+    console.log(`  📄 Fetching content for ALL ${files.length} files (processing in batches of 10)...`);
 
-            // Handle different file types
-            if (file.mimeType === 'application/vnd.google-apps.document') {
-                // Google Doc - export as plain text
-                const response = await fetch(
-                    `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain`,
-                    {
-                        headers: { 'Authorization': `Bearer ${accessToken}` }
-                    }
-                );
-                if (response.ok) {
-                    content = await response.text();
-                }
-            } else if (file.mimeType === 'application/pdf' || file.mimeType === 'text/plain') {
-                // PDF or text file - get binary content
-                const response = await fetch(
-                    `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-                    {
-                        headers: { 'Authorization': `Bearer ${accessToken}` }
-                    }
-                );
-                if (response.ok) {
-                    content = await response.text();
-                }
-            }
+    for (let i = 0; i < files.length; i += 10) {
+        const batch = files.slice(i, i + 10);
+        console.log(`     Processing batch ${Math.floor(i / 10) + 1}/${Math.ceil(files.length / 10)} (${batch.length} files)...`);
 
-            if (content) {
-                filesWithContent.push({
-                    ...file,
-                    content: content.substring(0, 20000) // Limit content size
-                });
+        // Process batch in parallel for speed
+        const batchResults = await Promise.allSettled(
+            batch.map(async (file) => {
+                try {
+                    let content = '';
+
+                    // Handle different file types
+                    if (file.mimeType === 'application/vnd.google-apps.document') {
+                        // Google Doc - export as plain text
+                        const response = await fetch(
+                            `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain`,
+                            {
+                                headers: { 'Authorization': `Bearer ${accessToken}` }
+                            }
+                        );
+                        if (response.ok) {
+                            content = await response.text();
+                        }
+                    } else if (file.mimeType === 'application/pdf' || file.mimeType === 'text/plain') {
+                        // PDF or text file - get binary content
+                        const response = await fetch(
+                            `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+                            {
+                                headers: { 'Authorization': `Bearer ${accessToken}` }
+                            }
+                        );
+                        if (response.ok) {
+                            content = await response.text();
+                        }
+                    }
+
+                    if (content) {
+                        return {
+                            ...file,
+                            content: content.substring(0, 50000) // Increased from 20k to 50k chars per file
+                        };
+                    }
+                    return null;
+                } catch (error) {
+                    console.error(`  ⚠️  Error fetching content for ${file.name}:`, error.message);
+                    return null;
+                }
+            })
+        );
+
+        // Collect successful results
+        batchResults.forEach(result => {
+            if (result.status === 'fulfilled' && result.value) {
+                filesWithContent.push(result.value);
             }
-        } catch (error) {
-            console.error(`  ⚠️  Error fetching content for ${file.name}:`, error.message);
-        }
+        });
     }
 
+    console.log(`  ✓ Successfully fetched content for ${filesWithContent.length}/${files.length} files`);
     return filesWithContent;
 }
 
@@ -553,36 +590,49 @@ app.post('/api/prep-meeting', async (req, res) => {
             const permQueries = attendeeEmails.map(email => `'${email}' in readers or '${email}' in writers`).join(' or ');
             const permQuery = `(${permQueries}) and modifiedTime > '${twoYearsAgo.toISOString()}'`;
 
+            // NEW: Domain-wide file query - fetch files owned/authored by ANYONE at attendee domains
+            // This captures team documents, company resources, and colleague files
+            const domainFileQueries = domains.map(d =>
+                `from:'${d}' and modifiedTime > '${twoYearsAgo.toISOString()}'`
+            ).join(' or ');
+            const domainQuery = domainFileQueries ? `(${domainFileQueries})` : '';
+
             let nameQuery = '';
             if (keywords.length > 0) {
-                const nameKeywords = keywords.slice(0, 3).map(k => `name contains '${k}'`).join(' or ');
+                const nameKeywords = keywords.map(k => `name contains '${k}'`).join(' or ');
                 nameQuery = `(${nameKeywords}) and modifiedTime > '${twoYearsAgo.toISOString()}'`;
             }
 
-            console.log(`  📁 Fetching Drive files with enhanced queries...`);
+            console.log(`  📁 Fetching Drive files with comprehensive domain-based queries...`);
+            console.log(`     - Attendee permission-based files`);
+            console.log(`     - Domain-wide files from: ${domains.join(', ')}`);
+            console.log(`     - Keyword-based files: ${keywords.slice(0, 5).join(', ')}`);
 
-            // Fetch both permission-based and name-based files in parallel
-            const [permFiles, nameFiles] = await Promise.all([
-                fetchDriveFiles(accessToken, permQuery, 50),
-                nameQuery ? fetchDriveFiles(accessToken, nameQuery, 30) : Promise.resolve([])
+            // Fetch permission-based, domain-wide, and keyword-based files in parallel
+            // REMOVED CAPS: Fetch up to 200 files per query type for comprehensive coverage
+            const [permFiles, domainFiles, nameFiles] = await Promise.all([
+                fetchDriveFiles(accessToken, permQuery, 200),
+                domainQuery ? fetchDriveFiles(accessToken, domainQuery, 200) : Promise.resolve([]),
+                nameQuery ? fetchDriveFiles(accessToken, nameQuery, 200) : Promise.resolve([])
             ]);
 
-            // Merge and deduplicate files by ID
+            // Merge and deduplicate files by ID - include domain files
             const fileMap = new Map();
-            [...permFiles, ...nameFiles].forEach(file => {
+            [...permFiles, ...domainFiles, ...nameFiles].forEach(file => {
                 if (!fileMap.has(file.id)) {
                     fileMap.set(file.id, file);
                 }
             });
             files = Array.from(fileMap.values());
 
-            console.log(`  ✓ Fetched ${files.length} unique Drive files (${permFiles.length} from permissions, ${nameFiles.length} from keywords)`);
+            console.log(`  ✓ Fetched ${files.length} unique Drive files`);
+            console.log(`     - ${permFiles.length} from attendee permissions`);
+            console.log(`     - ${domainFiles.length} from domain-wide search`);
+            console.log(`     - ${nameFiles.length} from keyword matching`);
 
-            // Fetch file contents
+            // Fetch file contents for ALL files (no caps)
             if (files.length > 0) {
-                console.log(`  📄 Fetching content for top ${Math.min(files.length, 5)} files...`);
                 files = await fetchDriveFileContents(accessToken, files);
-                console.log(`  ✓ Fetched content for ${files.length} files`);
             }
         }
 
@@ -827,54 +877,73 @@ Be specific and informative. Focus on what matters for preparation.`,
         if (emails && emails.length > 0) {
             console.log(`  📊 Performing deep email analysis on ${emails.length} emails...`);
 
-            // Filter emails to those relevant to THIS meeting with BALANCED approach
-            // Goal: Include useful business context while excluding obvious spam/newsletters
-            const relevanceCheck = await callGPT([{
-                role: 'system',
-                content: `You are filtering emails for meeting prep. Meeting: "${meeting.summary}"
+            // Filter emails to those relevant to THIS meeting - COMPREHENSIVE approach
+            // Goal: Include ALL useful business context, no artificial time constraints
+            console.log(`  🔍 Filtering ${emails.length} emails for meeting relevance (processing in batches of 50)...`);
 
-SELECTIVE FILTERING - Only include emails with DIRECT relevance to this specific meeting.
+            let allRelevantIndices = [];
 
-✅ INCLUDE ONLY IF:
-1. **Direct meeting relevance**: Email explicitly discusses this meeting's topic, agenda, or objectives
-2. **Direct attendee correspondence**: Recent (last 90 days) direct exchanges with meeting attendees about relevant work topics
-3. **Shared meeting materials**: Documents, slides, or resources explicitly for this meeting
-4. **Project context**: Updates about projects/initiatives that are the PRIMARY focus of this meeting
-5. **Recent decisions**: Decisions made in last 30 days that directly impact this meeting's agenda
+            // Process emails in batches of 50 for relevance checking
+            for (let batchStart = 0; batchStart < emails.length; batchStart += 50) {
+                const batchEnd = Math.min(batchStart + 50, emails.length);
+                const batchEmails = emails.slice(batchStart, batchEnd);
 
-❌ EXCLUDE:
-- Generic project updates not specific to this meeting's focus
-- Old emails (>90 days) unless they contain critical historical decisions
-- Marketing newsletters, promotional emails, event announcements
-- Automated notifications (calendar, system alerts, CI/CD reports)
-- Social/casual correspondence unrelated to meeting topic
-- General business correspondence that doesn't relate to meeting objectives
-- Emails that only tangentially mention attendees or topics
+                console.log(`     Relevance check batch ${Math.floor(batchStart / 50) + 1}/${Math.ceil(emails.length / 50)} (${batchEmails.length} emails)...`);
 
-QUALITY OVER QUANTITY:
-- Target 20-30% inclusion rate (only the most relevant emails)
-- When in doubt, EXCLUDE - irrelevant context is worse than missing context
-- Each included email should add specific, actionable context for THIS meeting
+                const relevanceCheck = await callGPT([{
+                    role: 'system',
+                    content: `You are filtering emails for meeting prep. Meeting: "${meeting.summary}"
 
-Return JSON with email indices to INCLUDE:
+COMPREHENSIVE FILTERING - Include ALL emails with relevance to understanding the full context.
+
+✅ INCLUDE IF:
+1. **Direct meeting relevance**: Email discusses this meeting's topic, agenda, or objectives
+2. **Attendee correspondence**: Direct exchanges with meeting attendees about relevant work topics (NO TIME LIMIT - include historical context)
+3. **Shared materials**: Documents, slides, or resources related to meeting topics
+4. **Project context**: Updates about projects/initiatives related to this meeting
+5. **Historical decisions**: Past decisions that provide context (include old emails if relevant)
+6. **Working relationships**: Emails showing collaboration patterns between attendees
+7. **Domain knowledge**: Emails from attendee domains discussing relevant topics
+
+❌ EXCLUDE ONLY:
+- Obvious spam, marketing newsletters, promotional emails
+- Automated system notifications (CI/CD, calendar invites without content)
+- Completely unrelated topics from different work streams
+
+NO TIME CONSTRAINTS:
+- OLD emails (>90 days) ARE VALUABLE for historical context - include them if relevant
+- Focus on relevance to meeting topic, not recency
+- Historical decisions and foundational discussions are crucial
+
+COMPREHENSIVE OVER SELECTIVE:
+- Include 60-80% of emails (err on the side of inclusion)
+- When in doubt, INCLUDE - more context is better than missing context
+- Each email helps build the full story
+
+Return JSON with email indices to INCLUDE (relative to this batch):
 {"relevant_indices": [0, 3, 7, ...]}
 
-Example: For a "Q4 Budget Review" meeting, INCLUDE budget spreadsheets and Q4 spending updates, but EXCLUDE general project status emails unless they specifically discuss budget implications.`
-            }, {
-                role: 'user',
-                content: `Emails to filter:\n${emails.slice(0, 20).map((e, i) => `[${i}] Subject: ${e.subject}\nFrom: ${e.from}\nSnippet: ${e.snippet.substring(0, 200)}`).join('\n\n')}`
-            }], 800);
+Example: For a "Q4 Budget Review" meeting, INCLUDE budget discussions from ANY time period, project cost discussions, resource allocation emails, AND general project updates that might have budget implications.`
+                }, {
+                    role: 'user',
+                    content: `Emails to filter:\n${batchEmails.map((e, i) => `[${i}] Subject: ${e.subject}\nFrom: ${e.from}\nDate: ${e.date}\nSnippet: ${e.snippet.substring(0, 200)}`).join('\n\n')}`
+                }], 1000);
 
-            let relevantIndices = [];
-            try {
-                const parsed = safeParseJSON(relevanceCheck);
-                relevantIndices = parsed.relevant_indices || [];
-            } catch (e) {
-                console.log(`  ⚠️  Failed to parse relevance check, using all emails`);
-                relevantIndices = emails.slice(0, 20).map((_, i) => i);
+                let batchIndices = [];
+                try {
+                    const parsed = safeParseJSON(relevanceCheck);
+                    batchIndices = (parsed.relevant_indices || []).map(idx => batchStart + idx);
+                } catch (e) {
+                    console.log(`  ⚠️  Failed to parse relevance check for batch, including all batch emails`);
+                    batchIndices = batchEmails.map((_, i) => batchStart + i);
+                }
+
+                allRelevantIndices.push(...batchIndices);
+                console.log(`     ✓ Found ${batchIndices.length}/${batchEmails.length} relevant emails in this batch`);
             }
 
-            console.log(`  🔍 Filtered to ${relevantIndices.length}/${Math.min(emails.length, 20)} relevant emails`);
+            const relevantIndices = allRelevantIndices;
+            console.log(`  🔍 Total relevant emails: ${relevantIndices.length}/${emails.length}`);
 
             if (relevantIndices.length === 0) {
                 // No relevant emails found - use generic message
@@ -884,10 +953,20 @@ Example: For a "Q4 Budget Review" meeting, INCLUDE budget spreadsheets and Q4 sp
             } else {
                 relevantEmails = relevantIndices.map(i => emails[i]).filter(Boolean);
 
-                // PASS 1: Extract key topics, decisions, and action items from RELEVANT emails only
-                const topicsExtraction = await callGPT([{
-                    role: 'system',
-                    content: `Deeply analyze these emails to extract ALL relevant context for meeting "${meeting.summary}".
+                console.log(`  📊 Extracting context from ${relevantEmails.length} relevant emails (processing in batches of 20)...`);
+
+                // PASS 1: Extract key topics, decisions, and action items - BATCH PROCESSING for unlimited emails
+                let allExtractedData = [];
+
+                for (let batchStart = 0; batchStart < relevantEmails.length; batchStart += 20) {
+                    const batchEnd = Math.min(batchStart + 20, relevantEmails.length);
+                    const batchEmails = relevantEmails.slice(batchStart, batchEnd);
+
+                    console.log(`     Context extraction batch ${Math.floor(batchStart / 20) + 1}/${Math.ceil(relevantEmails.length / 20)} (${batchEmails.length} emails)...`);
+
+                    const topicsExtraction = await callGPT([{
+                        role: 'system',
+                        content: `Deeply analyze these emails to extract ALL relevant context for meeting "${meeting.summary}".
 
 CRITICAL: Focus on RELATIONSHIPS, PROGRESS, and BLOCKERS - not just topics.
 
@@ -910,17 +989,41 @@ Be THOROUGH and SPECIFIC:
 - Each point should be 15-80 words with concrete details
 
 Even "routine" business emails reveal working relationships and progress - extract that value!`
-                }, {
-                    role: 'user',
-                    content: `Emails:\n${relevantEmails.map(e => `Subject: ${e.subject}\nFrom: ${e.from}\nDate: ${e.date}\nBody: ${(e.body || e.snippet).substring(0, 1000)}`).join('\n\n---\n\n')}`
-                }], 1200);
+                    }, {
+                        role: 'user',
+                        content: `Emails:\n${batchEmails.map(e => `Subject: ${e.subject}\nFrom: ${e.from}\nDate: ${e.date}\nBody: ${(e.body || e.snippet).substring(0, 3000)}`).join('\n\n---\n\n')}`
+                    }], 1500);
 
-            let extractedData = { workingRelationships: [], projectProgress: [], blockers: [], decisions: [], actionItems: [], topics: [], keyContext: [] };
-            try {
-                extractedData = safeParseJSON(topicsExtraction);
-            } catch (e) {
-                console.log(`  ⚠️  Failed to parse topics extraction, continuing...`);
-            }
+                    try {
+                        const batchData = safeParseJSON(topicsExtraction);
+                        allExtractedData.push(batchData);
+                    } catch (e) {
+                        console.log(`  ⚠️  Failed to parse topics extraction for batch, continuing...`);
+                    }
+                }
+
+                // Merge all batch results
+                let extractedData = {
+                    workingRelationships: [],
+                    projectProgress: [],
+                    blockers: [],
+                    decisions: [],
+                    actionItems: [],
+                    topics: [],
+                    keyContext: []
+                };
+
+                allExtractedData.forEach(batchData => {
+                    if (batchData) {
+                        Object.keys(extractedData).forEach(key => {
+                            if (Array.isArray(batchData[key])) {
+                                extractedData[key].push(...batchData[key]);
+                            }
+                        });
+                    }
+                });
+
+                console.log(`  ✓ Extracted context: ${extractedData.workingRelationships.length} relationships, ${extractedData.decisions.length} decisions, ${extractedData.blockers.length} blockers`);
 
             // PASS 2: Synthesize into narrative focused on working relationships and progress
             const emailSummary = await callGPT([{
@@ -969,14 +1072,21 @@ DO NOT write generic summaries. Extract and synthesize REAL working context.`
             filesWithContent = files.filter(f => f.content && f.content.length > 100);
 
             if (filesWithContent.length > 0) {
-                console.log(`  📊 Deep analysis of ${filesWithContent.length} documents with content...`);
+                console.log(`  📊 Deep analysis of ALL ${filesWithContent.length} documents (processing in batches of 5)...`);
 
-                // PASS 1: Extract key information from EACH document
-                const docInsights = await Promise.all(
-                    filesWithContent.slice(0, 5).map(async (file) => {
-                        const insight = await callGPT([{
-                            role: 'system',
-                            content: `Analyze this document for meeting "${meeting.summary}". Extract 3-7 KEY INSIGHTS.
+                // PASS 1: Extract key information from ALL documents - BATCH PROCESSING
+                const allDocInsights = [];
+
+                for (let i = 0; i < filesWithContent.length; i += 5) {
+                    const batch = filesWithContent.slice(i, i + 5);
+                    console.log(`     Document analysis batch ${Math.floor(i / 5) + 1}/${Math.ceil(filesWithContent.length / 5)} (${batch.length} files)...`);
+
+                    const batchInsights = await Promise.all(
+                        batch.map(async (file) => {
+                            try {
+                                const insight = await callGPT([{
+                                    role: 'system',
+                                    content: `Analyze this document for meeting "${meeting.summary}". Extract 3-10 KEY INSIGHTS.
 
 Return JSON array of insights:
 ["insight 1", "insight 2", ...]
@@ -987,20 +1097,26 @@ Each insight should:
 - Quote or reference specific content
 - Explain relevance to the meeting
 
-Focus on: decisions, data, action items, proposals, problems, solutions, timelines.`
-                        }, {
-                            role: 'user',
-                            content: `Document: "${file.name}"\n\nContent:\n${file.content.substring(0, 12000)}`
-                        }], 900);
+Focus on: decisions, data, action items, proposals, problems, solutions, timelines, strategic context.`
+                                }, {
+                                    role: 'user',
+                                    content: `Document: "${file.name}"\n\nContent:\n${file.content.substring(0, 20000)}`
+                                }], 1200);
 
-                        try {
-                            const parsed = safeParseJSON(insight);
-                            return { fileName: file.name, insights: Array.isArray(parsed) ? parsed : [] };
-                        } catch (e) {
-                            return { fileName: file.name, insights: [] };
-                        }
-                    })
-                );
+                                const parsed = safeParseJSON(insight);
+                                return { fileName: file.name, insights: Array.isArray(parsed) ? parsed : [] };
+                            } catch (e) {
+                                console.error(`  ⚠️  Error analyzing ${file.name}:`, e.message);
+                                return { fileName: file.name, insights: [] };
+                            }
+                        })
+                    );
+
+                    allDocInsights.push(...batchInsights);
+                }
+
+                const docInsights = allDocInsights;
+                console.log(`  ✓ Analyzed ${docInsights.length} documents, extracted insights from ${docInsights.filter(d => d.insights.length > 0).length} files`);
 
                 // PASS 2: Synthesize all document insights into coherent narrative
                 const allInsights = docInsights.filter(d => d.insights.length > 0);
