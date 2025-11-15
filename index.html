@@ -1612,6 +1612,7 @@
                 <div style="display: flex; gap: 10px;">
                     <button class="prep-button" id="prepMeButton" onclick="prepareForMeeting()">Prep Me</button>
                     <button class="prep-button" id="interactivePrepButton" onclick="startInteractivePrep()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">💬 Interactive Prep</button>
+                    <button class="prep-button" id="voicePrepButton" onclick="startVoicePrep()" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">🎙️ Voice Prep Mode</button>
                     <button class="enter-meeting-button" id="enterMeetingButton" onclick="enterMeeting()" style="display: none;">🎤 Entering Meeting</button>
                 </div>
             </div>
@@ -1796,6 +1797,66 @@
                             <span id="chatStatus" style="margin-left: auto;"></span>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Voice Prep Mode Modal (outside container for proper fixed positioning) -->
+    <div id="voicePrepOverlay" class="prep-modal" style="display: none;">
+        <div class="prep-modal-content" style="max-width: 800px; max-height: 90vh;">
+            <div class="prep-modal-header">
+                <span>🎙️ Voice Prep Mode - 2-Minute Briefing</span>
+                <button class="prep-modal-close" onclick="closeVoicePrep()">&times;</button>
+            </div>
+
+            <div style="padding: 30px;">
+                <!-- Meeting Info -->
+                <div style="color: #666; font-size: 14px; margin-bottom: 20px; padding: 16px; background: #f8f9fa; border-radius: 8px; text-align: center;">
+                    <strong id="voicePrepMeetingTitle"></strong>
+                    <div style="font-size: 13px; margin-top: 4px;" id="voicePrepMeetingTime"></div>
+                </div>
+
+                <!-- Status and Timer -->
+                <div style="margin-bottom: 20px; text-align: center;">
+                    <div style="font-size: 48px; font-weight: bold; color: #764ba2; margin-bottom: 8px;" id="voicePrepTimer">2:00</div>
+                    <div style="font-size: 14px; color: #666;" id="voicePrepStatus">Ready to start your briefing</div>
+                </div>
+
+                <!-- Waveform Visualization -->
+                <div style="height: 100px; background: #f0f0f0; border-radius: 12px; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; overflow: hidden;" id="voicePrepWaveform">
+                    <div style="color: #999; font-size: 14px;">Audio visualization</div>
+                </div>
+
+                <!-- Transcript Display -->
+                <div style="height: 200px; overflow-y: auto; background: #fafafa; border-radius: 12px; padding: 16px; margin-bottom: 20px; font-size: 14px; line-height: 1.6;" id="voicePrepTranscript">
+                    <div style="text-align: center; color: #999; padding: 40px 20px;">
+                        <div style="font-size: 24px; margin-bottom: 12px;">🎙️</div>
+                        <div>Your 2-minute voice briefing will appear here...</div>
+                        <div style="font-size: 13px; margin-top: 8px;">The AI will guide you through attendees, insights, agenda, and recommendations. You can interrupt anytime to ask questions.</div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button id="voicePrepStartBtn" onclick="startVoicePrepSession()" style="padding: 12px 32px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                        🎙️ Start Briefing
+                    </button>
+                    <button id="voicePrepStopBtn" onclick="stopVoicePrepSession()" style="padding: 12px 32px; background: #dc3545; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; display: none;">
+                        ⏹️ Stop
+                    </button>
+                </div>
+
+                <!-- Instructions -->
+                <div style="margin-top: 20px; padding: 12px; background: #e8f5e9; border-radius: 8px; font-size: 13px; color: #2e7d32;">
+                    <strong>💡 How it works:</strong>
+                    <ul style="margin: 8px 0 0 20px; padding: 0;">
+                        <li>The AI will deliver a structured 2-minute briefing</li>
+                        <li>Interrupt anytime by speaking - just ask your question</li>
+                        <li>After the briefing, you can continue asking questions</li>
+                        <li>Make sure your microphone is enabled</li>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -3957,9 +4018,8 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         }
 
         function closePrepModal() {
-            // Clear brief state to prevent data leakage
-            meetingBrief = null;
-            currentMeetingId = null;
+            // Don't clear meetingBrief - keep it for "Entering Meeting" and "Voice Prep Mode" buttons
+            // It will be cleared when user switches meetings or goes back to calendar
 
             // Clear DOM content to prevent stale data display
             document.getElementById('prepModalBody').innerHTML = '';
@@ -4913,6 +4973,301 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             console.log('🛑 Voice conversation stopped');
         }
 
+        // ==================== Voice Prep Mode Functions ====================
+
+        let voicePrepWs = null;
+        let voicePrepMediaStream = null;
+        let voicePrepAudioContext = null;
+        let voicePrepScriptProcessor = null;
+        let voicePrepActive = false;
+        let voicePrepTimerInterval = null;
+
+        async function startVoicePrep() {
+            console.log('🎙️ startVoicePrep called');
+            console.log('meetingBrief:', meetingBrief);
+
+            // Check if prep has been generated
+            if (!meetingBrief) {
+                alert('Please generate a meeting prep first by clicking "Prep Me".');
+                return;
+            }
+
+            console.log('Opening voice prep modal...');
+
+            // Show the modal
+            const modal = document.getElementById('voicePrepOverlay');
+            console.log('Modal element:', modal);
+
+            if (!modal) {
+                alert('Voice Prep modal not found! Please refresh the page.');
+                return;
+            }
+
+            modal.style.display = 'flex';
+            console.log('Modal display set to flex');
+
+            // Set meeting details
+            document.getElementById('voicePrepMeetingTitle').textContent = meetingBrief.summary || 'Meeting';
+            const startDate = meetingBrief.start?.dateTime || meetingBrief.start?.date;
+            document.getElementById('voicePrepMeetingTime').textContent = startDate ? new Date(startDate).toLocaleString() : 'Time not specified';
+
+            console.log('Voice prep modal opened successfully');
+        }
+
+        function closeVoicePrep() {
+            // Stop session if active
+            if (voicePrepActive) {
+                stopVoicePrepSession();
+            }
+
+            // Close modal
+            document.getElementById('voicePrepOverlay').style.display = 'none';
+
+            // Reset UI
+            document.getElementById('voicePrepTimer').textContent = '2:00';
+            document.getElementById('voicePrepStatus').textContent = 'Ready to start your briefing';
+            document.getElementById('voicePrepTranscript').innerHTML = `
+                <div style="text-align: center; color: #999; padding: 40px 20px;">
+                    <div style="font-size: 24px; margin-bottom: 12px;">🎙️</div>
+                    <div>Your 2-minute voice briefing will appear here...</div>
+                    <div style="font-size: 13px; margin-top: 8px;">The AI will guide you through attendees, insights, agenda, and recommendations. You can interrupt anytime to ask questions.</div>
+                </div>
+            `;
+        }
+
+        async function startVoicePrepSession() {
+            try {
+                // Request microphone access
+                voicePrepMediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+                // Set up audio context for streaming
+                voicePrepAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const source = voicePrepAudioContext.createMediaStreamSource(voicePrepMediaStream);
+                voicePrepScriptProcessor = voicePrepAudioContext.createScriptProcessor(4096, 1, 1);
+
+                // Connect to WebSocket
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}`;
+                voicePrepWs = new WebSocket(wsUrl);
+
+                voicePrepWs.onopen = () => {
+                    console.log('🎙️ Voice prep WebSocket connected');
+
+                    // Send voice_prep_start message
+                    voicePrepWs.send(JSON.stringify({
+                        type: 'voice_prep_start',
+                        brief: meetingBrief
+                    }));
+
+                    voicePrepActive = true;
+
+                    // Update UI
+                    document.getElementById('voicePrepStartBtn').style.display = 'none';
+                    document.getElementById('voicePrepStopBtn').style.display = 'block';
+                    document.getElementById('voicePrepStatus').textContent = 'Briefing in progress...';
+
+                    // Start audio streaming
+                    voicePrepScriptProcessor.onaudioprocess = (e) => {
+                        if (!voicePrepActive) return;
+
+                        const float32Audio = e.inputBuffer.getChannelData(0);
+                        const int16Audio = new Int16Array(float32Audio.length);
+
+                        // Convert float32 to int16
+                        for (let i = 0; i < float32Audio.length; i++) {
+                            const s = Math.max(-1, Math.min(1, float32Audio[i]));
+                            int16Audio[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                        }
+
+                        // Stream audio to backend
+                        if (voicePrepWs && voicePrepWs.readyState === WebSocket.OPEN) {
+                            const base64Audio = btoa(String.fromCharCode.apply(null, new Uint8Array(int16Audio.buffer)));
+                            voicePrepWs.send(JSON.stringify({
+                                type: 'voice_prep_audio',
+                                audio: base64Audio
+                            }));
+                        }
+                    };
+
+                    source.connect(voicePrepScriptProcessor);
+                    voicePrepScriptProcessor.connect(voicePrepAudioContext.destination);
+                };
+
+                voicePrepWs.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    handleVoicePrepMessage(data);
+                };
+
+                voicePrepWs.onerror = (error) => {
+                    console.error('Voice prep WebSocket error:', error);
+                    alert('Connection error. Please try again.');
+                    stopVoicePrepSession();
+                };
+
+                voicePrepWs.onclose = () => {
+                    console.log('🛑 Voice prep WebSocket closed');
+                    stopVoicePrepSession();
+                };
+
+            } catch (error) {
+                console.error('Error starting voice prep session:', error);
+                alert('Failed to start voice prep: ' + error.message);
+                stopVoicePrepSession();
+            }
+        }
+
+        function stopVoicePrepSession() {
+            voicePrepActive = false;
+
+            // Stop audio processing
+            if (voicePrepScriptProcessor) {
+                voicePrepScriptProcessor.disconnect();
+                voicePrepScriptProcessor = null;
+            }
+
+            if (voicePrepAudioContext) {
+                voicePrepAudioContext.close();
+                voicePrepAudioContext = null;
+            }
+
+            if (voicePrepMediaStream) {
+                voicePrepMediaStream.getTracks().forEach(track => track.stop());
+                voicePrepMediaStream = null;
+            }
+
+            // Stop timer
+            if (voicePrepTimerInterval) {
+                clearInterval(voicePrepTimerInterval);
+                voicePrepTimerInterval = null;
+            }
+
+            // Notify backend
+            if (voicePrepWs && voicePrepWs.readyState === WebSocket.OPEN) {
+                voicePrepWs.send(JSON.stringify({
+                    type: 'voice_prep_stop'
+                }));
+                voicePrepWs.close();
+            }
+
+            voicePrepWs = null;
+
+            // Update UI
+            document.getElementById('voicePrepStartBtn').style.display = 'block';
+            document.getElementById('voicePrepStopBtn').style.display = 'none';
+            document.getElementById('voicePrepStatus').textContent = 'Session ended';
+
+            console.log('🛑 Voice prep session stopped');
+        }
+
+        function handleVoicePrepMessage(data) {
+            switch (data.type) {
+                case 'voice_prep_ready':
+                    console.log('✅ Voice prep ready');
+                    document.getElementById('voicePrepStatus').textContent = data.message || 'Starting briefing...';
+                    break;
+
+                case 'voice_prep_transcript':
+                    // Display user or AI transcript
+                    addVoicePrepTranscript(data.speaker || 'You', data.text, data.isFinal);
+                    break;
+
+                case 'voice_prep_response':
+                    // AI response text
+                    addVoicePrepTranscript('AI', data.text, true);
+                    break;
+
+                case 'voice_prep_audio':
+                    // Play AI audio
+                    playVoicePrepAudio(data.audio);
+                    break;
+
+                case 'voice_prep_time_update':
+                    // Update timer
+                    updateVoicePrepTimer(data.elapsed, data.total);
+                    break;
+
+                case 'voice_prep_section_change':
+                    // Section transition
+                    document.getElementById('voicePrepStatus').textContent = `Section: ${data.section}`;
+                    break;
+
+                case 'voice_prep_interrupted':
+                    document.getElementById('voicePrepStatus').textContent = data.message || 'Paused for your question';
+                    break;
+
+                case 'error':
+                    console.error('Voice prep error:', data.message);
+                    document.getElementById('voicePrepStatus').textContent = 'Error: ' + data.message;
+                    break;
+            }
+        }
+
+        function addVoicePrepTranscript(speaker, text, isFinal) {
+            const transcriptDiv = document.getElementById('voicePrepTranscript');
+
+            // Remove placeholder if exists
+            const placeholder = transcriptDiv.querySelector('div[style*="text-align: center"]');
+            if (placeholder) {
+                transcriptDiv.innerHTML = '';
+            }
+
+            // Check if we should update the last message (for interim results)
+            if (!isFinal && transcriptDiv.lastChild && transcriptDiv.lastChild.dataset.speaker === speaker) {
+                transcriptDiv.lastChild.innerHTML = `<strong>${speaker}:</strong> ${text}`;
+            } else {
+                const messageDiv = document.createElement('div');
+                messageDiv.dataset.speaker = speaker;
+                messageDiv.style.marginBottom = '12px';
+                messageDiv.style.color = speaker === 'You' ? '#2563eb' : '#059669';
+                messageDiv.innerHTML = `<strong>${speaker}:</strong> ${text}`;
+                transcriptDiv.appendChild(messageDiv);
+            }
+
+            // Auto-scroll to bottom
+            transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+        }
+
+        async function playVoicePrepAudio(base64Audio) {
+            try {
+                // Decode base64 to array buffer
+                const binaryString = atob(base64Audio);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // Create audio context and play
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const audioBuffer = await audioContext.decodeAudioData(bytes.buffer);
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                source.start(0);
+
+                console.log('🔊 Playing voice prep audio');
+            } catch (error) {
+                console.error('Error playing voice prep audio:', error);
+            }
+        }
+
+        function updateVoicePrepTimer(elapsed, total) {
+            const remaining = Math.max(0, total - elapsed);
+            const minutes = Math.floor(remaining / 60000);
+            const seconds = Math.floor((remaining % 60000) / 1000);
+            const display = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            document.getElementById('voicePrepTimer').textContent = display;
+        }
+
+        // ==================== End Voice Prep Mode Functions ====================
+
         function addChatMessage(role, content, toolCall = null) {
             const chatHistory = document.getElementById('chatHistory');
             const placeholder = chatHistory.querySelector('.chat-placeholder');
@@ -5105,6 +5460,12 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         window.closeInteractivePrep = closeInteractivePrep;
         window.sendChatMessage = sendChatMessage;
         window.toggleVoiceInput = toggleVoiceInput;
+
+        // Voice Prep Mode functions
+        window.startVoicePrep = startVoicePrep;
+        window.closeVoicePrep = closeVoicePrep;
+        window.startVoicePrepSession = startVoicePrepSession;
+        window.stopVoicePrepSession = stopVoicePrepSession;
 
     </script>
 </body>

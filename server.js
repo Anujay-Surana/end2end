@@ -6,6 +6,7 @@ const { createClient } = require('@deepgram/sdk');
 const Parallel = require('parallel-web');
 const fetch = require('node-fetch');
 const VoiceConversationManager = require('./services/voiceConversation');
+const VoicePrepManager = require('./services/voicePrepBriefing');
 require('dotenv').config();
 
 const app = express();
@@ -596,7 +597,7 @@ app.post('/api/prep-meeting', async (req, res) => {
             // This captures team documents mentioning the companies/domains
             const domainSearchTerms = [
                 ...domains.map(d => d.split('.')[0]), // company names (e.g., "kordn8", "tonik")
-                ...attendees.map(a => a.name.split(' ')[0]).filter(Boolean) // First names
+                ...attendees.map(a => a.name ? a.name.split(' ')[0] : null).filter(Boolean) // First names
             ].filter(Boolean);
 
             const domainQuery = domainSearchTerms.length > 0
@@ -2068,6 +2069,49 @@ wss.on('connection', (ws) => {
                 if (ws.voiceConversationManager) {
                     ws.voiceConversationManager.disconnect();
                     ws.voiceConversationManager = null;
+                }
+            }
+
+            // Voice Prep: Start 2-minute briefing
+            else if (data.type === 'voice_prep_start') {
+                console.log('🎤 Starting voice prep briefing');
+
+                if (!data.brief) {
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: 'Meeting brief not provided'
+                    }));
+                    return;
+                }
+
+                // Create voice prep manager
+                ws.voicePrepManager = new VoicePrepManager(
+                    data.brief,
+                    OPENAI_API_KEY
+                );
+
+                // Connect the manager to the WebSocket
+                await ws.voicePrepManager.connect(ws);
+
+                console.log('✅ Voice prep briefing initialized');
+            }
+
+            // Voice Prep: Audio data streaming
+            else if (data.type === 'voice_prep_audio') {
+                if (ws.voicePrepManager) {
+                    const audioChunk = Buffer.from(data.audio, 'base64');
+                    ws.voicePrepManager.sendAudio(audioChunk);
+                } else {
+                    console.warn('⚠️  Voice prep briefing not initialized');
+                }
+            }
+
+            // Voice Prep: Stop
+            else if (data.type === 'voice_prep_stop') {
+                console.log('🛑 Stopping voice prep briefing');
+                if (ws.voicePrepManager) {
+                    ws.voicePrepManager.disconnect();
+                    ws.voicePrepManager = null;
                 }
             }
 
