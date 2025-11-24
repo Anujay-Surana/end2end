@@ -5,7 +5,7 @@
  */
 
 const logger = require('../services/logger');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 /**
  * Sanitize sensitive data from request body
@@ -73,8 +73,8 @@ function sanitizeHeaders(headers) {
  * Generates request ID and logs request details
  */
 function requestLogger(req, res, next) {
-    // Generate unique request ID
-    const requestId = `req-${uuidv4().split('-')[0]}`;
+    // Generate unique request ID using crypto.randomUUID() (built into Node.js 18+)
+    const requestId = `req-${crypto.randomUUID().split('-')[0]}`;
     req.requestId = requestId;
 
     // Log request details
