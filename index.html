@@ -6543,7 +6543,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 // Schedule this chunk for playback
                 const source = voicePrepPlaybackContext.createBufferSource();
                 source.buffer = audioBuffer;
-                source.playbackRate = 1.15; // Speed up voice by 15%
+                source.playbackRate = 2.0; // Speed up voice by 2x
                 source.connect(voicePrepPlaybackContext.destination);
 
                 // Track this source so we can stop it if cancellation happens
@@ -6947,6 +6947,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     try {
                         const data = JSON.parse(event.data);
                         if (data.type === 'chat_panel_response') {
+                            // stripMarkdown is called inside addChatMessage
                             addChatMessage('assistant', data.message);
                         }
                     } catch (error) {
@@ -7064,14 +7065,29 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             }
         }
 
+        function stripMarkdown(text) {
+            if (!text) return text;
+            // Remove markdown formatting: **bold**, *italic*, `code`, etc.
+            return text
+                .replace(/\*\*([^*]+)\*\*/g, '$1')
+                .replace(/\*([^*]+)\*/g, '$1')
+                .replace(/`([^`]+)`/g, '$1')
+                .replace(/#{1,6}\s+/g, '') // Remove headers
+                .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1') // Remove links, keep text
+                .trim();
+        }
+
         function addChatMessage(role, message, timestamp = null) {
             const messagesArea = document.getElementById('chatMessagesArea');
             const messageDiv = document.createElement('div');
             messageDiv.className = `chat-message ${role}`;
             
+            // Strip markdown formatting for clean display
+            const cleanMessage = stripMarkdown(message);
+            
             const bubble = document.createElement('div');
             bubble.className = 'chat-bubble';
-            bubble.textContent = message;
+            bubble.textContent = cleanMessage;
             
             const time = timestamp || new Date();
             const timeStr = time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });

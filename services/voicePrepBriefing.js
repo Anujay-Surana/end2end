@@ -411,10 +411,13 @@ The prompt structure should:
 4. Include interruption handling rules
 5. Include response format requirements
 6. Be well-structured and comprehensive
+7. CRITICAL: Always use [USER_NAME] placeholder and instruct to refer to the user by their actual name, NOT "user" or "the user"
 
-Format: Return ONLY the system prompt structure text with placeholders like [ATTENDEE_NAMES], [MEETING_TITLE], etc. No markdown, no explanations.`;
+Format: Return ONLY the system prompt structure text with placeholders like [ATTENDEE_NAMES], [MEETING_TITLE], [USER_NAME], etc. No markdown, no explanations.`;
 
         const userPrompt = `Generate a system prompt structure for Shadow briefing ${context.userName} about a meeting.
+
+CRITICAL: The prompt must use [USER_NAME] placeholder and instruct Shadow to refer to ${context.userName} by their actual name "${context.userName}", NOT "user" or "the user". Always use "you" to refer to ${context.userName} when speaking.
 
 MEETING OVERVIEW:
 - Title: [MEETING_TITLE]

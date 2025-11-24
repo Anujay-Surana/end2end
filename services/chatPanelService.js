@@ -52,7 +52,9 @@ class ChatPanelService {
             }
 
             const data = await response.json();
-            return data.choices[0].message.content.trim();
+            const responseText = data.choices[0].message.content.trim();
+            // Strip markdown formatting for clean display
+            return this.stripMarkdown(responseText);
         } catch (error) {
             logger.error({ error: error.message }, 'Error generating chat response');
             throw error;
@@ -131,12 +133,31 @@ class ChatPanelService {
             }
 
             const data = await response.json();
-            return data.choices[0].message.content.trim();
+            const responseText = data.choices[0].message.content.trim();
+            // Strip markdown formatting for clean display
+            return this.stripMarkdown(responseText);
         } catch (error) {
             logger.error({ error: error.message }, 'Error generating initial update');
             // Fallback message
             return `You have ${meetings.length} meeting${meetings.length !== 1 ? 's' : ''} scheduled for today. Ready to help you prepare!`;
         }
+    }
+
+    /**
+     * Strip markdown formatting from text
+     * @param {string} text - Text with markdown
+     * @returns {string} - Clean text without markdown
+     */
+    stripMarkdown(text) {
+        if (!text) return text;
+        // Remove markdown formatting: **bold**, *italic*, `code`, etc.
+        return text
+            .replace(/\*\*([^*]+)\*\*/g, '$1') // Bold
+            .replace(/\*([^*]+)\*/g, '$1') // Italic
+            .replace(/`([^`]+)`/g, '$1') // Code
+            .replace(/#{1,6}\s+/g, '') // Headers
+            .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1') // Links, keep text
+            .trim();
     }
 
     /**
