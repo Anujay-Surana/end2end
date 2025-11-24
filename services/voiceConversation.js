@@ -51,19 +51,34 @@ class VoiceConversationManager {
     async connect(ws) {
         this.ws = ws;
 
-        // Initialize Deepgram with Flux model for conversations
+        // Initialize Deepgram with optimized configuration for conversations
         this.deepgramConnection = this.deepgram.listen.live({
-            model: 'nova-2', // Use nova-2 (flux may not be available in 4.11.2)
+            model: 'nova-2',
             language: 'en',
             encoding: 'linear16',
             sample_rate: 16000,
             channels: 1,
+
+            // Formatting & Quality
             smart_format: true,
             punctuate: true,
+            filler_words: true,          // Remove um, uh, etc. for cleaner transcripts
+            numerals: true,              // Convert numbers to digits
+
+            // Streaming & Timing (optimized for conversations)
             interim_results: true,
-            utterance_end_ms: 1500, // Detect end of utterance after 1.5s silence
-            vad_events: true, // Voice activity detection
-            endpointing: 500 // Quick turn detection
+            utterance_end_ms: 1000,      // Optimized from 1500ms for faster turn detection
+            endpointing: 300,            // Reduced from 500ms for more responsive conversations
+
+            // Voice Activity Detection
+            vad_events: true,            // Enabled for better interruption handling
+
+            // Performance Optimization
+            diarize: false,              // Single speaker optimization
+            multichannel: false,
+
+            // Keywords (optional - boost recognition for meeting-related terms)
+            keywords: ['meeting:2', 'attendees:2', 'agenda:2', 'brief:2']
         });
 
         // Set up event handlers

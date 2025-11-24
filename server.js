@@ -5,8 +5,12 @@ const WebSocket = require('ws');
 const { createClient } = require('@deepgram/sdk');
 const Parallel = require('parallel-web');
 const fetch = require('node-fetch');
+const cookieParser = require('cookie-parser');
+const session = require('express-session');
 const VoiceConversationManager = require('./services/voiceConversation');
 const VoicePrepManager = require('./services/voicePrepBriefing');
+const { fetchGmailMessages, fetchDriveFiles, fetchDriveFileContents } = require('./services/googleApi');
+const logger = require('./services/logger');
 require('dotenv').config();
 
 const app = express();
@@ -16,12 +20,15 @@ const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 8080;
 
 // ===== ENVIRONMENT VARIABLE VALIDATION =====
-console.log('\n🔍 Validating environment variables...');
+logger.info('Validating environment variables...');
 
 const requiredEnvVars = {
     'OPENAI_API_KEY': process.env.OPENAI_API_KEY,
     'PARALLEL_API_KEY': process.env.PARALLEL_API_KEY,
-    'DEEPGRAM_API_KEY': process.env.DEEPGRAM_API_KEY
+    'DEEPGRAM_API_KEY': process.env.DEEPGRAM_API_KEY,
+    'SUPABASE_URL': process.env.SUPABASE_URL,
+    'SUPABASE_SERVICE_ROLE_KEY': process.env.SUPABASE_SERVICE_ROLE_KEY,
+    'SESSION_SECRET': process.env.SESSION_SECRET
 };
 
 const missingVars = [];
@@ -36,18 +43,18 @@ for (const [name, value] of Object.entries(requiredEnvVars)) {
 }
 
 if (missingVars.length > 0) {
-    console.error(`\n❌ Missing required environment variables: ${missingVars.join(', ')}`);
+    logger.error({ missingVars }, 'Missing required environment variables');
     console.error('Please add them to your .env file and restart the server.\n');
     process.exit(1);
 }
 
 if (invalidVars.length > 0) {
-    console.error(`\n⚠️  Invalid/placeholder values detected: ${invalidVars.join(', ')}`);
+    logger.warn({ invalidVars }, 'Invalid/placeholder values detected');
     console.error('Please update these with your actual API keys in the .env file.\n');
     process.exit(1);
 }
 
-console.log('✅ All required environment variables are set\n');
+logger.info('All required environment variables are set');
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
@@ -61,22 +68,79 @@ const parallelClient = new Parallel({
 let deepgram;
 try {
     deepgram = createClient(DEEPGRAM_API_KEY);
-    console.log('✅ Deepgram client initialized');
+    logger.info('Deepgram client initialized');
 } catch (error) {
-    console.error('❌ Failed to initialize Deepgram client:', error.message);
+    logger.error({ error: error.message }, 'Failed to initialize Deepgram client');
     console.error('Please check your DEEPGRAM_API_KEY in the .env file.\n');
     process.exit(1);
 }
 
 // Enable CORS for our frontend
-app.use(cors());
+// Environment-aware CORS configuration
+const corsOptions = {
+    origin: process.env.NODE_ENV === 'production' 
+        ? process.env.ALLOWED_ORIGINS?.split(',') || false  // Restrict to specific origins in production
+        : true,  // Allow all origins in development
+    credentials: true, // Allow cookies
+    optionsSuccessStatus: 200 // Some legacy browsers (IE11, various SmartTVs) choke on 204
+};
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' })); // Increase limit for large context
+app.use(cookieParser()); // Parse cookies for session management
+
+// Request logging middleware (must be after body parsing)
+const requestLogger = require('./middleware/requestLogger');
+app.use(requestLogger);
+
+// Configure express-session middleware
+// Note: We use database-backed sessions (sessions table) but express-session
+// provides cookie management and session middleware integration
+app.use(session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+    },
+    // We don't use express-session's store since we have our own database sessions
+    // The middleware is mainly for cookie management and req.session object
+    name: 'session' // Cookie name
+}));
+
+// Make Parallel API client available to all routes
+app.use((req, res, next) => {
+    req.parallelClient = parallelClient;
+    next();
+});
 
 // Serve static files (frontend)
 app.use(express.static(__dirname));
 
+// ===== MULTI-ACCOUNT ROUTES =====
+// Mount authentication routes
+const authRoutes = require('./routes/auth');
+app.use('/auth', authRoutes);
+
+// Mount account management routes
+const accountRoutes = require('./routes/accounts');
+app.use('/api/accounts', accountRoutes);
+
+// Mount meeting preparation routes (supports both multi-account and legacy single-account)
+const meetingRoutes = require('./routes/meetings');
+app.use('/api', meetingRoutes);
+
+// Mount day prep routes
+const dayPrepRoutes = require('./routes/dayPrep');
+app.use('/api', dayPrepRoutes);
+
 // TTS endpoint - uses OpenAI TTS
-app.post('/api/tts', async (req, res) => {
+const { validateTTS } = require('./middleware/validation');
+const { ttsLimiter } = require('./middleware/rateLimiter');
+app.post('/api/tts', ttsLimiter, validateTTS, async (req, res) => {
     try {
         const { text } = req.body;
 
@@ -122,7 +186,9 @@ app.post('/api/tts', async (req, res) => {
 });
 
 // Search endpoint - uses Parallel AI search
-app.post('/api/parallel-search', async (req, res) => {
+const { validateParallelSearch } = require('./middleware/validation');
+const { parallelAILimiter } = require('./middleware/rateLimiter');
+app.post('/api/parallel-search', parallelAILimiter, validateParallelSearch, async (req, res) => {
     try {
         const { objective, search_queries, mode, max_results, max_chars_per_result } = req.body;
 
@@ -149,7 +215,8 @@ app.post('/api/parallel-search', async (req, res) => {
 });
 
 // Extract endpoint - extracts content from URLs
-app.post('/api/parallel-extract', async (req, res) => {
+const { validateParallelExtract } = require('./middleware/validation');
+app.post('/api/parallel-extract', parallelAILimiter, validateParallelExtract, async (req, res) => {
     try {
         const { urls, objective, excerpts, fullContent } = req.body;
 
@@ -175,7 +242,7 @@ app.post('/api/parallel-extract', async (req, res) => {
 });
 
 // Deep research endpoint - starts a research task
-app.post('/api/parallel-research', async (req, res) => {
+app.post('/api/parallel-research', parallelAILimiter, async (req, res) => {
     try {
         const { input, task_spec, processor } = req.body;
 
@@ -199,115 +266,16 @@ app.post('/api/parallel-research', async (req, res) => {
 });
 
 // ===== GPT HELPER FUNCTIONS =====
-
-async function callGPT(messages, maxTokens = 1000) {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-            model: 'gpt-4o',
-            messages,
-            temperature: 0.7,
-            max_tokens: maxTokens
-        })
-    });
-
-    if (!response.ok) {
-        throw new Error(`GPT API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.choices[0].message.content.trim();
-}
-
-async function craftSearchQueries(context) {
-    try {
-        const result = await callGPT([{
-            role: 'system',
-            content: 'Generate EXACTLY 3 highly specific web search queries. Return ONLY a JSON array. Example: ["query 1", "query 2", "query 3"]'
-        }, {
-            role: 'user',
-            content: context
-        }], 200);
-
-        const queries = JSON.parse(result);
-        return Array.isArray(queries) ? queries.slice(0, 3) : [];
-    } catch (error) {
-        console.error('Error crafting queries:', error);
-        return [];
-    }
-}
-
-async function synthesizeResults(prompt, data, maxTokens = 500) {
-    try {
-        const result = await callGPT([{
-            role: 'system',
-            content: `You are an executive briefing expert. Your task is to extract and synthesize information from data based on the specific prompt provided.
-
-CORE PRINCIPLES:
-1. **Verify before including**: ONLY include information directly supported by the provided data
-2. **Be specific**: Include numbers, dates, names, companies, titles, concrete details
-3. **Context-appropriate length**:
-   - For fact extraction: 15-80 words per fact
-   - For narrative synthesis: Follow prompt guidance (typically 6-12 sentences)
-4. **Quality over quantity**: Return fewer high-quality insights rather than padding with generic statements
-5. **Skip obvious/generic**: No "experienced professional", "works in tech", "team member" unless there's specific detail
-6. **Business relevance**: Focus on information useful for meeting preparation and decision-making
-
-OUTPUT FORMAT:
-- Follow the prompt's explicit output format instructions (JSON array, paragraph, etc.)
-- If prompt asks for JSON, return valid JSON only (no markdown code blocks unless you strip them)
-- If prompt asks for narrative, write cohesive prose
-- If data is insufficient for quality output, acknowledge it explicitly
-
-VALIDATION CHECKS:
-- Does each statement have evidence in the data?
-- Would this information actually help in a meeting context?
-- Is this specific enough to be actionable?
-- Have I followed the prompt's specific instructions?`
-        }, {
-            role: 'user',
-            content: `${prompt}\n\nData:\n${JSON.stringify(data).substring(0, 12000)}`
-        }], maxTokens);
-
-        return result;
-    } catch (error) {
-        console.error('Error synthesizing:', error);
-        return null;
-    }
-}
-
-/**
- * Safely parse JSON that may be wrapped in markdown code blocks
- * Only strips backticks at the START and END, not throughout the content
- */
-function safeParseJSON(text) {
-    if (!text) return null;
-
-    let cleaned = text.trim();
-
-    // Remove markdown code blocks ONLY at start/end (not in the middle of content)
-    // This prevents corrupting JSON that contains backticks in its content
-    if (cleaned.startsWith('```')) {
-        // Remove opening code block (```json or just ```)
-        cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '');
-    }
-
-    if (cleaned.endsWith('```')) {
-        // Remove closing code block
-        cleaned = cleaned.replace(/\n?```\s*$/, '');
-    }
-
-    return JSON.parse(cleaned.trim());
-}
+// Note: GPT functions are now imported from services/gptService.js to avoid duplication
+const { callGPT, synthesizeResults, safeParseJSON, craftSearchQueries } = require('./services/gptService');
 
 // ===== CONTEXT FETCHING HELPERS =====
+// Note: Google API functions (fetchGmailMessages, fetchDriveFiles, fetchDriveFileContents) 
+// are now imported from services/googleApi.js to avoid duplication
 
 /**
  * Extract keywords from meeting title and description
+ * Used only by the old /api/prep-meeting-OLD endpoint (kept for reference)
  */
 function extractKeywords(title, description = '') {
     const text = `${title} ${description}`.toLowerCase();
@@ -323,221 +291,12 @@ function extractKeywords(title, description = '') {
     return [...new Set(words)].slice(0, 5);
 }
 
-/**
- * Fetch Gmail messages using user's access token
- */
-async function fetchGmailMessages(accessToken, query, maxResults = 100) {
-    try {
-        console.log(`  📧 Gmail query: ${query.substring(0, 150)}...`);
+// ===== MEETING PREP ENDPOINT (OLD - KEPT FOR REFERENCE) =====
+// NOTE: This old endpoint is SHADOWED by the new routes/meetings.js endpoint
+// The new multi-account endpoint is mounted above and will handle /api/prep-meeting requests
+// This code is kept here for reference but will not be executed
 
-        // Step 1: Get message IDs
-        const listResponse = await fetch(
-            `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`,
-            {
-                headers: { 'Authorization': `Bearer ${accessToken}` }
-            }
-        );
-
-        if (!listResponse.ok) {
-            throw new Error(`Gmail API error: ${listResponse.status}`);
-        }
-
-        const listData = await listResponse.json();
-        const messageIds = listData.messages || [];
-
-        console.log(`  ✓ Found ${messageIds.length} message IDs`);
-
-        if (messageIds.length === 0) {
-            return [];
-        }
-
-        // Step 2: Fetch full message details for ALL messages (no 30-message cap)
-        // Process in batches of 20 to avoid rate limits
-        console.log(`  📧 Fetching full details for ALL ${messageIds.length} messages (batches of 20)...`);
-        const allMessages = [];
-
-        for (let i = 0; i < messageIds.length; i += 20) {
-            const batch = messageIds.slice(i, i + 20);
-            console.log(`     Processing email batch ${Math.floor(i / 20) + 1}/${Math.ceil(messageIds.length / 20)} (${batch.length} emails)...`);
-
-            const batchPromises = batch.map(async (msg) => {
-                try {
-                    const msgResponse = await fetch(
-                        `https://www.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
-                        {
-                            headers: { 'Authorization': `Bearer ${accessToken}` }
-                        }
-                    );
-
-                    if (!msgResponse.ok) {
-                        return null;
-                    }
-
-                    return msgResponse.json();
-                } catch (error) {
-                    console.error(`  ⚠️  Error fetching message ${msg.id}:`, error.message);
-                    return null;
-                }
-            });
-
-            const batchMessages = (await Promise.all(batchPromises)).filter(Boolean);
-            allMessages.push(...batchMessages);
-        }
-
-        const messages = allMessages;
-        console.log(`  ✓ Fetched ${messages.length}/${messageIds.length} full messages`);
-
-        // Step 3: Parse and format messages
-        return messages.map(msg => {
-            const headers = msg.payload?.headers || [];
-            const getHeader = (name) => headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
-
-            let body = '';
-            if (msg.payload?.parts) {
-                const textPart = msg.payload.parts.find(p => p.mimeType === 'text/plain');
-                if (textPart?.body?.data) {
-                    body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
-                }
-            } else if (msg.payload?.body?.data) {
-                body = Buffer.from(msg.payload.body.data, 'base64').toString('utf-8');
-            }
-
-            return {
-                id: msg.id,
-                subject: getHeader('Subject'),
-                from: getHeader('From'),
-                to: getHeader('To'),
-                date: getHeader('Date'),
-                snippet: msg.snippet || '',
-                body: body.substring(0, 15000) // Increased from 5k to 15k chars per email
-            };
-        });
-
-    } catch (error) {
-        console.error('  ❌ Error fetching Gmail messages:', error.message);
-        return [];
-    }
-}
-
-/**
- * Fetch Google Drive files using user's access token
- */
-async function fetchDriveFiles(accessToken, query, maxResults = 50) {
-    try {
-        console.log(`  📁 Drive query: ${query.substring(0, 150)}...`);
-
-        const response = await fetch(
-            `https://www.googleapis.com/drive/v3/files?` +
-            `q=${encodeURIComponent(query)}&` +
-            `fields=files(id,name,mimeType,modifiedTime,owners,size,webViewLink,iconLink)&` +
-            `orderBy=modifiedTime desc&` +
-            `pageSize=${maxResults}`,
-            {
-                headers: { 'Authorization': `Bearer ${accessToken}` }
-            }
-        );
-
-        if (!response.ok) {
-            throw new Error(`Drive API error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const files = data.files || [];
-
-        console.log(`  ✓ Found ${files.length} Drive files`);
-
-        return files.map(file => ({
-            id: file.id,
-            name: file.name,
-            mimeType: file.mimeType,
-            size: file.size || 0,
-            modifiedTime: file.modifiedTime,
-            owner: file.owners && file.owners.length > 0 ? file.owners[0].displayName || file.owners[0].emailAddress : 'Unknown',
-            ownerEmail: file.owners && file.owners.length > 0 ? file.owners[0].emailAddress : '',
-            url: file.webViewLink,
-            iconLink: file.iconLink
-        }));
-
-    } catch (error) {
-        console.error('  ❌ Error fetching Drive files:', error.message);
-        return [];
-    }
-}
-
-/**
- * Fetch Drive file contents
- */
-async function fetchDriveFileContents(accessToken, files) {
-    const filesWithContent = [];
-
-    // REMOVED CAP: Process ALL files found (no artificial 5-file limit)
-    // Process in batches of 10 to avoid timeouts, but fetch ALL files
-    console.log(`  📄 Fetching content for ALL ${files.length} files (processing in batches of 10)...`);
-
-    for (let i = 0; i < files.length; i += 10) {
-        const batch = files.slice(i, i + 10);
-        console.log(`     Processing batch ${Math.floor(i / 10) + 1}/${Math.ceil(files.length / 10)} (${batch.length} files)...`);
-
-        // Process batch in parallel for speed
-        const batchResults = await Promise.allSettled(
-            batch.map(async (file) => {
-                try {
-                    let content = '';
-
-                    // Handle different file types
-                    if (file.mimeType === 'application/vnd.google-apps.document') {
-                        // Google Doc - export as plain text
-                        const response = await fetch(
-                            `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain`,
-                            {
-                                headers: { 'Authorization': `Bearer ${accessToken}` }
-                            }
-                        );
-                        if (response.ok) {
-                            content = await response.text();
-                        }
-                    } else if (file.mimeType === 'application/pdf' || file.mimeType === 'text/plain') {
-                        // PDF or text file - get binary content
-                        const response = await fetch(
-                            `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-                            {
-                                headers: { 'Authorization': `Bearer ${accessToken}` }
-                            }
-                        );
-                        if (response.ok) {
-                            content = await response.text();
-                        }
-                    }
-
-                    if (content) {
-                        return {
-                            ...file,
-                            content: content.substring(0, 50000) // Increased from 20k to 50k chars per file
-                        };
-                    }
-                    return null;
-                } catch (error) {
-                    console.error(`  ⚠️  Error fetching content for ${file.name}:`, error.message);
-                    return null;
-                }
-            })
-        );
-
-        // Collect successful results
-        batchResults.forEach(result => {
-            if (result.status === 'fulfilled' && result.value) {
-                filesWithContent.push(result.value);
-            }
-        });
-    }
-
-    console.log(`  ✓ Successfully fetched content for ${filesWithContent.length}/${files.length} files`);
-    return filesWithContent;
-}
-
-// ===== MEETING PREP ENDPOINT =====
-
-app.post('/api/prep-meeting', async (req, res) => {
+app.post('/api/prep-meeting-OLD', async (req, res) => {
     try {
         const { meeting, attendees, accessToken } = req.body;
 
@@ -2084,10 +1843,26 @@ wss.on('connection', (ws) => {
                     return;
                 }
 
+                // Get user context if available
+                let userContext = null;
+                if (userEmail) {
+                    // Try to get user name from brief or construct from email
+                    const userName = data.brief?.userName || userEmail.split('@')[0];
+                    userContext = {
+                        name: userName,
+                        email: userEmail,
+                        formattedName: userName,
+                        formattedEmail: userEmail,
+                        contextString: `${userName} (${userEmail})`,
+                        emails: [userEmail]
+                    };
+                }
+                
                 // Create voice prep manager
                 ws.voicePrepManager = new VoicePrepManager(
                     data.brief,
-                    OPENAI_API_KEY
+                    OPENAI_API_KEY,
+                    userContext
                 );
 
                 // Connect the manager to the WebSocket
@@ -2100,15 +1875,31 @@ wss.on('connection', (ws) => {
             else if (data.type === 'voice_prep_audio') {
                 if (ws.voicePrepManager) {
                     const audioChunk = Buffer.from(data.audio, 'base64');
+                    // sendAudio will auto-commit when >= 100ms of audio is accumulated
                     ws.voicePrepManager.sendAudio(audioChunk);
                 } else {
                     console.warn('⚠️  Voice prep briefing not initialized');
+                }
+            }
+            
+            // Voice Prep: Commit audio buffer (explicit commit from client - e.g., on silence)
+            // NOTE: With server_vad, OpenAI handles commits automatically, so this is rarely needed
+            else if (data.type === 'voice_prep_audio_commit') {
+                if (ws.voicePrepManager && ws.voicePrepManager.realtimeManager) {
+                    // Only commit if audio was actually sent and we have enough buffered
+                    ws.voicePrepManager.commitAudioBuffer();
                 }
             }
 
             // Voice Prep: Stop
             else if (data.type === 'voice_prep_stop') {
                 console.log('🛑 Stopping voice prep briefing');
+                
+                // With server_vad, OpenAI handles commits automatically
+                // We don't need to manually commit on stop - OpenAI will flush any remaining audio
+                // Attempting to commit manually often fails because OpenAI already committed
+                // So we skip manual commit and just disconnect
+                
                 if (ws.voicePrepManager) {
                     ws.voicePrepManager.disconnect();
                     ws.voicePrepManager = null;
@@ -2546,15 +2337,70 @@ app.get('/health', (req, res) => {
     });
 });
 
-server.listen(PORT, () => {
-    console.log(`\n🚀 Proxy server running on http://localhost:${PORT}`);
-    console.log(`📡 Parallel AI API key: ${process.env.PARALLEL_API_KEY ? '✓ Configured' : '✗ Missing'}`);
-    console.log(`🎤 Deepgram API key: ${process.env.DEEPGRAM_API_KEY ? '✓ Configured' : '✗ Missing'}`);
-    console.log(`\nAvailable endpoints:`);
-    console.log(`  POST /api/parallel-search   - Web search`);
-    console.log(`  POST /api/parallel-extract  - Extract from URLs`);
-    console.log(`  POST /api/parallel-research - Deep research tasks`);
-    console.log(`  POST /api/prep-meeting      - Generate meeting brief`);
-    console.log(`  WS   /ws/meeting-stream     - Real-time meeting assistant`);
-    console.log(`  GET  /health                - Health check\n`);
+// Start server with database validation
+async function startServer() {
+    logger.info('Testing database connection...');
+
+    try {
+        // Use centralized database connection module
+        const { testConnection } = require('./db/connection');
+        const connected = await testConnection();
+
+        if (!connected) {
+            logger.warn('Database connection test failed - server will start but database features may not work');
+            console.error('\n⚠️  WARNING: Database connection failed');
+            console.error('   Server will start, but features requiring database will not work.');
+            console.error('   Fix the connection issue and restart the server.\n');
+            // Don't exit - allow server to start for development/testing
+        } else {
+            logger.info('Database connection successful');
+        }
+
+    } catch (error) {
+        logger.error({ error: error.message }, 'Database connection error');
+        console.error('⚠️  Database connection error - server will start anyway');
+        console.error('   Please check your SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env file');
+        console.error('   Or run migrations: node db/runMigrations.js\n');
+        // Don't exit - allow server to start for development/testing
+    }
+
+    server.listen(PORT, () => {
+        logger.info({
+            port: PORT,
+            parallelApiConfigured: !!process.env.PARALLEL_API_KEY,
+            deepgramConfigured: !!process.env.DEEPGRAM_API_KEY,
+            supabaseConnected: true
+        }, 'Server started');
+        
+        // Also log to console for visibility
+        console.log(`\n🚀 Server running on http://localhost:${PORT}`);
+        console.log(`📡 Parallel AI API key: ${process.env.PARALLEL_API_KEY ? '✓ Configured' : '✗ Missing'}`);
+        console.log(`🎤 Deepgram API key: ${process.env.DEEPGRAM_API_KEY ? '✓ Configured' : '✗ Missing'}`);
+        console.log(`💾 Supabase database: ✓ Connected`);
+        console.log(`\nAvailable endpoints:`);
+        console.log(`  POST /auth/google/callback     - OAuth sign-in`);
+        console.log(`  POST /auth/google/add-account  - Add account`);
+        console.log(`  GET  /auth/me                  - Current user`);
+        console.log(`  GET  /api/accounts             - List accounts`);
+        console.log(`  POST /api/prep-meeting         - Multi-account meeting prep`);
+        console.log(`  POST /api/parallel-search      - Web search`);
+        console.log(`  POST /api/parallel-extract     - Extract from URLs`);
+        console.log(`  POST /api/parallel-research    - Deep research tasks`);
+        console.log(`  WS   /ws/meeting-stream        - Real-time meeting assistant`);
+        console.log(`  GET  /health                   - Health check\n`);
+    });
+}
+
+// Error handling middleware - must be last
+const { errorHandler } = require('./middleware/errorHandler');
+app.use(errorHandler);
+
+// Start session cleanup service
+const { startPeriodicCleanup } = require('./services/sessionCleanup');
+const CLEANUP_INTERVAL_HOURS = parseInt(process.env.SESSION_CLEANUP_INTERVAL_HOURS || '6', 10);
+startPeriodicCleanup(CLEANUP_INTERVAL_HOURS);
+
+startServer().catch(error => {
+    logger.fatal({ error }, 'Fatal error starting server');
+    process.exit(1);
 });

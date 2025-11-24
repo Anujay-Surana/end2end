@@ -11,19 +11,41 @@
             box-sizing: border-box;
         }
 
+        /* Design System - Minimal Color Palette */
+        :root {
+            --color-primary: #1a1a1a;
+            --color-accent: #2563eb;
+            --color-bg: #ffffff;
+            --color-bg-secondary: #f9fafb;
+            --color-text: #1a1a1a;
+            --color-text-secondary: #6b7280;
+            --color-border: #e5e7eb;
+            --color-hover: #f3f4f6;
+            --spacing-xs: 4px;
+            --spacing-sm: 8px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+            --spacing-xl: 32px;
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
-            padding: 20px;
+            background: var(--color-bg-secondary);
+            padding: var(--spacing-md);
+            color: var(--color-text);
+            line-height: 1.6;
         }
 
         .container {
             max-width: 800px;
             margin: 0 auto;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            padding: 30px;
+            background: var(--color-bg);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            padding: var(--spacing-xl);
         }
 
         .header {
@@ -32,9 +54,290 @@
             position: relative;
         }
 
-        h1 {
+        /* Chat Mode Toggle */
+        .chat-mode-toggle {
+            position: absolute;
+            top: 0;
+            left: 0;
+            background: var(--color-primary);
+            color: white;
+            border: none;
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .chat-mode-toggle:hover {
+            background: #2d2d2d;
+        }
+
+        .chat-mode-toggle.active {
+            background: var(--color-accent);
+        }
+
+        /* Chat Mode Container */
+        .chat-mode-container {
+            display: none;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .chat-mode-container.active {
+            display: block;
+        }
+
+        /* Date Picker Card */
+        .date-picker-card {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            text-align: center;
+        }
+
+        .date-picker-card h2 {
             color: #333;
-            margin-bottom: 20px;
+            font-size: 24px;
+            margin-bottom: 24px;
+            font-weight: 600;
+        }
+
+        .date-input-group {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .date-input {
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            color: #333;
+            background: #fafafa;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .date-input:hover {
+            border-color: var(--color-primary);
+            background: var(--color-bg);
+        }
+
+        .date-input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            background: var(--color-bg);
+            box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.1);
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .action-card {
+            background: var(--color-bg);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            border: 1px solid var(--color-border);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-card:hover {
+            border-color: var(--color-primary);
+            background: var(--color-hover);
+            transform: translateY(-1px);
+        }
+
+        .action-card.primary {
+            background: var(--color-primary);
+            color: white;
+            border-color: var(--color-primary);
+        }
+
+        .action-card.primary:hover {
+            background: #2d2d2d;
+        }
+
+        .action-card.secondary {
+            background: var(--color-bg);
+            color: var(--color-text);
+            border-color: var(--color-border);
+        }
+
+        .action-card h3 {
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .action-card p {
+            font-size: 14px;
+            opacity: 0.9;
+            margin: 0;
+        }
+
+        /* Meeting Selection Modal */
+        .meeting-selection-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .meeting-selection-modal.active {
+            display: flex;
+        }
+
+        /* Loading Modal */
+        .loading-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 10001;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .loading-modal-content {
+            background: white;
+            border-radius: 16px;
+            padding: 48px;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .loading-modal-content h3 {
+            margin: 24px 0 8px 0;
+            color: var(--color-text-primary);
+            font-size: 20px;
+        }
+
+        .loading-modal-content p {
+            margin: 0;
+            color: var(--color-text-secondary);
+            font-size: 14px;
+        }
+
+        .loading-modal-content .prep-spinner {
+            margin: 0 auto;
+            width: 48px;
+            height: 48px;
+        }
+
+        .meeting-selection-content {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .meeting-selection-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .meeting-selection-header h2 {
+            color: #333;
+            font-size: 24px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .meeting-selection-close {
+            background: none;
+            border: none;
+            font-size: 28px;
+            cursor: pointer;
+            color: #666;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.3s;
+        }
+
+        .meeting-selection-close:hover {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .meeting-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .meeting-card {
+            background: #fafafa;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .meeting-card:hover {
+            border-color: var(--color-primary);
+            background: var(--color-bg);
+        }
+
+        .meeting-card-time {
+            color: var(--color-accent);
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .meeting-card-title {
+            color: var(--color-text);
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: var(--spacing-sm);
+            line-height: 1.4;
+        }
+
+        .meeting-card-attendees {
+            color: var(--color-text-secondary);
+            font-size: 14px;
+        }
+
+        h1 {
+            color: var(--color-text);
+            margin-bottom: var(--spacing-md);
+            font-weight: 600;
+            font-size: 28px;
         }
 
         .user-profile {
@@ -65,28 +368,29 @@
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background: #4285f4;
+            background: var(--color-primary);
             color: white;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: 600;
+            font-weight: 500;
             font-size: 16px;
         }
 
         #signInButton {
-            background: #4285f4;
+            background: var(--color-primary);
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
+            padding: var(--spacing-sm) var(--spacing-lg);
+            border-radius: var(--radius-sm);
             font-size: 16px;
+            font-weight: 500;
             cursor: pointer;
-            transition: background 0.3s;
+            transition: background 0.2s;
         }
 
         #signInButton:hover {
-            background: #357ae8;
+            background: #2d2d2d;
         }
 
         .date-navigation {
@@ -129,18 +433,19 @@
         }
 
         .event {
-            background: #f9f9f9;
-            padding: 16px;
-            margin-bottom: 12px;
-            border-radius: 8px;
-            border-left: 4px solid #4285f4;
+            background: var(--color-bg);
+            padding: var(--spacing-md);
+            margin-bottom: var(--spacing-sm);
+            border-radius: var(--radius-md);
+            border-left: 3px solid var(--color-primary);
+            border: 1px solid var(--color-border);
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all 0.2s;
         }
 
         .event:hover {
-            background: #f0f0f0;
-            transform: translateX(4px);
+            background: var(--color-hover);
+            border-color: var(--color-primary);
         }
 
         .event-time {
@@ -162,34 +467,35 @@
         }
 
         .event-countdown {
-            color: #4285f4;
+            color: var(--color-accent);
             font-size: 13px;
-            font-weight: 600;
-            margin-top: 6px;
+            font-weight: 500;
+            margin-top: var(--spacing-xs);
         }
 
         .event-countdown.past {
-            color: #999;
+            color: var(--color-text-secondary);
         }
 
         .event-countdown.happening {
-            color: #34a853;
+            color: var(--color-accent);
         }
 
         .meeting-info-toggle {
-            background: #e8f0fe;
-            color: #4285f4;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 6px;
+            background: var(--color-bg-secondary);
+            color: var(--color-text);
+            border: 1px solid var(--color-border);
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-sm);
             font-size: 13px;
+            font-weight: 500;
             cursor: pointer;
-            margin-top: 10px;
-            transition: background 0.3s;
+            margin-top: var(--spacing-sm);
+            transition: background 0.2s;
         }
 
         .meeting-info-toggle:hover {
-            background: #d2e3fc;
+            background: var(--color-hover);
         }
 
         .meeting-details {
@@ -228,11 +534,12 @@
         }
 
         .context-panel {
-            background: #f0f7ff;
-            padding: 12px;
-            margin-top: 12px;
-            border-radius: 6px;
-            border-left: 3px solid #4285f4;
+            background: var(--color-bg-secondary);
+            padding: var(--spacing-sm);
+            margin-top: var(--spacing-sm);
+            border-radius: var(--radius-sm);
+            border-left: 3px solid var(--color-primary);
+            border: 1px solid var(--color-border);
         }
 
         .context-header {
@@ -303,25 +610,25 @@
         }
 
         .loading-context {
-            color: #999;
+            color: var(--color-text-secondary);
             font-size: 12px;
             font-style: italic;
         }
 
         .no-events {
             text-align: center;
-            color: #999;
-            padding: 40px;
+            color: var(--color-text-secondary);
+            padding: var(--spacing-xl);
             font-size: 16px;
         }
 
         .loading {
             text-align: center;
-            color: #666;
-            padding: 20px;
+            color: var(--color-text-secondary);
+            padding: var(--spacing-md);
         }
 
-        #signOutButton {
+        #signOutButton, #manageAccountsButton {
             background: #666;
             color: white;
             border: none;
@@ -330,10 +637,155 @@
             font-size: 14px;
             cursor: pointer;
             margin-top: 20px;
+            margin-right: 10px;
         }
 
-        #signOutButton:hover {
+        #signOutButton:hover, #manageAccountsButton:hover {
             background: #555;
+        }
+
+        #manageAccountsButton {
+            background: #007bff;
+        }
+
+        #manageAccountsButton:hover {
+            background: #0056b3;
+        }
+
+        /* Account Management Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            color: #333;
+        }
+
+        .close-modal {
+            font-size: 28px;
+            font-weight: bold;
+            color: #aaa;
+            cursor: pointer;
+            border: none;
+            background: none;
+        }
+
+        .close-modal:hover {
+            color: #000;
+        }
+
+        .account-list {
+            list-style: none;
+            padding: 0;
+            margin: 20px 0;
+        }
+
+        .account-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            background: #f9f9f9;
+        }
+
+        .account-info {
+            flex: 1;
+        }
+
+        .account-email {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .account-badge {
+            display: inline-block;
+            background: #007bff;
+            color: white;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+
+        .account-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .account-actions button {
+            padding: 6px 12px;
+            font-size: 13px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-set-primary {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-set-primary:hover {
+            background: #218838;
+        }
+
+        .btn-remove {
+            background: var(--color-text-secondary);
+            color: white;
+        }
+
+        .btn-remove:hover {
+            background: var(--color-text);
+        }
+
+        .btn-add-account {
+            width: 100%;
+            padding: 12px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .btn-add-account:hover {
+            background: #0056b3;
+        }
+
+        .no-accounts {
+            text-align: center;
+            color: #666;
+            padding: 20px;
         }
 
         /* Meeting Detail Page Styles */
@@ -383,8 +835,8 @@
 
         .meeting-status-large {
             font-size: 14px;
-            color: #4285f4;
-            font-weight: 600;
+            color: var(--color-accent);
+            font-weight: 500;
         }
 
         /* Tab Navigation */
@@ -408,12 +860,12 @@
         }
 
         .tab-button:hover {
-            color: #4285f4;
+            color: var(--color-primary);
         }
 
         .tab-button.active {
-            color: #4285f4;
-            border-bottom-color: #4285f4;
+            color: var(--color-primary);
+            border-bottom-color: var(--color-primary);
         }
 
         .tab-content {
@@ -462,18 +914,20 @@
         }
 
         .select-all-btn {
-            background: #e8f0fe;
-            color: #4285f4;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
+            background: var(--color-bg-secondary);
+            color: var(--color-text);
+            border: 1px solid var(--color-border);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: var(--radius-sm);
             font-size: 12px;
+            font-weight: 500;
             cursor: pointer;
-            margin-top: 10px;
+            margin-top: var(--spacing-sm);
+            transition: background 0.2s;
         }
 
         .select-all-btn:hover {
-            background: #d2e3fc;
+            background: var(--color-hover);
         }
 
         /* Attachments */
@@ -491,13 +945,13 @@
         .attachment-icon {
             width: 40px;
             height: 40px;
-            background: #e8f0fe;
-            border-radius: 6px;
+            background: var(--color-bg-secondary);
+            border-radius: var(--radius-sm);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #4285f4;
-            font-weight: 600;
+            color: var(--color-text);
+            font-weight: 500;
             font-size: 12px;
         }
 
@@ -518,18 +972,20 @@
         }
 
         .attachment-link {
-            background: #4285f4;
+            background: var(--color-primary);
             color: white;
             border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: var(--radius-sm);
             font-size: 12px;
+            font-weight: 500;
             cursor: pointer;
             text-decoration: none;
+            transition: background 0.2s;
         }
 
         .attachment-link:hover {
-            background: #357ae8;
+            background: #2d2d2d;
         }
 
         .overview-grid {
@@ -540,44 +996,47 @@
         }
 
         .overview-card {
-            background: #f9f9f9;
-            padding: 16px;
-            border-radius: 8px;
+            background: var(--color-bg-secondary);
+            padding: var(--spacing-md);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--color-border);
         }
 
         .overview-card-title {
-            font-weight: 600;
-            color: #666;
+            font-weight: 500;
+            color: var(--color-text-secondary);
             font-size: 12px;
-            margin-bottom: 8px;
+            margin-bottom: var(--spacing-sm);
             text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .overview-card-content {
-            color: #333;
+            color: var(--color-text);
             font-size: 14px;
         }
 
         .prep-button {
-            background: #34a853;
+            background: var(--color-primary);
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
+            padding: var(--spacing-sm) var(--spacing-lg);
+            border-radius: var(--radius-sm);
             font-size: 14px;
-            font-weight: 600;
+            font-weight: 500;
             cursor: pointer;
-            margin-left: 12px;
-            transition: background 0.3s;
+            margin-left: var(--spacing-sm);
+            transition: background 0.2s;
         }
 
         .prep-button:hover {
-            background: #2d8e47;
+            background: #2d2d2d;
         }
 
         .prep-button:disabled {
-            background: #ccc;
+            background: var(--color-border);
             cursor: not-allowed;
+            color: var(--color-text-secondary);
         }
 
         .prep-modal {
@@ -610,8 +1069,8 @@
         .prep-modal-header {
             font-size: 24px;
             font-weight: 600;
-            color: #333;
-            margin-bottom: 20px;
+            color: var(--color-text);
+            margin-bottom: var(--spacing-md);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -621,7 +1080,7 @@
             background: none;
             border: none;
             font-size: 28px;
-            color: #666;
+            color: var(--color-text-secondary);
             cursor: pointer;
             padding: 0;
             width: 32px;
@@ -630,7 +1089,7 @@
         }
 
         .prep-modal-close:hover {
-            color: #333;
+            color: var(--color-text);
         }
 
         .prep-content {
@@ -641,16 +1100,18 @@
 
         .prep-content h2 {
             font-size: 18px;
-            margin-top: 20px;
-            margin-bottom: 10px;
-            color: #34a853;
+            margin-top: var(--spacing-md);
+            margin-bottom: var(--spacing-sm);
+            color: var(--color-text);
+            font-weight: 600;
         }
 
         .prep-content h3 {
             font-size: 16px;
-            margin-top: 16px;
-            margin-bottom: 8px;
-            color: #666;
+            margin-top: var(--spacing-md);
+            margin-bottom: var(--spacing-sm);
+            color: var(--color-text-secondary);
+            font-weight: 500;
         }
 
         .prep-content ul {
@@ -662,20 +1123,49 @@
             margin-bottom: 6px;
         }
 
+        /* Skeleton Loaders */
+        .skeleton {
+            background: linear-gradient(90deg, var(--color-bg-secondary) 25%, var(--color-hover) 50%, var(--color-bg-secondary) 75%);
+            background-size: 200% 100%;
+            animation: skeleton-loading 1.5s ease-in-out infinite;
+            border-radius: var(--radius-sm);
+        }
+
+        @keyframes skeleton-loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .skeleton-text {
+            height: 16px;
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .skeleton-title {
+            height: 24px;
+            width: 60%;
+            margin-bottom: var(--spacing-md);
+        }
+
+        .skeleton-card {
+            height: 120px;
+            margin-bottom: var(--spacing-md);
+        }
+
         .prep-loading {
             text-align: center;
-            padding: 40px;
-            color: #666;
+            padding: var(--spacing-xl);
+            color: var(--color-text-secondary);
         }
 
         .prep-spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #34a853;
+            border: 2px solid var(--color-border);
+            border-top: 2px solid var(--color-primary);
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
+            width: 32px;
+            height: 32px;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto var(--spacing-md);
         }
 
         @keyframes spin {
@@ -690,12 +1180,12 @@
         }
 
         .brief-hero-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-primary);
             color: white;
-            padding: 32px;
-            border-radius: 16px;
-            margin-bottom: 24px;
-            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.25);
+            padding: var(--spacing-xl);
+            border-radius: var(--radius-lg);
+            margin-bottom: var(--spacing-lg);
+            border: 1px solid var(--color-border);
         }
 
         .brief-hero-card h2 {
@@ -754,13 +1244,13 @@
             width: 56px;
             height: 56px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-primary);
             color: white;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 18px;
-            font-weight: 700;
+            font-weight: 500;
             flex-shrink: 0;
         }
 
@@ -798,7 +1288,7 @@
 
         .key-facts li:before {
             content: '•';
-            color: #667eea;
+            color: var(--color-primary);
             font-weight: bold;
             position: absolute;
             left: -15px;
@@ -870,13 +1360,13 @@
         }
 
         .brief-tab-button:hover {
-            color: #34a853;
-            background: #f5f5f5;
+            color: var(--color-primary);
+            background: var(--color-bg-secondary);
         }
 
         .brief-tab-button.active {
-            color: #34a853;
-            border-bottom-color: #34a853;
+            color: var(--color-primary);
+            border-bottom-color: var(--color-primary);
         }
 
         .brief-tab-content {
@@ -913,12 +1403,12 @@
             width: 48px;
             height: 48px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-primary);
             color: white;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: 600;
+            font-weight: 500;
             font-size: 18px;
         }
 
@@ -965,9 +1455,10 @@
         }
 
         .insight-card h4 {
-            margin: 0 0 12px 0;
-            color: #34a853;
+            margin: 0 0 var(--spacing-sm) 0;
+            color: var(--color-text);
             font-size: 16px;
+            font-weight: 600;
         }
 
         .insight-card ul {
@@ -984,18 +1475,19 @@
         /* Source Citations */
         .source-citation {
             display: inline-block;
-            background: #e8f0fe;
-            color: #1967d2;
-            padding: 4px 8px;
-            border-radius: 4px;
+            background: var(--color-bg-secondary);
+            color: var(--color-text);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: var(--radius-sm);
             font-size: 11px;
             text-decoration: none;
-            margin-left: 8px;
+            margin-left: var(--spacing-sm);
             transition: background 0.2s;
+            border: 1px solid var(--color-border);
         }
 
         .source-citation:hover {
-            background: #d2e3fc;
+            background: var(--color-hover);
         }
 
         /* Progress Bar */
@@ -1010,7 +1502,7 @@
 
         .progress-bar {
             height: 100%;
-            background: linear-gradient(90deg, #34a853 0%, #4285f4 100%);
+            background: var(--color-primary);
             width: 0%;
             transition: width 0.3s;
         }
@@ -1100,17 +1592,17 @@
 
         .recommendation-item {
             display: flex;
-            gap: 12px;
-            padding: 16px;
-            background: #f8f9fa;
-            border-left: 4px solid #34a853;
-            border-radius: 4px;
-            margin-bottom: 12px;
+            gap: var(--spacing-sm);
+            padding: var(--spacing-md);
+            background: var(--color-bg-secondary);
+            border-left: 3px solid var(--color-primary);
+            border-radius: var(--radius-sm);
+            margin-bottom: var(--spacing-sm);
             align-items: flex-start;
         }
 
         .rec-number {
-            background: #34a853;
+            background: var(--color-primary);
             color: white;
             width: 28px;
             height: 28px;
@@ -1118,7 +1610,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: 600;
+            font-weight: 500;
             font-size: 14px;
             flex-shrink: 0;
         }
@@ -1131,21 +1623,19 @@
 
         /* Real-Time Meeting Assistant Styles */
         .enter-meeting-button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-primary);
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
+            padding: var(--spacing-sm) var(--spacing-lg);
+            border-radius: var(--radius-md);
             font-size: 15px;
-            font-weight: 600;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+            transition: background 0.2s;
         }
 
         .enter-meeting-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            background: #2d2d2d;
         }
 
         .meeting-assistant {
@@ -1215,16 +1705,16 @@
         }
 
         .transcript-item {
-            margin-bottom: 12px;
-            padding: 10px;
-            background: white;
-            border-radius: 6px;
-            border-left: 3px solid #667eea;
+            margin-bottom: var(--spacing-sm);
+            padding: var(--spacing-sm);
+            background: var(--color-bg);
+            border-radius: var(--radius-sm);
+            border-left: 3px solid var(--color-primary);
         }
 
         .transcript-item.user {
-            border-left-color: #10b981;
-            background: #f0fdf4;
+            border-left-color: var(--color-accent);
+            background: var(--color-bg-secondary);
         }
 
         .transcript-speaker {
@@ -1341,7 +1831,7 @@
         }
 
         .chat-message.user .chat-bubble {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-primary);
             color: white;
             border-bottom-right-radius: 4px;
         }
@@ -1411,9 +1901,8 @@
             left: 30px;
             top: 0;
             bottom: 0;
-            width: 3px;
-            background: linear-gradient(180deg, #4285f4 0%, #34a853 50%, #fbbc04 100%);
-            opacity: 0.3;
+            width: 2px;
+            background: var(--color-border);
         }
 
         .timeline-event {
@@ -1447,28 +1936,28 @@
         }
 
         .timeline-marker.email {
-            background: #4285f4;
+            background: var(--color-primary);
         }
 
         .timeline-marker.document {
-            background: #ea4335;
+            background: var(--color-text-secondary);
         }
 
         .timeline-marker.meeting {
-            background: #34a853;
+            background: var(--color-accent);
         }
 
         .timeline-event.recent .timeline-marker {
-            box-shadow: 0 0 0 2px #34a853, 0 0 10px rgba(52, 168, 83, 0.4);
+            box-shadow: 0 0 0 2px var(--color-accent), 0 0 10px rgba(37, 99, 235, 0.2);
             animation: pulse 2s infinite;
         }
 
         @keyframes pulse {
             0%, 100% {
-                box-shadow: 0 0 0 2px #34a853, 0 0 10px rgba(52, 168, 83, 0.4);
+                box-shadow: 0 0 0 2px var(--color-accent), 0 0 10px rgba(37, 99, 235, 0.2);
             }
             50% {
-                box-shadow: 0 0 0 2px #34a853, 0 0 20px rgba(52, 168, 83, 0.6);
+                box-shadow: 0 0 0 2px var(--color-accent), 0 0 20px rgba(37, 99, 235, 0.3);
             }
         }
 
@@ -1504,18 +1993,21 @@
         }
 
         .timeline-type-badge.email {
-            background: #e8f0fe;
-            color: #4285f4;
+            background: var(--color-bg-secondary);
+            color: var(--color-text);
+            border: 1px solid var(--color-border);
         }
 
         .timeline-type-badge.document {
-            background: #fce8e6;
-            color: #ea4335;
+            background: var(--color-bg-secondary);
+            color: var(--color-text);
+            border: 1px solid var(--color-border);
         }
 
         .timeline-type-badge.meeting {
-            background: #e6f4ea;
-            color: #34a853;
+            background: var(--color-bg-secondary);
+            color: var(--color-text);
+            border: 1px solid var(--color-border);
         }
 
         .timeline-date {
@@ -1540,14 +2032,14 @@
         }
 
         .timeline-snippet {
-            margin: 8px 0 0 0;
+            margin: var(--spacing-sm) 0 0 0;
             font-size: 13px;
-            color: #555;
+            color: var(--color-text);
             line-height: 1.5;
-            padding: 10px;
-            background: #f9f9f9;
-            border-left: 3px solid #4285f4;
-            border-radius: 4px;
+            padding: var(--spacing-sm);
+            background: var(--color-bg-secondary);
+            border-left: 3px solid var(--color-primary);
+            border-radius: var(--radius-sm);
         }
 
         .timeline-action {
@@ -1559,12 +2051,12 @@
 
         .timeline-recent-badge {
             display: inline-block;
-            margin-top: 8px;
-            padding: 4px 8px;
-            background: #34a853;
+            margin-top: var(--spacing-sm);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            background: var(--color-accent);
             color: white;
             font-size: 11px;
-            font-weight: 600;
+            font-weight: 500;
             border-radius: 10px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -1580,6 +2072,7 @@
 <body>
     <div class="container">
         <div class="header">
+            <button id="chatModeToggle" class="chat-mode-toggle" onclick="toggleChatMode()">💬 Chat Mode</button>
             <div id="userProfile" class="user-profile" style="display: none;">
                 <div class="user-info">
                     <div class="user-name" id="userName"></div>
@@ -1591,7 +2084,49 @@
             <button id="signInButton">Sign in with Google</button>
         </div>
 
-        <div id="eventsContainer" class="events-container">
+        <!-- Chat Mode Container -->
+        <div id="chatModeContainer" class="chat-mode-container">
+            <div class="date-picker-card">
+                <h2>Select Date</h2>
+                <div class="date-input-group">
+                    <input type="date" id="chatModeDatePicker" class="date-input" />
+                </div>
+            </div>
+            <div class="action-buttons">
+                <div class="action-card primary" onclick="startDayPrep()">
+                    <h3>📅 Day Prep</h3>
+                    <p>Get a comprehensive 5-7 minute voice brief for all meetings on this day</p>
+                </div>
+                <div class="action-card secondary" onclick="startMeetingPrep()">
+                    <h3>🎙️ Meeting Prep</h3>
+                    <p>Select a specific meeting for a 2-minute voice prep brief</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Meeting Selection Modal -->
+        <div id="meetingSelectionModal" class="meeting-selection-modal">
+            <div class="meeting-selection-content">
+                <div class="meeting-selection-header">
+                    <h2>Select Meeting</h2>
+                    <button class="meeting-selection-close" onclick="closeMeetingSelection()">&times;</button>
+                </div>
+                <div id="meetingList" class="meeting-list">
+                    <!-- Meetings will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Modal for Meeting Prep -->
+        <div id="meetingPrepLoadingModal" class="loading-modal" style="display: none;">
+            <div class="loading-modal-content">
+                <div class="prep-spinner"></div>
+                <h3>Preparing your meeting brief...</h3>
+                <p>This may take a minute. Please wait.</p>
+            </div>
+        </div>
+
+        <div id="eventsContainer" class="events-container visible">
             <div class="date-navigation">
                 <button class="nav-button" id="prevDay">�</button>
                 <div class="current-date" id="currentDate"></div>
@@ -1601,7 +2136,22 @@
             <div id="eventsList"></div>
 
             <div style="text-align: center;">
+                <button id="manageAccountsButton">Manage Accounts</button>
                 <button id="signOutButton">Sign Out</button>
+            </div>
+        </div>
+
+        <!-- Account Management Modal -->
+        <div id="accountModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Manage Connected Accounts</h2>
+                    <button class="close-modal" id="closeAccountModal">&times;</button>
+                </div>
+                <ul id="accountList" class="account-list">
+                    <li class="no-accounts">Loading accounts...</li>
+                </ul>
+                <button id="addAccountButton" class="btn-add-account">+ Add Another Account</button>
             </div>
         </div>
 
@@ -1611,8 +2161,8 @@
                 <button class="back-button" onclick="showCalendarView()">← Back to Calendar</button>
                 <div style="display: flex; gap: 10px;">
                     <button class="prep-button" id="prepMeButton" onclick="prepareForMeeting()">Prep Me</button>
-                    <button class="prep-button" id="interactivePrepButton" onclick="startInteractivePrep()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">💬 Interactive Prep</button>
-                    <button class="prep-button" id="voicePrepButton" onclick="startVoicePrep()" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">🎙️ Voice Prep Mode</button>
+                    <button class="prep-button" id="interactivePrepButton" onclick="startInteractivePrep()" style="background: var(--color-primary);">💬 Interactive Prep</button>
+                    <button class="prep-button" id="voicePrepButton" onclick="startVoicePrep()" style="background: var(--color-primary);">🎙️ Voice Prep Mode</button>
                     <button class="enter-meeting-button" id="enterMeetingButton" onclick="enterMeeting()" style="display: none;">🎤 Entering Meeting</button>
                 </div>
             </div>
@@ -1777,14 +2327,14 @@
                             <button
                                 id="voiceInputBtn"
                                 onclick="toggleVoiceInput()"
-                                style="padding: 12px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;"
+                                style="padding: 12px 20px; background: var(--color-primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;"
                                 title="Voice input"
                             >
                                 🎤
                             </button>
                             <button
                                 onclick="sendChatMessage()"
-                                style="padding: 12px 20px; background: #764ba2; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;"
+                                style="padding: 12px 20px; background: var(--color-primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;"
                             >
                                 Send
                             </button>
@@ -1813,15 +2363,15 @@
 
             <div style="padding: 30px;">
                 <!-- Meeting Info -->
-                <div style="color: #666; font-size: 14px; margin-bottom: 20px; padding: 16px; background: #f8f9fa; border-radius: 8px; text-align: center;">
+                <div style="color: var(--color-text-secondary); font-size: 14px; margin-bottom: 20px; padding: 16px; background: var(--color-bg-secondary); border-radius: 8px; text-align: center; border: 1px solid var(--color-border);">
                     <strong id="voicePrepMeetingTitle"></strong>
                     <div style="font-size: 13px; margin-top: 4px;" id="voicePrepMeetingTime"></div>
                 </div>
 
                 <!-- Status and Timer -->
                 <div style="margin-bottom: 20px; text-align: center;">
-                    <div style="font-size: 48px; font-weight: bold; color: #764ba2; margin-bottom: 8px;" id="voicePrepTimer">2:00</div>
-                    <div style="font-size: 14px; color: #666;" id="voicePrepStatus">Ready to start your briefing</div>
+                    <div style="font-size: 48px; font-weight: 600; color: var(--color-primary); margin-bottom: 8px;" id="voicePrepTimer">2:00</div>
+                    <div style="font-size: 14px; color: var(--color-text-secondary);" id="voicePrepStatus">Ready to start your briefing</div>
                 </div>
 
                 <!-- Waveform Visualization -->
@@ -1840,16 +2390,16 @@
 
                 <!-- Controls -->
                 <div style="display: flex; gap: 12px; justify-content: center;">
-                    <button id="voicePrepStartBtn" onclick="startVoicePrepSession()" style="padding: 12px 32px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                    <button id="voicePrepStartBtn" onclick="startVoicePrepSession()" style="padding: 12px 32px; background: var(--color-primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 500;">
                         🎙️ Start Briefing
                     </button>
-                    <button id="voicePrepStopBtn" onclick="stopVoicePrepSession()" style="padding: 12px 32px; background: #dc3545; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; display: none;">
+                    <button id="voicePrepStopBtn" onclick="stopVoicePrepSession()" style="padding: 12px 32px; background: var(--color-text-secondary); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; display: none;">
                         ⏹️ Stop
                     </button>
                 </div>
 
                 <!-- Instructions -->
-                <div style="margin-top: 20px; padding: 12px; background: #e8f5e9; border-radius: 8px; font-size: 13px; color: #2e7d32;">
+                <div style="margin-top: 20px; padding: 12px; background: var(--color-bg-secondary); border-radius: 8px; font-size: 13px; color: var(--color-text); border: 1px solid var(--color-border);">
                     <strong>💡 How it works:</strong>
                     <ul style="margin: 8px 0 0 20px; padding: 0;">
                         <li>The AI will deliver a structured 2-minute briefing</li>
@@ -1866,7 +2416,7 @@
     <script>
         const CLIENT_ID = '173246695918-vbpcthe7tuo0vhmft1d1poots6cd38l3.apps.googleusercontent.com';
         const API_KEY = 'YOUR_API_KEY'; // Not needed for OAuth flow
-        const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly';
+        const SCOPES = 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly';
         // API keys moved to backend server for security
 
         let tokenClient;
@@ -1882,48 +2432,126 @@
         let currentFiles = [];
 
         window.onload = function() {
-            // Initialize Google Identity Services
-            tokenClient = google.accounts.oauth2.initTokenClient({
+            // Initialize Google Identity Services - use CODE flow for multi-account support
+            // NOTE: initCodeClient with ux_mode: 'popup' REQUIRES 'postmessage' in authorized redirect URIs
+            tokenClient = google.accounts.oauth2.initCodeClient({
                 client_id: CLIENT_ID,
                 scope: SCOPES,
-                callback: (response) => {
-                    if (response.access_token) {
-                        accessToken = response.access_token;
-                        onSignIn();
+                ux_mode: 'popup',
+                callback: async (response) => {
+                    if (response.code) {
+                        // Exchange code for session on backend
+                        await exchangeCodeForSession(response.code);
+                    } else if (response.error) {
+                        // Handle OAuth errors
+                        console.error('OAuth error:', response.error, response);
+                        if (response.error === 'invalid_request') {
+                            console.error('OAuth invalid_request error details:', {
+                                error: response.error,
+                                error_description: response.error_description,
+                                hint: 'Google Identity Services initCodeClient with popup mode REQUIRES "postmessage" in authorized redirect URIs'
+                            });
+                            alert('OAuth configuration error: "postmessage" must be added to Authorized redirect URIs in Google Cloud Console.\n\nThis is required for Google Identity Services popup flow.');
+                        } else {
+                            alert('Sign in failed: ' + (response.error_description || response.error));
+                        }
                     }
                 },
             });
 
+            // Check if already signed in (session exists)
+            checkSession();
+
             document.getElementById('signInButton').addEventListener('click', () => {
-                tokenClient.requestAccessToken();
+                tokenClient.requestCode();
             });
 
             document.getElementById('signOutButton').addEventListener('click', signOut);
             document.getElementById('prevDay').addEventListener('click', () => changeDay(-1));
             document.getElementById('nextDay').addEventListener('click', () => changeDay(1));
+
+            // Account management modal
+            document.getElementById('manageAccountsButton').addEventListener('click', openAccountModal);
+            document.getElementById('closeAccountModal').addEventListener('click', closeAccountModal);
+            document.getElementById('addAccountButton').addEventListener('click', addNewAccount);
         };
+
+        /**
+         * Exchange OAuth code for session (multi-account mode)
+         */
+        async function exchangeCodeForSession(code) {
+            try {
+                const response = await fetch('/auth/google/callback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include', // Include cookies
+                    body: JSON.stringify({ code })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Store access token for direct Google API calls
+                    accessToken = data.access_token;
+                    console.log('✅ Access token stored');
+
+                    // Session cookie is automatically set by server
+                    await onSignIn();
+                } else {
+                    console.error('Sign in failed:', data.error);
+                    alert('Sign in failed: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error exchanging code:', error);
+                alert('Sign in failed. Please try again.');
+            }
+        }
+
+        /**
+         * Check if user already has a valid session
+         */
+        async function checkSession() {
+            try {
+                const response = await fetch('/auth/me', {
+                    credentials: 'include' // Include cookies
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    userEmail = data.user.email;
+                    userProfile = data.user;
+                    accessToken = data.accessToken || null; // Get token if available
+                    await onSignIn();
+                }
+            } catch (error) {
+                // No valid session, user needs to sign in
+                console.log('No valid session found');
+            }
+        }
 
         async function fetchUserProfile() {
             try {
-                const response = await fetch(
-                    'https://www.googleapis.com/oauth2/v2/userinfo',
-                    {
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`
-                        }
-                    }
-                );
+                // Use session-based auth endpoint instead of direct Google API
+                const response = await fetch('/auth/me', {
+                    credentials: 'include'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch user profile');
+                }
 
                 const data = await response.json();
-                userEmail = data.email;
-                userProfile = data;
+                const user = data.user;
+
+                userEmail = user.email;
+                userProfile = user;
 
                 // Display user profile
-                document.getElementById('userName').textContent = data.name || 'User';
-                document.getElementById('userEmail').textContent = data.email;
+                document.getElementById('userName').textContent = user.name || 'User';
+                document.getElementById('userEmail').textContent = user.email;
 
                 // Get initials for avatar
-                const nameParts = (data.name || data.email).split(' ');
+                const nameParts = (user.name || user.email).split(' ');
                 const initials = nameParts.length > 1
                     ? nameParts[0][0] + nameParts[nameParts.length - 1][0]
                     : nameParts[0][0];
@@ -1946,7 +2574,17 @@
             loadEvents();
         }
 
-        function signOut() {
+        async function signOut() {
+            try {
+                // Call backend logout endpoint
+                await fetch('/auth/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+
             // Clear all user-specific state to prevent data leakage
             accessToken = null;
             userEmail = null;
@@ -1965,7 +2603,6 @@
             document.getElementById('signInButton').style.display = 'block';
             document.getElementById('eventsContainer').classList.remove('visible');
             document.getElementById('userProfile').style.display = 'none';
-            google.accounts.oauth2.revoke(accessToken);
         }
 
         function changeDay(delta) {
@@ -1988,7 +2625,18 @@
             const currentDateEl = document.getElementById('currentDate');
 
             currentDateEl.textContent = formatDate(currentDate);
-            eventsList.innerHTML = '<div class="loading">Loading events...</div>';
+            // Show skeleton loaders
+            eventsList.innerHTML = `
+                <div class="skeleton-card"></div>
+                <div class="skeleton-card"></div>
+                <div class="skeleton-card"></div>
+            `;
+
+            // Check if accessToken is available
+            if (!accessToken) {
+                eventsList.innerHTML = '<div class="no-events">Please sign in to view events.</div>';
+                return;
+            }
 
             const startOfDay = new Date(currentDate);
             startOfDay.setHours(0, 0, 0, 0);
@@ -2009,6 +2657,18 @@
                         }
                     }
                 );
+
+                // Handle 401 errors (token expired/revoked)
+                if (response.status === 401) {
+                    console.warn('Token expired or revoked, clearing session');
+                    accessToken = null;
+                    eventsList.innerHTML = '<div class="no-events">Your session has expired. Please sign in again.</div>';
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error(`Failed to load events: ${response.status}`);
+                }
 
                 const data = await response.json();
                 allEvents = data.items || [];
@@ -2384,7 +3044,7 @@
                         <div class="event-title">${event.summary || 'Untitled Event'}</div>
                         ${timeInfo ? `<div class="event-countdown ${timeInfo.class}" data-event-time="${start}" data-event-end="${end}">${timeInfo.text}</div>` : ''}
                         ${eventStatus ? `<div class="event-countdown" style="margin-top: 4px;">${eventStatus}</div>` : ''}
-                        <div style="margin-top: 10px; color: #4285f4; font-size: 13px; font-weight: 600;">Click for details →</div>
+                        <div style="margin-top: 10px; color: var(--color-accent); font-size: 13px; font-weight: 500;">Click for details →</div>
                     </div>
                 `;
             }).join('');
@@ -3394,14 +4054,21 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             button.disabled = true;
             button.textContent = 'Preparing...';
 
-            // Open modal with loading state
+            // Open modal with loading state - use skeleton loaders
             const modal = document.getElementById('prepModal');
             const modalBody = document.getElementById('prepModalBody');
             modalBody.innerHTML = `
                 <div class="prep-loading">
                     <div class="prep-spinner"></div>
-                    <div id="loadingMessage">Generating your meeting brief...</div>
-                    <p style="color: #666; font-size: 13px; margin-top: 10px;">This may take 15-20 seconds</p>
+                    <div id="loadingMessage" style="margin-bottom: 20px; font-weight: 500;">Generating your meeting brief...</div>
+                    <div style="max-width: 600px; margin: 0 auto;">
+                        <div class="skeleton-title"></div>
+                        <div class="skeleton-text"></div>
+                        <div class="skeleton-text" style="width: 80%;"></div>
+                        <div class="skeleton-card" style="margin-top: 20px;"></div>
+                        <div class="skeleton-card"></div>
+                    </div>
+                    <p style="color: var(--color-text-secondary); font-size: 13px; margin-top: 20px;">This may take 15-20 seconds</p>
                 </div>
             `;
             modal.classList.add('visible');
@@ -3414,21 +4081,60 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 currentEmails = [];
                 currentFiles = [];
 
-                // Call backend to generate brief (server now fetches emails/files)
+                // Call backend to generate brief (server now fetches emails/files from ALL connected accounts)
                 const response = await fetch('/api/prep-meeting', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
+                    credentials: 'include', // Include session cookie
                     body: JSON.stringify({
                         meeting,
-                        attendees,
-                        accessToken: accessToken // Server uses this to fetch emails/files
+                        attendees
+                        // No accessToken needed - session-based auth automatically fetches from ALL accounts
                     })
                 });
 
                 if (!response.ok) {
-                    throw new Error(`Server error: ${response.status}`);
+                    // Try to parse error response body
+                    let errorMessage = `Server error: ${response.status}`;
+                    let errorDetails = null;
+                    
+                    try {
+                        const errorData = await response.json();
+                        errorMessage = errorData.message || errorMessage;
+                        errorDetails = errorData;
+                        
+                        // Check for revoked token error
+                        if (response.status === 401 && (errorData.error === 'TokenRevoked' || errorData.revoked === true)) {
+                            // Clear session and redirect to sign-in
+                            document.cookie = 'session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+                            alert('Your session has expired. Please sign in again.');
+                            window.location.href = '/';
+                            return;
+                        }
+                        
+                        // Log full error details to console for debugging
+                        console.error('Server error response:', {
+                            status: response.status,
+                            statusText: response.statusText,
+                            error: errorData
+                        });
+                    } catch (parseError) {
+                        // If response isn't JSON, try to get text
+                        try {
+                            const errorText = await response.text();
+                            console.error('Server error (non-JSON):', errorText);
+                            errorMessage = errorText || errorMessage;
+                        } catch (textError) {
+                            console.error('Failed to parse error response:', textError);
+                        }
+                    }
+                    
+                    const error = new Error(errorMessage);
+                    error.status = response.status;
+                    error.details = errorDetails;
+                    throw error;
                 }
 
                 const brief = await response.json();
@@ -3452,6 +4158,29 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
             } catch (error) {
                 console.error('Error preparing meeting brief:', error);
+                
+                // Build detailed error message for display
+                let errorDisplay = error.message || 'An error occurred while preparing your meeting brief';
+                
+                if (error.details) {
+                    // Add field-level details if available
+                    if (error.details.field) {
+                        errorDisplay += `\n\nField: ${error.details.field}`;
+                    }
+                    if (error.details.expected) {
+                        errorDisplay += `\nExpected: ${error.details.expected}`;
+                    }
+                    if (error.details.received !== undefined) {
+                        const receivedStr = typeof error.details.received === 'object' 
+                            ? JSON.stringify(error.details.received).substring(0, 100)
+                            : String(error.details.received).substring(0, 100);
+                        errorDisplay += `\nReceived: ${receivedStr}`;
+                    }
+                    if (error.details.requestId) {
+                        errorDisplay += `\n\nRequest ID: ${error.details.requestId}`;
+                    }
+                }
+                
                 modalBody.innerHTML = `
                     <div class="prep-content">
                         <p style="color: #d32f2f;">Failed to generate meeting brief. Please try again.</p>
@@ -3498,35 +4227,48 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
                     <!-- Tab: Attendees -->
                     <div id="brief-tab-attendees" class="brief-tab-content active">
-                        ${brief.attendees && brief.attendees.length > 0 ? `
+                        ${brief.attendees && Array.isArray(brief.attendees) && brief.attendees.length > 0 ? `
                             <div class="attendee-grid">
-                                ${brief.attendees.map(att => `
+                                ${brief.attendees.map(att => {
+                                    try {
+                                        const name = att?.name || 'Unknown';
+                                        const title = att?.title || 'No title';
+                                        const email = att?.email || 'No email';
+                                        const keyFacts = Array.isArray(att?.keyFacts) ? att.keyFacts : [];
+                                        const dataSource = att?.dataSource || '';
+                                        return `
                                     <div class="attendee-modern-card">
-                                        <div class="attendee-avatar-modern">${getInitials(att.name)}</div>
+                                        <div class="attendee-avatar-modern">${getInitials(name)}</div>
                                         <div class="attendee-details">
-                                            <h4>${att.name}</h4>
-                                            <p class="attendee-title">${att.title}</p>
-                                            <p class="attendee-email">${att.email}</p>
-                                            ${att.keyFacts && att.keyFacts.length > 0 ? `
+                                            <h4>${name}</h4>
+                                            <p class="attendee-title">${title}</p>
+                                            <p class="attendee-email">${email}</p>
+                                            ${keyFacts.length > 0 ? `
                                                 <div class="key-facts-section">
                                                     <strong>Key Information:</strong>
+                                                    ${dataSource ? `<span style="font-size: 11px; color: #999; margin-left: 8px;">(${dataSource === 'local' ? 'from emails' : dataSource === 'web' ? 'from web search' : dataSource === 'local+web' ? 'from emails & web' : 'basic info'})</span>` : ''}
                                                     <ul class="key-facts">
-                                                        ${att.keyFacts.map(fact => `<li>${fact}</li>`).join('')}
+                                                        ${keyFacts.map(fact => `<li>${typeof fact === 'string' ? fact : JSON.stringify(fact)}</li>`).join('')}
                                                     </ul>
                                                 </div>
-                                            ` : '<p style="color: #888;">No additional information found</p>'}
+                                            ` : '<p style="color: #888;">Limited information available</p>'}
                                         </div>
                                     </div>
-                                `).join('')}
+                                `;
+                                    } catch (e) {
+                                        console.error('Error rendering attendee:', e);
+                                        return '<div class="attendee-modern-card"><p style="color: #d32f2f;">Error loading attendee data</p></div>';
+                                    }
+                                }).join('')}
                             </div>
-                        ` : '<p>No attendee information available.</p>'}
+                        ` : '<p style="color: #888;">No attendee information available.</p>'}
                     </div>
 
                     <!-- Tab: Relationships -->
                     <div id="brief-tab-relationships" class="brief-tab-content">
                         <div class="analysis-section">
                             <h3>🤝 Working Relationship Dynamics</h3>
-                            ${brief.relationshipAnalysis ? `
+                            ${brief.relationshipAnalysis && typeof brief.relationshipAnalysis === 'string' && brief.relationshipAnalysis.trim().length > 0 ? `
                                 <p class="analysis-text relationship-analysis">${brief.relationshipAnalysis}</p>
                             ` : '<p style="color: #888;">No relationship analysis available.</p>'}
                         </div>
@@ -4524,7 +5266,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 `;
                 brief.attendees.forEach(att => {
                     html += `
-                        <div style="margin-bottom: 12px; padding: 10px; background: white; border-radius: 6px; border-left: 3px solid #667eea;">
+                        <div style="margin-bottom: 12px; padding: 10px; background: var(--color-bg); border-radius: 6px; border-left: 3px solid var(--color-primary); border: 1px solid var(--color-border);">
                             <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">${att.name}</div>
                             <div style="font-size: 12px; color: #6b7280; margin-bottom: 6px;">${att.title || att.email}</div>
                             ${att.keyFacts && att.keyFacts.length > 0 ? `
@@ -4833,7 +5575,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
         function stopChatVoiceInput() {
             const button = document.getElementById('voiceInputBtn');
-            button.style.background = '#667eea';
+            button.style.background = 'var(--color-primary)';
             button.textContent = '🎤';
             updateChatStatus('Connected', '#10b981');
 
@@ -4935,7 +5677,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
         function stopVoiceConversation() {
             const button = document.getElementById('voiceInputBtn');
-            button.style.background = '#667eea';
+            button.style.background = 'var(--color-primary)';
             button.textContent = '🎤';
             updateChatStatus('Connected', '#10b981');
 
@@ -4982,13 +5724,23 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         let voicePrepActive = false;
         let voicePrepTimerInterval = null;
 
+        // Audio streaming state for Deepgram Aura TTS
+        let voicePrepPlaybackContext = null;
+        let voicePrepAudioQueue = [];
+        let voicePrepIsPlaying = false;
+        let voicePrepAudioSources = []; // Track active audio sources for cancellation
+        let voicePrepNextStartTime = 0;
+
         async function startVoicePrep() {
             console.log('🎙️ startVoicePrep called');
-            console.log('meetingBrief:', meetingBrief);
+            
+            // Use stored brief if available (from meeting prep or day prep)
+            const briefToUse = window.currentMeetingBrief || meetingBrief;
+            console.log('Brief to use:', briefToUse);
 
             // Check if prep has been generated
-            if (!meetingBrief) {
-                alert('Please generate a meeting prep first by clicking "Prep Me".');
+            if (!briefToUse) {
+                alert('Please generate a meeting prep first by clicking "Prep Me" or use Day Prep.');
                 return;
             }
 
@@ -5007,9 +5759,11 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             console.log('Modal display set to flex');
 
             // Set meeting details
-            document.getElementById('voicePrepMeetingTitle').textContent = meetingBrief.summary || 'Meeting';
-            const startDate = meetingBrief.start?.dateTime || meetingBrief.start?.date;
-            document.getElementById('voicePrepMeetingTime').textContent = startDate ? new Date(startDate).toLocaleString() : 'Time not specified';
+            const brief = briefToUse || meetingBrief;
+            const meetingTitle = brief.summary || brief.title || (brief.date ? `Day Prep for ${new Date(brief.date).toLocaleDateString()}` : 'Meeting');
+            document.getElementById('voicePrepMeetingTitle').textContent = meetingTitle;
+            const startDate = brief.start?.dateTime || brief.start?.date || (brief.date ? new Date(brief.date).toISOString() : null);
+            document.getElementById('voicePrepMeetingTime').textContent = startDate ? new Date(startDate).toLocaleString() : (brief.date ? new Date(brief.date).toLocaleDateString() : 'Time not specified');
 
             console.log('Voice prep modal opened successfully');
         }
@@ -5058,13 +5812,40 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 const wsUrl = `${protocol}//${window.location.host}`;
                 voicePrepWs = new WebSocket(wsUrl);
 
-                voicePrepWs.onopen = () => {
+                    voicePrepWs.onopen = async () => {
                     console.log('🎙️ Voice prep WebSocket connected');
 
+                    // Initialize/resume audio playback context for user interaction
+                    if (!voicePrepPlaybackContext) {
+                        voicePrepPlaybackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+                        voicePrepNextStartTime = voicePrepPlaybackContext.currentTime;
+                        console.log('🔊 Initialized audio playback context');
+                    }
+                    // Resume AudioContext if suspended (required for autoplay policies)
+                    if (voicePrepPlaybackContext.state === 'suspended') {
+                        try {
+                            await voicePrepPlaybackContext.resume();
+                            console.log('🔊 Resumed AudioContext for playback');
+                        } catch (resumeError) {
+                            console.warn('Failed to resume AudioContext:', resumeError);
+                        }
+                    }
+                    console.log('AudioContext state:', voicePrepPlaybackContext.state);
+
                     // Send voice_prep_start message
+                    // Use stored brief from window (set in startVoicePrep)
+                    const brief = window.currentMeetingBrief || meetingBrief;
+                    // For day prep, use narrative as the brief content
+                    const voicePrepBrief = brief && brief.narrative ? {
+                        summary: brief.summary || 'Day Prep',
+                        narrative: brief.narrative,
+                        meetings: brief.meetings || [],
+                        date: brief.date
+                    } : brief;
+                    
                     voicePrepWs.send(JSON.stringify({
                         type: 'voice_prep_start',
-                        brief: meetingBrief
+                        brief: voicePrepBrief
                     }));
 
                     voicePrepActive = true;
@@ -5143,6 +5924,18 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 voicePrepMediaStream = null;
             }
 
+            // Clean up playback context
+            if (voicePrepPlaybackContext) {
+                // Stop all active sources before closing
+                stopAllVoicePrepAudio();
+                voicePrepPlaybackContext.close();
+                voicePrepPlaybackContext = null;
+            }
+            voicePrepAudioQueue = [];
+            voicePrepIsPlaying = false;
+            voicePrepNextStartTime = 0;
+            voicePrepAudioSources = [];
+
             // Stop timer
             if (voicePrepTimerInterval) {
                 clearInterval(voicePrepTimerInterval);
@@ -5170,6 +5963,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         function handleVoicePrepMessage(data) {
             switch (data.type) {
                 case 'voice_prep_ready':
+                case 'realtime_ready':
                     console.log('✅ Voice prep ready');
                     document.getElementById('voicePrepStatus').textContent = data.message || 'Starting briefing...';
                     break;
@@ -5185,8 +5979,29 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     break;
 
                 case 'voice_prep_audio':
-                    // Play AI audio
+                    // Legacy: Play complete audio (for OpenAI TTS)
                     playVoicePrepAudio(data.audio);
+                    break;
+
+                case 'voice_prep_audio_chunk':
+                    // NEW: Stream audio chunks from Deepgram Aura
+                    playVoicePrepAudioChunk(data.audio);
+                    break;
+
+                case 'realtime_audio':
+                    // NEW: Stream PCM16 audio chunks from OpenAI Realtime API
+                    playRealtimeAudioChunk(data.audio);
+                    break;
+
+                case 'realtime_audio_done':
+                    // Signal end of Realtime API audio stream
+                    console.log('🔊 Realtime API audio stream complete');
+                    voicePrepIsPlaying = false;
+                    break;
+
+                case 'voice_prep_audio_complete':
+                    // Signal end of audio stream
+                    console.log('🔊 Audio stream complete');
                     break;
 
                 case 'voice_prep_time_update':
@@ -5201,6 +6016,15 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
                 case 'voice_prep_interrupted':
                     document.getElementById('voicePrepStatus').textContent = data.message || 'Paused for your question';
+                    // Stop any ongoing audio playback when interrupted
+                    stopAllVoicePrepAudio();
+                    break;
+
+                case 'realtime_response_cancelled':
+                    console.log('🛑 AI response cancelled - ready for user input');
+                    document.getElementById('voicePrepStatus').textContent = 'Listening...';
+                    // Stop any ongoing audio playback
+                    stopAllVoicePrepAudio();
                     break;
 
                 case 'error':
@@ -5209,6 +6033,12 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     break;
             }
         }
+
+        // Track last transcript to prevent duplicates
+        // Track recent transcripts for deduplication (store last 10 transcripts)
+        let recentTranscripts = [];
+        const MAX_RECENT_TRANSCRIPTS = 10;
+        const DEDUP_WINDOW_MS = 2000; // 2 second window for deduplication
 
         function addVoicePrepTranscript(speaker, text, isFinal) {
             const transcriptDiv = document.getElementById('voicePrepTranscript');
@@ -5219,12 +6049,46 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 transcriptDiv.innerHTML = '';
             }
 
+            // Improved deduplication: Check against all recent transcripts
+            const now = Date.now();
+            if (isFinal && text.trim()) {
+                // Check if this exact transcript was added recently
+                const isDuplicate = recentTranscripts.some(transcript => {
+                    return transcript.text === text.trim() && 
+                           transcript.speaker === speaker && 
+                           (now - transcript.timestamp) < DEDUP_WINDOW_MS;
+                });
+
+                if (isDuplicate) {
+                    console.log('Duplicate transcript detected, skipping', { speaker, text: text.substring(0, 50) });
+                    return;
+                }
+
+                // Add to recent transcripts list
+                recentTranscripts.push({
+                    text: text.trim(),
+                    speaker: speaker,
+                    timestamp: now
+                });
+
+                // Keep only recent transcripts (remove old ones)
+                recentTranscripts = recentTranscripts.filter(t => (now - t.timestamp) < DEDUP_WINDOW_MS);
+                
+                // Limit to max size
+                if (recentTranscripts.length > MAX_RECENT_TRANSCRIPTS) {
+                    recentTranscripts = recentTranscripts.slice(-MAX_RECENT_TRANSCRIPTS);
+                }
+            }
+
             // Check if we should update the last message (for interim results)
-            if (!isFinal && transcriptDiv.lastChild && transcriptDiv.lastChild.dataset.speaker === speaker) {
+            if (!isFinal && transcriptDiv.lastChild && transcriptDiv.lastChild.dataset.speaker === speaker && transcriptDiv.lastChild.dataset.isFinal !== 'true') {
+                // Update existing interim message
                 transcriptDiv.lastChild.innerHTML = `<strong>${speaker}:</strong> ${text}`;
             } else {
+                // Create new message
                 const messageDiv = document.createElement('div');
                 messageDiv.dataset.speaker = speaker;
+                messageDiv.dataset.isFinal = isFinal ? 'true' : 'false';
                 messageDiv.style.marginBottom = '12px';
                 messageDiv.style.color = speaker === 'You' ? '#2563eb' : '#059669';
                 messageDiv.innerHTML = `<strong>${speaker}:</strong> ${text}`;
@@ -5256,6 +6120,184 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             } catch (error) {
                 console.error('Error playing voice prep audio:', error);
             }
+        }
+
+        async function playVoicePrepAudioChunk(base64Audio) {
+            try {
+                // Initialize playback context if needed
+                if (!voicePrepPlaybackContext) {
+                    voicePrepPlaybackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+                    voicePrepNextStartTime = voicePrepPlaybackContext.currentTime;
+                    console.log('🔊 Initialized audio playback context for streaming');
+                }
+
+                // Decode base64 to array buffer
+                const binaryString = atob(base64Audio);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // Decode audio chunk
+                const audioBuffer = await voicePrepPlaybackContext.decodeAudioData(bytes.buffer);
+
+                // Schedule this chunk for playback
+                const source = voicePrepPlaybackContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(voicePrepPlaybackContext.destination);
+
+                // Schedule at the next available time for seamless playback
+                const currentTime = voicePrepPlaybackContext.currentTime;
+                const startTime = Math.max(currentTime, voicePrepNextStartTime);
+                source.start(startTime);
+
+                // Update next start time
+                voicePrepNextStartTime = startTime + audioBuffer.duration;
+
+                if (!voicePrepIsPlaying) {
+                    voicePrepIsPlaying = true;
+                    console.log('🔊 Started streaming audio playback');
+                }
+
+            } catch (error) {
+                console.error('Error playing voice prep audio chunk:', error);
+            }
+        }
+
+        // Play PCM16 audio chunks from OpenAI Realtime API
+        async function playRealtimeAudioChunk(base64Audio) {
+            try {
+                // Set playing flag at start - cancellation is handled by stopAllVoicePrepAudio()
+                if (!voicePrepIsPlaying) {
+                    voicePrepIsPlaying = true;
+                }
+                
+                // Initialize playback context if needed (Realtime API uses 24kHz PCM16)
+                if (!voicePrepPlaybackContext) {
+                    voicePrepPlaybackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+                    voicePrepNextStartTime = voicePrepPlaybackContext.currentTime;
+                    console.log('🔊 Initialized audio playback context for Realtime API');
+                }
+
+                // Resume AudioContext if suspended (required for autoplay policies)
+                if (voicePrepPlaybackContext.state === 'suspended') {
+                    await voicePrepPlaybackContext.resume();
+                    console.log('🔊 Resumed AudioContext');
+                }
+
+                // Decode base64 to array buffer
+                const binaryString = atob(base64Audio);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // Convert PCM16 (little-endian) to Float32Array
+                // PCM16 is 16-bit signed integers, 2 bytes per sample
+                const sampleCount = Math.floor(bytes.length / 2);
+                if (sampleCount === 0) {
+                    console.warn('Empty audio chunk received, skipping');
+                    return;
+                }
+
+                const float32Data = new Float32Array(sampleCount);
+                const dataView = new DataView(bytes.buffer);
+                
+                // Read as little-endian 16-bit signed integers
+                for (let i = 0; i < sampleCount; i++) {
+                    const int16Value = dataView.getInt16(i * 2, true); // true = little-endian
+                    // Convert from -32768 to 32767 range to -1.0 to 1.0 range
+                    float32Data[i] = Math.max(-1, Math.min(1, int16Value / 32768.0));
+                }
+
+                // Create audio buffer from float32 data
+                const audioBuffer = voicePrepPlaybackContext.createBuffer(1, float32Data.length, 24000);
+                audioBuffer.copyToChannel(float32Data, 0);
+
+                // Schedule this chunk for playback
+                const source = voicePrepPlaybackContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.playbackRate = 1.15; // Speed up voice by 15%
+                source.connect(voicePrepPlaybackContext.destination);
+
+                // Track this source so we can stop it if cancellation happens
+                voicePrepAudioSources.push(source);
+                
+                // Clean up source when it finishes playing
+                source.onended = () => {
+                    const index = voicePrepAudioSources.indexOf(source);
+                    if (index > -1) {
+                        voicePrepAudioSources.splice(index, 1);
+                    }
+                };
+
+                // Schedule at the next available time for seamless playback
+                const currentTime = voicePrepPlaybackContext.currentTime;
+                const startTime = Math.max(currentTime, voicePrepNextStartTime);
+                source.start(startTime);
+
+                // Update next start time
+                voicePrepNextStartTime = startTime + audioBuffer.duration;
+
+                // Log first chunk for debugging
+                if (voicePrepAudioSources.length === 1) {
+                    console.log('🔊 Started Realtime API audio playback', { 
+                        chunkSize: bytes.length, 
+                        samples: float32Data.length,
+                        duration: audioBuffer.duration.toFixed(3) + 's',
+                        contextState: voicePrepPlaybackContext.state
+                    });
+                } else {
+                    console.debug('🔊 Playing audio chunk', { 
+                        samples: float32Data.length,
+                        duration: audioBuffer.duration.toFixed(3) + 's',
+                        startTime: startTime.toFixed(3)
+                    });
+                }
+
+            } catch (error) {
+                console.error('Error playing Realtime API audio chunk:', error);
+                console.error('Error details:', {
+                    message: error.message,
+                    stack: error.stack,
+                    base64Length: base64Audio?.length
+                });
+            }
+        }
+
+        // Stop all active audio playback (for cancellation)
+        function stopAllVoicePrepAudio() {
+            if (!voicePrepIsPlaying && voicePrepAudioSources.length === 0) {
+                return; // Already stopped
+            }
+
+            console.log('🛑 Stopping all voice prep audio playback', { 
+                sourcesCount: voicePrepAudioSources.length 
+            });
+
+            // Stop all active audio sources
+            voicePrepAudioSources.forEach((source, index) => {
+                try {
+                    source.stop();
+                } catch (error) {
+                    // Source may have already finished or been stopped
+                    console.debug('Could not stop audio source', { index, error: error.message });
+                }
+            });
+            voicePrepAudioSources = [];
+
+            // Reset playback state
+            voicePrepIsPlaying = false;
+            voicePrepAudioQueue = [];
+
+            // Reset timing to current time to prevent future scheduling
+            if (voicePrepPlaybackContext) {
+                voicePrepNextStartTime = voicePrepPlaybackContext.currentTime;
+            } else {
+                voicePrepNextStartTime = 0;
+            }
+
+            console.log('✅ All voice prep audio stopped');
         }
 
         function updateVoicePrepTimer(elapsed, total) {
@@ -5464,8 +6506,457 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         // Voice Prep Mode functions
         window.startVoicePrep = startVoicePrep;
         window.closeVoicePrep = closeVoicePrep;
+
+        // ==================== Chat Mode Functions ====================
+        let chatModeActive = false;
+
+        function toggleChatMode() {
+            chatModeActive = !chatModeActive;
+            const chatModeContainer = document.getElementById('chatModeContainer');
+            const eventsContainer = document.getElementById('eventsContainer');
+            const toggleButton = document.getElementById('chatModeToggle');
+            const datePicker = document.getElementById('chatModeDatePicker');
+
+            if (chatModeActive) {
+                chatModeContainer.classList.add('active');
+                eventsContainer.classList.remove('visible');
+                toggleButton.classList.add('active');
+                toggleButton.textContent = '📅 Calendar Mode';
+                
+                // Always set default date to today when opening chat mode
+                const today = new Date().toISOString().split('T')[0];
+                datePicker.value = today;
+                console.log('Chat mode opened - date picker set to:', today);
+            } else {
+                chatModeContainer.classList.remove('active');
+                eventsContainer.classList.add('visible');
+                toggleButton.classList.remove('active');
+                toggleButton.textContent = '💬 Chat Mode';
+            }
+        }
+
+        async function startDayPrep() {
+            const datePicker = document.getElementById('chatModeDatePicker');
+            let selectedDate = datePicker.value;
+            
+            // Fallback to today's date if picker is empty
+            if (!selectedDate) {
+                selectedDate = new Date().toISOString().split('T')[0];
+                datePicker.value = selectedDate;
+                console.log('No date selected, using today:', selectedDate);
+            }
+
+            // Verify date format (YYYY-MM-DD)
+            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+            if (!dateRegex.test(selectedDate)) {
+                console.error('Invalid date format:', selectedDate);
+                alert('Invalid date format. Please select a valid date.');
+                return;
+            }
+
+            console.log('Starting Day Prep for:', selectedDate, '(format: YYYY-MM-DD)');
+            
+            // Show loading state
+            const dayPrepCard = document.querySelector('.action-card.primary');
+            const originalHTML = dayPrepCard.innerHTML;
+            dayPrepCard.innerHTML = '<h3>⏳ Preparing...</h3><p>Analyzing all meetings for this day...</p>';
+            dayPrepCard.style.pointerEvents = 'none';
+
+            try {
+                // Call day prep endpoint
+                const response = await fetch('/api/day-prep', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        date: selectedDate
+                    })
+                });
+
+                if (!response.ok) {
+                    // Check for revoked token error
+                    try {
+                        const errorData = await response.json();
+                        if (response.status === 401 && (errorData.error === 'TokenRevoked' || errorData.revoked === true)) {
+                            // Clear session and redirect to sign-in
+                            document.cookie = 'session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+                            alert('Your session has expired. Please sign in again.');
+                            window.location.href = '/';
+                            return;
+                        }
+                        throw new Error(errorData.message || `Day prep failed: ${response.status}`);
+                    } catch (parseError) {
+                        throw new Error(`Day prep failed: ${response.status}`);
+                    }
+                }
+
+                const dayPrepData = await response.json();
+                console.log('Day Prep data:', dayPrepData);
+
+                // Store day prep brief globally for voice prep
+                window.currentDayPrepBrief = dayPrepData.dayPrep;
+                window.currentDayPrepDate = selectedDate;
+                
+                // Restore button
+                dayPrepCard.innerHTML = originalHTML;
+                dayPrepCard.style.pointerEvents = 'auto';
+                
+                // Start voice prep with day prep content
+                // Create a mock meeting brief structure for voice prep
+                const dayPrepBrief = {
+                    summary: dayPrepData.dayPrep.summary,
+                    narrative: dayPrepData.dayPrep.narrative,
+                    meetings: dayPrepData.meetings,
+                    date: selectedDate
+                };
+                
+                window.currentMeetingBrief = dayPrepBrief;
+                
+                // Open voice prep modal
+                startVoicePrep();
+
+            } catch (error) {
+                console.error('Day Prep error:', error);
+                alert('Failed to prepare day prep: ' + error.message);
+                
+                // Restore button
+                dayPrepCard.innerHTML = originalHTML;
+                dayPrepCard.style.pointerEvents = 'auto';
+            }
+        }
+
+        async function startMeetingPrep() {
+            const datePicker = document.getElementById('chatModeDatePicker');
+            const selectedDate = datePicker.value;
+            
+            if (!selectedDate) {
+                alert('Please select a date');
+                return;
+            }
+
+            console.log('Starting Meeting Prep for:', selectedDate);
+
+            try {
+                // Fetch meetings for the day
+                const response = await fetch(`/api/meetings-for-day?date=${selectedDate}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch meetings: ${response.status}`);
+                }
+
+                const data = await response.json();
+                console.log('Meetings for day:', data);
+
+                const meetings = data.meetings || [];
+                if (!meetings || meetings.length === 0) {
+                    alert('No meetings found for this date');
+                    return;
+                }
+
+                // Show meeting selection modal
+                displayMeetingSelection(meetings);
+
+            } catch (error) {
+                console.error('Meeting Prep error:', error);
+                alert('Failed to fetch meetings: ' + error.message);
+            }
+        }
+
+        function displayMeetingSelection(meetings) {
+            const modal = document.getElementById('meetingSelectionModal');
+            const meetingList = document.getElementById('meetingList');
+            
+            // Clear any existing content (including skeleton loaders)
+            meetingList.innerHTML = '';
+
+            if (meetings.length === 0) {
+                meetingList.innerHTML = '<div class="no-events">No meetings found for this date</div>';
+                modal.classList.add('active');
+                return;
+            }
+
+            meetings.forEach(meeting => {
+                const meetingCard = document.createElement('div');
+                meetingCard.className = 'meeting-card';
+                
+                // Handle time display - check if it's an all-day event (date only) vs timed event
+                const startTime = meeting.start?.dateTime || meeting.start?.date;
+                let timeStr = 'Time TBD';
+                
+                if (startTime) {
+                    if (meeting.start?.dateTime) {
+                        // Timed event - show time
+                        timeStr = new Date(startTime).toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true
+                        });
+                    } else if (meeting.start?.date) {
+                        // All-day event - show "All day"
+                        timeStr = 'All day';
+                    }
+                }
+                
+                // Clean up meeting title - remove any odd formatting
+                let meetingTitle = meeting.summary || meeting.title || 'Untitled Meeting';
+                // Remove any HTML-like tags or clean up formatting
+                meetingTitle = meetingTitle.replace(/<[^>]*>/g, '').trim();
+                
+                const attendeeCount = meeting.attendees?.length || 0;
+                
+                meetingCard.innerHTML = `
+                    <div class="meeting-card-time">${timeStr}</div>
+                    <div class="meeting-card-title">${meetingTitle}</div>
+                    <div class="meeting-card-attendees">${attendeeCount} attendee${attendeeCount !== 1 ? 's' : ''}</div>
+                `;
+                
+                meetingCard.onclick = () => selectMeetingForPrep(meeting);
+                meetingList.appendChild(meetingCard);
+            });
+
+            modal.classList.add('active');
+        }
+
+        function closeMeetingSelection() {
+            const modal = document.getElementById('meetingSelectionModal');
+            modal.classList.remove('active');
+        }
+
+        async function selectMeetingForPrep(meeting) {
+            console.log('Selected meeting for prep:', meeting);
+            
+            closeMeetingSelection();
+
+            // Show loading modal immediately
+            const loadingModal = document.getElementById('meetingPrepLoadingModal');
+            loadingModal.style.display = 'flex';
+
+            try {
+                // Fetch meeting brief
+                const response = await fetch('/api/prep-meeting', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        meeting: meeting,
+                        attendees: meeting.attendees || []
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.message || `Meeting prep failed: ${response.status}`);
+                }
+
+                const brief = await response.json();
+                console.log('Meeting brief:', brief);
+
+                // Hide loading modal
+                loadingModal.style.display = 'none';
+
+                // Start voice prep with this brief
+                // Store brief globally for voice prep
+                window.currentMeetingBrief = brief;
+                
+                // Open voice prep modal
+                startVoicePrep();
+
+            } catch (error) {
+                console.error('Meeting prep error:', error);
+                // Hide loading modal on error
+                loadingModal.style.display = 'none';
+                alert('Failed to prepare meeting: ' + error.message);
+                // Restore meeting list
+                displayMeetingSelection(await fetch(`/api/meetings-for-day?date=${document.getElementById('chatModeDatePicker').value}`).then(r => r.json()));
+            }
+        }
+
+        // Export chat mode functions
+        window.toggleChatMode = toggleChatMode;
+        window.startDayPrep = startDayPrep;
+        window.startMeetingPrep = startMeetingPrep;
+        window.closeMeetingSelection = closeMeetingSelection;
+        window.selectMeetingForPrep = selectMeetingForPrep;
         window.startVoicePrepSession = startVoicePrepSession;
         window.stopVoicePrepSession = stopVoicePrepSession;
+
+        // ===== ACCOUNT MANAGEMENT FUNCTIONS =====
+
+        /**
+         * Open account management modal and load accounts
+         */
+        async function openAccountModal() {
+            document.getElementById('accountModal').style.display = 'block';
+            await loadAccounts();
+        }
+
+        /**
+         * Close account management modal
+         */
+        function closeAccountModal() {
+            document.getElementById('accountModal').style.display = 'none';
+        }
+
+        /**
+         * Load and display connected accounts
+         */
+        async function loadAccounts() {
+            const accountList = document.getElementById('accountList');
+            accountList.innerHTML = '<li class="no-accounts">Loading accounts...</li>';
+
+            try {
+                const response = await fetch('/api/accounts', {
+                    credentials: 'include'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to load accounts');
+                }
+
+                const data = await response.json();
+                const accounts = data.accounts;
+
+                if (accounts.length === 0) {
+                    accountList.innerHTML = '<li class="no-accounts">No connected accounts</li>';
+                    return;
+                }
+
+                // Render accounts
+                accountList.innerHTML = accounts.map(account => `
+                    <li class="account-item">
+                        <div class="account-info">
+                            <div class="account-email">
+                                ${account.email}
+                                ${account.is_primary ? '<span class="account-badge">PRIMARY</span>' : ''}
+                            </div>
+                            <div style="font-size: 13px; color: #666; margin-top: 4px;">
+                                ${account.name || ''}
+                            </div>
+                        </div>
+                        <div class="account-actions">
+                            ${!account.is_primary ? `
+                                <button class="btn-set-primary" onclick="setPrimaryAccount('${account.id}')">
+                                    Set Primary
+                                </button>
+                            ` : ''}
+                            ${accounts.length > 1 ? `
+                                <button class="btn-remove" onclick="removeAccount('${account.id}', '${account.email}')">
+                                    Remove
+                                </button>
+                            ` : ''}
+                        </div>
+                    </li>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading accounts:', error);
+                accountList.innerHTML = '<li class="no-accounts">Error loading accounts</li>';
+            }
+        }
+
+        /**
+         * Add a new account (initiate OAuth for additional account)
+         */
+        async function addNewAccount() {
+            // Create a new token client for adding account
+            const addAccountClient = google.accounts.oauth2.initCodeClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                ux_mode: 'popup',
+                callback: async (response) => {
+                    if (response.code) {
+                        await exchangeCodeForAdditionalAccount(response.code);
+                    }
+                },
+            });
+
+            addAccountClient.requestCode();
+        }
+
+        /**
+         * Exchange code for additional account
+         */
+        async function exchangeCodeForAdditionalAccount(code) {
+            try {
+                const response = await fetch('/auth/google/add-account', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ code })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert(`Account ${data.account.email} added successfully!`);
+                    await loadAccounts(); // Refresh account list
+                } else {
+                    alert('Failed to add account: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error adding account:', error);
+                alert('Failed to add account. Please try again.');
+            }
+        }
+
+        /**
+         * Set an account as primary
+         */
+        async function setPrimaryAccount(accountId) {
+            try {
+                const response = await fetch(`/api/accounts/${accountId}/set-primary`, {
+                    method: 'PUT',
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    await loadAccounts(); // Refresh account list
+                } else {
+                    alert('Failed to set primary account: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error setting primary account:', error);
+                alert('Failed to set primary account. Please try again.');
+            }
+        }
+
+        /**
+         * Remove an account
+         */
+        async function removeAccount(accountId, accountEmail) {
+            if (!confirm(`Are you sure you want to remove ${accountEmail}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/accounts/${accountId}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    await loadAccounts(); // Refresh account list
+                } else {
+                    alert('Failed to remove account: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error removing account:', error);
+                alert('Failed to remove account. Please try again.');
+            }
+        }
+
+        // Expose functions to window for onclick handlers
+        window.openAccountModal = openAccountModal;
+        window.closeAccountModal = closeAccountModal;
+        window.addNewAccount = addNewAccount;
+        window.setPrimaryAccount = setPrimaryAccount;
+        window.removeAccount = removeAccount;
 
     </script>
 </body>

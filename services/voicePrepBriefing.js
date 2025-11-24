@@ -1,17 +1,19 @@
 /**
- * Voice Prep Briefing Service - 2-Minute Meeting Preparation
+ * Voice Prep Briefing Service - 2-Minute Meeting Preparation (Shadow Style)
  *
- * Architecture: Deepgram (STT) + GPT-4o (LLM) + OpenAI TTS
+ * Architecture: OpenAI Realtime API (voice-to-voice)
  *
  * Features:
- * - Structured 2-minute briefing (intro → attendees → insights → agenda → recommendations → Q&A)
- * - Natural interruption handling with context preservation
- * - Section-based pacing with visual indicators
- * - Conversational style optimized for quick comprehension
+ * - Shadow-style executive briefing (250-280 words in 2 minutes)
+ * - 8-section structure: Snapshot → Attendees → Touchpoints → Opportunities → Risks → Levers → Rapport → Recommendation
+ * - Seamless interruption handling (no meta-phrases, natural resumption)
+ * - Low-latency streaming (~320ms target)
+ * - ChatGPT voice mode quality
+ * - Native voice-to-voice (no separate STT/TTS)
  */
 
-const { createClient } = require('@deepgram/sdk');
-const fetch = require('node-fetch');
+const OpenAIRealtimeManager = require('./openaiRealtime');
+const logger = require('./logger');
 
 // Briefing sections with time allocations (milliseconds)
 const BRIEFING_SECTIONS = {
@@ -35,9 +37,11 @@ const States = {
 };
 
 class VoicePrepManager {
-    constructor(meetingBrief, openaiApiKey) {
+    constructor(meetingBrief, openaiApiKey, userContext = null) {
         this.brief = meetingBrief;
         this.openaiApiKey = openaiApiKey;
+        this.userContext = userContext; // Store user context
+        this.fetch = require('node-fetch'); // For GPT API calls
 
         // State management
         this.state = States.INITIALIZING;
@@ -46,9 +50,8 @@ class VoicePrepManager {
         this.briefingStartTime = null;
         this.elapsedTime = 0;
 
-        // Deepgram connection
-        this.deepgram = createClient(process.env.DEEPGRAM_API_KEY);
-        this.deepgramConnection = null;
+        // Realtime API manager
+        this.realtimeManager = null;
 
         // WebSocket reference
         this.ws = null;
@@ -57,12 +60,18 @@ class VoicePrepManager {
         this.conversationHistory = [];
         this.briefingDelivered = false;
 
-        // Abort controller for GPT requests
-        this.abortController = null;
-
         // Timer for section transitions
         this.sectionTimer = null;
         this.elapsedTimer = null;
+        
+        // Interruption handling
+        this.interruptedAt = null;
+        this.resumeText = null;
+        this.lastQuestionHash = null; // Track last question to prevent duplicates
+        
+        // Transcript deduplication
+        this.lastSentTranscript = null;
+        this.lastSentTranscriptTime = null;
     }
 
     /**
@@ -72,24 +81,70 @@ class VoicePrepManager {
         this.ws = ws;
         this.briefingStartTime = Date.now();
 
-        // Initialize Deepgram for speech recognition
-        this.deepgramConnection = this.deepgram.listen.live({
-            model: 'nova-2',
-            language: 'en',
-            encoding: 'linear16',
-            sample_rate: 16000,
-            channels: 1,
-            smart_format: true,
-            punctuate: true,
-            interim_results: true,
-            utterance_end_ms: 1500,
-            vad_events: true,
-            endpointing: 500
-        });
+        try {
+            // Build system prompt dynamically using GPT
+            const systemPrompt = await this.buildBriefingPrompt();
 
-        this.setupDeepgramEvents();
+            // Initialize Realtime API manager
+            this.realtimeManager = new OpenAIRealtimeManager(
+                this.openaiApiKey,
+                systemPrompt,
+                this.userContext
+            );
 
-        console.log('🎤 Voice Prep Briefing initialized');
+            // Set up event handlers
+            this.realtimeManager.onTranscript = (transcript) => {
+                this.handleTranscript(transcript);
+            };
+
+            this.realtimeManager.onAudioChunk = (audioChunk) => {
+                // Audio chunks are already forwarded to client by RealtimeManager
+                // Just update state
+                if (this.state === States.BRIEFING) {
+                    this.state = States.BRIEFING; // Keep briefing state
+                }
+            };
+
+            this.realtimeManager.onSpeechStarted = () => {
+                // User started speaking - cancellation is handled by openaiRealtime.js
+                // Update UI state to reflect interruption
+                if (this.state === States.BRIEFING || this.realtimeManager.isSpeaking) {
+                    logger.info('User started speaking during briefing - handling interruption');
+                    // Update state for UI feedback
+                    this.state = States.INTERRUPTED;
+                    this.interruptedAt = Date.now();
+                    this.sendToClient({
+                        type: 'voice_prep_interrupted',
+                        message: 'Listening...'
+                    });
+                }
+            };
+
+            this.realtimeManager.onSpeechStopped = () => {
+                logger.debug('User stopped speaking');
+            };
+
+            this.realtimeManager.onError = (error) => {
+                logger.error({ error: error.message }, 'Realtime API error');
+                this.sendToClient({
+                    type: 'error',
+                    message: 'Voice briefing error'
+                });
+            };
+
+            this.realtimeManager.onDisconnect = () => {
+                logger.info('Realtime API disconnected');
+                this.state = States.ENDED;
+            };
+
+            // Connect to Realtime API
+            await this.realtimeManager.connect(ws);
+
+            logger.info('🎤 Voice Prep Briefing initialized with Realtime API');
+
+            // Wait for session to be fully updated before starting briefing
+            // The session.update message needs to be processed first
+            await new Promise(resolve => setTimeout(resolve, 500));
 
         // Send ready message
         this.sendToClient({
@@ -102,192 +157,535 @@ class VoicePrepManager {
 
         // Begin the structured briefing
         await this.startBriefing();
+
+        } catch (error) {
+            logger.error({ error: error.message }, 'Failed to initialize voice prep briefing');
+            this.sendToClient({
+                type: 'error',
+                message: 'Failed to start voice briefing'
+            });
+        }
     }
 
     /**
-     * Set up Deepgram event handlers
+     * Handle transcript from Realtime API
      */
-    setupDeepgramEvents() {
-        this.deepgramConnection.on('open', () => {
-            console.log('🎤 Deepgram connection opened for voice prep');
-        });
+    handleTranscript(transcript) {
+        const { text, isFinal } = transcript;
 
-        this.deepgramConnection.on('Transcript', async (data) => {
-            const transcript = data.channel?.alternatives?.[0];
-            if (!transcript || !transcript.transcript) return;
+        // Skip partial transcripts - only process final transcripts to avoid duplication
+        if (!isFinal) {
+            return; // Don't send or process partial transcripts
+        }
 
-            const text = transcript.transcript;
-            const isFinal = data.is_final;
-            const speechFinal = data.speech_final;
+        // Handle final transcript (user finished speaking)
+        if (isFinal && text.trim()) {
+            const trimmedText = text.trim();
+            const now = Date.now();
+            
+            // Deduplicate: Don't send the same final transcript twice within 2 seconds
+            if (this.lastSentTranscript === trimmedText && 
+                this.lastSentTranscriptTime && 
+                (now - this.lastSentTranscriptTime) < 2000) {
+                logger.debug('Duplicate final transcript detected, skipping', { text: trimmedText.substring(0, 50) });
+                return;
+            }
+            
+            logger.info({ text: trimmedText }, 'User question received');
 
-            // Send transcript to client
+            // User interrupted or asked a question
+            if (this.state === States.BRIEFING) {
+                logger.info('User interrupted briefing');
+                this.handleInterruption();
+            }
+
+            // Track sent transcript for deduplication
+            this.lastSentTranscript = trimmedText;
+            this.lastSentTranscriptTime = now;
+
+            // Send final transcript to client
             this.sendToClient({
                 type: 'voice_prep_transcript',
-                text: text,
-                isFinal: isFinal,
+                text: trimmedText,
+                isFinal: true,
                 speaker: 'You'
             });
 
-            // Handle speech_final (user finished speaking)
-            if (speechFinal && text.trim()) {
-                console.log(`💬 User question: "${text}"`);
-
-                // User interrupted or asked a question
-                if (this.state === States.BRIEFING) {
-                    console.log('⚠️  User interrupted briefing');
-                    this.handleInterruption();
-                }
-
-                // Process the user's question
-                await this.handleUserQuestion(text);
-            }
-        });
-
-        this.deepgramConnection.on('SpeechStarted', () => {
-            // User started speaking - prepare to interrupt if needed
-            if (this.state === States.BRIEFING) {
-                this.handleInterruption();
-            }
-        });
-
-        this.deepgramConnection.on('error', (error) => {
-            console.error('Deepgram error:', error);
-            this.sendToClient({
-                type: 'error',
-                message: 'Voice recognition error'
-            });
-        });
-
-        this.deepgramConnection.on('close', () => {
-            console.log('🎤 Deepgram connection closed');
-        });
+            // Process the user's question
+            this.handleUserQuestion(trimmedText);
+        }
     }
 
     /**
      * Start the structured 2-minute briefing
      */
     async startBriefing() {
+        // Wait for session to be ready before starting briefing
+        if (!this.realtimeManager || !this.realtimeManager.isConnected || !this.realtimeManager.sessionId) {
+            logger.info('Waiting for Realtime API session to be ready...');
+            // Wait for session.created event
+            await new Promise((resolve) => {
+                const checkInterval = setInterval(() => {
+                    if (this.realtimeManager && this.realtimeManager.isConnected && this.realtimeManager.sessionId) {
+                        clearInterval(checkInterval);
+                        logger.info('Realtime API session ready, starting briefing');
+                        resolve();
+                    }
+                }, 100);
+                // Timeout after 5 seconds
+                setTimeout(() => {
+                    clearInterval(checkInterval);
+                    logger.warn('Timeout waiting for Realtime API session');
+                    resolve();
+                }, 5000);
+            });
+        }
+
         this.state = States.BRIEFING;
         this.briefingDelivered = false;
 
-        // Build comprehensive system prompt for structured briefing
-        const systemPrompt = this.buildBriefingPrompt();
-
-        // Add to conversation history
-        this.conversationHistory.push({
-            role: 'system',
-            content: systemPrompt
-        });
-
-        this.conversationHistory.push({
-            role: 'user',
-            content: 'Please begin the 2-minute briefing now.'
-        });
-
-        // Generate the briefing
-        await this.generateAndSpeakResponse();
+        // Send direct instruction to start briefing
+        if (this.realtimeManager && this.realtimeManager.isConnected && this.realtimeManager.sessionId) {
+            logger.info('Sending briefing start instruction to Realtime API');
+            this.realtimeManager.sendTextInput('Begin the 2-minute briefing immediately.');
+            
+            // Small delay to ensure text input is processed
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Request response immediately
+            logger.info('Requesting response from Realtime API');
+            this.realtimeManager.requestResponse();
+        } else {
+            logger.error('Cannot start briefing: Realtime API not connected or session not ready', {
+                isConnected: this.realtimeManager?.isConnected,
+                sessionId: this.realtimeManager?.sessionId
+            });
+            this.sendToClient({
+                type: 'error',
+                message: 'Failed to start briefing - connection not ready'
+            });
+        }
     }
 
     /**
-     * Build the comprehensive briefing prompt
+     * Build Shadow-style executive briefing prompt dynamically using GPT
+     * Generates comprehensive system prompt with attendee names, meeting context, and transcription hints
      */
-    buildBriefingPrompt() {
+    async buildBriefingPrompt() {
         const meeting = this.brief;
+        let attendees = meeting.attendees || [];
+        
+        // Filter out the user from attendees list
+        if (this.userContext && this.userContext.email) {
+            attendees = attendees.filter(att => {
+                const attendeeEmail = (att.email || att.emailAddress || '').toLowerCase();
+                return attendeeEmail !== this.userContext.email.toLowerCase();
+            });
+        }
+        
+        // Extract all attendee names (first names, full names, variations) for transcription hints
+        const attendeeNameList = attendees
+            .map(a => {
+                const name = a.name || '';
+                const parts = name.split(' ');
+                return [name, parts[0], parts[parts.length - 1]].filter(Boolean);
+            })
+            .flat()
+            .filter((name, index, self) => self.indexOf(name) === index); // Remove duplicates
+        
+        const attendeeNames = attendees.map(a => a.name).filter(Boolean).join(' and ') || 'the other attendees';
+        
+        // FIX: Get meeting title from context.meeting or original meeting object, not brief.summary
+        const meetingTitle = (meeting.context && meeting.context.meeting && meeting.context.meeting.summary) 
+            || meeting.summary 
+            || meeting.title 
+            || 'this meeting';
+        
+        // FIX: Get meeting time from context.meeting or original meeting object
+        const meetingTime = (meeting.context && meeting.context.meeting && meeting.context.meeting.start?.dateTime)
+            || meeting.start?.dateTime 
+            || meeting.start?.date 
+            || 'upcoming';
+        
+        const companies = [...new Set(attendees.map(a => a.company).filter(Boolean))];
+        
+        // Extract all meeting context fields
+        const relationshipNotes = meeting.relationshipAnalysis || 'No prior interaction history available.';
+        const emailContext = meeting.emailAnalysis || 'No recent email exchanges.';
+        const documentContext = meeting.documentAnalysis || 'No shared documents.';
+        const companyResearch = meeting.companyResearch || 'No company research available.';
+        const actionItems = meeting.actionItems || [];
+        const timeline = meeting.timeline || [];
+        const contributionAnalysis = meeting.contributionAnalysis || 'No contribution analysis available.';
+        const broaderNarrative = meeting.broaderNarrative || 'No broader narrative available.';
+        const recommendations = meeting.recommendations || [];
 
-        return `You are conducting a 2-minute voice briefing to prepare someone for an upcoming meeting.
+        const userName = this.userContext ? this.userContext.formattedName : 'the user';
+        const userEmail = this.userContext ? this.userContext.formattedEmail : '';
+        
+        // Prepare context for GPT to generate system prompt structure
+        const contextForGPT = {
+            userName,
+            userEmail,
+            meetingTitle,
+            meetingTime,
+            attendeeNames: attendeeNameList,
+            companies,
+            attendeeCount: attendees.length
+        };
 
-MEETING DETAILS:
-Title: ${meeting.summary || 'Upcoming Meeting'}
-Time: ${meeting.start?.dateTime || meeting.start?.date || 'Not specified'}
-Attendees: ${meeting.attendees?.map(a => a.name).join(', ') || 'Not specified'}
+        try {
+            // Use GPT to generate the STRUCTURE of the system prompt
+            const promptStructure = await this.generateSystemPromptStructure(contextForGPT);
+            logger.info('Generated dynamic system prompt structure using GPT');
+            
+            // Now explicitly append ALL attendee details and meeting information
+            const fullPrompt = this.buildFullSystemPrompt(promptStructure, {
+                userName,
+                userEmail,
+                meetingTitle,
+                meetingTime,
+                attendeeNames: attendeeNameList,
+                companies,
+                attendees,
+                relationshipNotes,
+                emailContext,
+                documentContext,
+                companyResearch,
+                actionItems,
+                timeline,
+                contributionAnalysis,
+                broaderNarrative,
+                recommendations
+            });
+            
+            return fullPrompt;
+        } catch (error) {
+            logger.error('Failed to generate dynamic system prompt, using fallback', error);
+            // Fallback to basic prompt if GPT generation fails
+            return this.buildFallbackPrompt({
+                userName,
+                userEmail,
+                meetingTitle,
+                meetingTime,
+                attendeeNames: attendeeNameList,
+                companies,
+                attendees: attendees.map(att => ({
+                    name: att.name,
+                    email: att.email,
+                    title: att.title,
+                    company: att.company,
+                    keyFacts: att.keyFacts || []
+                })),
+                relationshipNotes,
+                emailContext,
+                documentContext,
+                companyResearch,
+                actionItems,
+                timeline,
+                contributionAnalysis,
+                broaderNarrative,
+                recommendations
+            });
+        }
+    }
 
-YOUR 2-MINUTE BRIEFING STRUCTURE:
+    /**
+     * Generate system prompt STRUCTURE using GPT (just the framework, not the data)
+     */
+    async generateSystemPromptStructure(context) {
+        const systemPromptForGPT = `You are an expert at creating system prompt structures for voice AI assistants. Generate a well-structured system prompt framework for Shadow, an executive assistant AI.
 
-SECTION 1 - INTRODUCTION (10 seconds):
-"Let me brief you on your upcoming meeting: ${meeting.summary}. Over the next 2 minutes, I'll cover who's attending, key insights from your past interactions, and what you need to know to be fully prepared."
+The prompt structure should:
+1. Include transcription hints section (with placeholder for attendee names)
+2. Include Shadow's role and persona
+3. Include briefing instructions (150-180 words, concise, Shadow's style)
+4. Include interruption handling rules
+5. Include response format requirements
+6. Be well-structured and comprehensive
 
-SECTION 2 - ATTENDEES (40 seconds):
-${meeting.attendees?.map(att => `
-**${att.name}** (${att.title || 'Role not specified'}, ${att.company || 'Company not specified'}):
-${att.keyFacts?.slice(0, 2).join('. ') || 'No specific context available.'}`).join('\n\n') || 'Attendee information not available.'}
+Format: Return ONLY the system prompt structure text with placeholders like [ATTENDEE_NAMES], [MEETING_TITLE], etc. No markdown, no explanations.`;
 
-SECTION 3 - KEY INSIGHTS (30 seconds):
-Email Context: ${meeting.emailAnalysis?.substring(0, 400) || 'No recent email history found.'}
+        const userPrompt = `Generate a system prompt structure for Shadow briefing ${context.userName} about a meeting.
 
-Document Context: ${meeting.documentAnalysis?.substring(0, 400) || 'No shared documents analyzed.'}
+MEETING OVERVIEW:
+- Title: [MEETING_TITLE]
+- Time: [MEETING_TIME]
+- Attendee Count: ${context.attendeeCount}
+- Companies: ${context.companies.join(', ')}
 
-Working Relationships: ${meeting.relationshipAnalysis?.substring(0, 400) || 'No prior working relationship detected.'}
+The structure should include placeholders for:
+- [ATTENDEE_NAMES] - list of attendee names for transcription hints
+- [MEETING_TITLE] - meeting title
+- [MEETING_TIME] - meeting time
+- [USER_NAME] - user's name
+- [USER_EMAIL] - user's email
+- [ATTENDEE_DETAILS_SECTION] - comprehensive attendee information section
+- [MEETING_CONTEXT_SECTION] - comprehensive meeting context section
 
-SECTION 4 - MEETING AGENDA & PURPOSE (20 seconds):
-${meeting.summary || 'Meeting purpose not specified. Based on available context, this appears to be a general sync or discussion meeting.'}
+Generate a comprehensive system prompt structure that Shadow can use to deliver voice briefings.`;
 
-${meeting.context || ''}
+        const response = await this.fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.openaiApiKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o',
+                messages: [
+                    { role: 'system', content: systemPromptForGPT },
+                    { role: 'user', content: userPrompt }
+                ],
+                temperature: 0.7,
+                max_tokens: 1500
+            })
+        });
 
-SECTION 5 - RECOMMENDATIONS (15 seconds):
-Top preparation tips:
-${meeting.recommendations?.slice(0, 3).map((rec, i) => `${i + 1}. ${rec}`).join('\n') || 'No specific recommendations generated yet.'}
+        if (!response.ok) {
+            throw new Error(`GPT API error: ${response.status}`);
+        }
 
-SECTION 6 - TRANSITION TO Q&A:
-"That's your 2-minute briefing. I'm now ready to answer any questions you have about the meeting, the attendees, or the context."
+        const data = await response.json();
+        return data.choices[0].message.content.trim();
+    }
 
-DELIVERY GUIDELINES:
-- Speak conversationally and naturally (like a colleague briefing you)
-- Pace: ~150 words per minute (brisk but not rushed)
-- Be specific: Use actual names, dates, document titles from the context
-- Stay focused: This is a quick prep, not a lecture
-- Smooth transitions: "Now let's talk about..." or "Moving to..."
-- If interrupted, STOP IMMEDIATELY and answer the question, then ask: "Should I continue the briefing or answer more questions?"
+    /**
+     * Build full system prompt by replacing placeholders with actual data
+     */
+    buildFullSystemPrompt(structure, data) {
+        // Build comprehensive attendee details section
+        const attendeeDetailsSection = data.attendees.length > 0
+            ? `\n\n=== ATTENDEE INFORMATION ===\n` +
+              data.attendees.map(att => {
+                  const name = att.name || 'Unknown attendee';
+                  const email = att.email || 'No email';
+                  const title = att.title || 'Role unknown';
+                  const company = att.company || 'Company unknown';
+                  const keyFacts = att.keyFacts && att.keyFacts.length > 0 
+                      ? att.keyFacts.join('\n  • ') 
+                      : 'Limited context available';
+                  
+                  return `${name} (${email})
+  Role: ${title}
+  Company: ${company}
+  Key Facts:
+  • ${keyFacts}`;
+              }).join('\n\n')
+            : 'No attendee information available.';
 
-INTERRUPTION HANDLING:
-- User can interrupt at ANY time by speaking
-- When interrupted, STOP the current section
-- Answer their question directly and concisely
-- Then ask: "Would you like me to continue the briefing, or do you have more questions?"
-- Resume from where you left off or pivot to Q&A based on their response
+        // Build comprehensive meeting context section
+        const meetingContextSection = `=== MEETING CONTEXT ===
 
-AFTER 2 MINUTES:
-- Switch to open Q&A mode
-- Say: "That's your briefing complete. What questions do you have?"
-- Answer questions about any aspect of the meeting context
-- Be conversational and helpful
+Meeting: ${data.meetingTitle}
+When: ${data.meetingTime}
+Companies Involved: ${data.companies.join(', ') || 'Various'}
+
+RELATIONSHIP ANALYSIS:
+${data.relationshipNotes}
+
+EMAIL CONTEXT:
+${data.emailContext}
+
+DOCUMENT CONTEXT:
+${data.documentContext}
+
+COMPANY RESEARCH:
+${data.companyResearch}
+
+CONTRIBUTION ANALYSIS:
+${data.contributionAnalysis}
+
+BROADER NARRATIVE:
+${data.broaderNarrative}
+
+RECOMMENDATIONS:
+${data.recommendations.length > 0 ? data.recommendations.join('\n• ') : 'None provided.'}
+
+ACTION ITEMS:
+${data.actionItems.length > 0 ? data.actionItems.join('\n• ') : 'None provided.'}
+
+TIMELINE EVENTS (${data.timeline.length} events):
+${data.timeline.length > 0 
+    ? data.timeline.slice(0, 10).map((event, idx) => {
+        const date = event.date || event.start?.dateTime || 'Date unknown';
+        const type = event.type || 'event';
+        const title = event.title || event.summary || 'Untitled';
+        return `${idx + 1}. [${date}] ${type}: ${title}`;
+      }).join('\n')
+    : 'No timeline events available.'}`;
+
+        // Replace placeholders in structure
+        let fullPrompt = structure
+            .replace(/\[ATTENDEE_NAMES\]/g, data.attendeeNames.join(', '))
+            .replace(/\[MEETING_TITLE\]/g, data.meetingTitle)
+            .replace(/\[MEETING_TIME\]/g, data.meetingTime)
+            .replace(/\[USER_NAME\]/g, data.userName)
+            .replace(/\[USER_EMAIL\]/g, data.userEmail)
+            .replace(/\[ATTENDEE_DETAILS_SECTION\]/g, attendeeDetailsSection)
+            .replace(/\[MEETING_CONTEXT_SECTION\]/g, meetingContextSection);
+
+        // If placeholders weren't used, append sections at the end
+        if (!structure.includes('[ATTENDEE_DETAILS_SECTION]')) {
+            fullPrompt += attendeeDetailsSection;
+        }
+        if (!structure.includes('[MEETING_CONTEXT_SECTION]')) {
+            fullPrompt += '\n\n' + meetingContextSection;
+        }
+
+        // Add transcription hints if not already included
+        if (!fullPrompt.includes('transcription') && !fullPrompt.includes('Transcription')) {
+            fullPrompt += `\n\n=== TRANSCRIPTION ACCURACY HINTS ===
+When transcribing user speech, pay special attention to these names: ${data.attendeeNames.join(', ')}. These are meeting attendees and should be transcribed accurately.`;
+        }
+
+        return fullPrompt;
+    }
+
+    /**
+     * Fallback prompt if GPT generation fails - includes ALL data explicitly
+     */
+    buildFallbackPrompt(context) {
+        const transcriptionHints = context.attendeeNames.length > 0 
+            ? `\n\nTRANSCRIPTION ACCURACY HINTS:\nWhen transcribing user speech, pay special attention to these names: ${context.attendeeNames.join(', ')}. These are meeting attendees and should be transcribed accurately.\n`
+            : '';
+
+        // Build comprehensive attendee details
+        const attendeeDetails = context.attendees.length > 0
+            ? context.attendees.map(att => {
+                const name = att.name || 'Unknown attendee';
+                const email = att.email || 'No email';
+                const title = att.title || 'Role unknown';
+                const company = att.company || 'Company unknown';
+                const keyFacts = att.keyFacts && att.keyFacts.length > 0 
+                    ? att.keyFacts.join('\n    • ') 
+                    : 'Limited context available';
+                
+                return `  ${name} (${email})
+    Role: ${title}
+    Company: ${company}
+    Key Facts:
+    • ${keyFacts}`;
+            }).join('\n\n')
+            : '  No attendee information available.';
+
+        // Build comprehensive meeting context
+        const meetingContext = `Meeting: ${context.meetingTitle}
+When: ${context.meetingTime}
+Companies: ${context.companies.join(', ') || 'Various'}
+
+RELATIONSHIP ANALYSIS:
+${context.relationshipNotes}
+
+EMAIL CONTEXT:
+${context.emailContext}
+
+DOCUMENT CONTEXT:
+${context.documentContext}
+
+COMPANY RESEARCH:
+${context.companyResearch}
+
+CONTRIBUTION ANALYSIS:
+${context.contributionAnalysis || 'No contribution analysis available.'}
+
+BROADER NARRATIVE:
+${context.broaderNarrative || 'No broader narrative available.'}
+
+RECOMMENDATIONS:
+${context.recommendations && context.recommendations.length > 0 
+    ? context.recommendations.map(r => `• ${r}`).join('\n')
+    : 'None provided.'}
+
+ACTION ITEMS:
+${context.actionItems && context.actionItems.length > 0 
+    ? context.actionItems.map(a => `• ${a}`).join('\n')
+    : 'None provided.'}
+
+TIMELINE EVENTS:
+${context.timeline && context.timeline.length > 0 
+    ? context.timeline.slice(0, 10).map((event, idx) => {
+        const date = event.date || event.start?.dateTime || 'Date unknown';
+        const type = event.type || 'event';
+        const title = event.title || event.summary || 'Untitled';
+        return `${idx + 1}. [${date}] ${type}: ${title}`;
+      }).join('\n')
+    : 'No timeline events available.'}`;
+
+        return `You are Shadow, ${context.userName}'s hyper-contextual executive assistant. Deliver a precise, calm, powerful voice brief.
+
+IMPORTANT: You are briefing ${context.userName} (${context.userEmail}). Use "you" to refer to ${context.userName}. Structure everything from ${context.userName}'s perspective. The attendees listed are OTHER people (excluding ${context.userName}).
+
+RULES:
+- Maximum 90 seconds (150-180 words total) - BE CONCISE
+- Start fast, no fluff, no preamble
+- Every sentence must add value - cut any filler
+- Prioritize only what changes decisions or behavior
+- Surface the 10% insights that give 90% advantage
+- Simple, high-clarity language
+- Voice style: Calm, confident Chief of Staff whispering the essentials
+
+=== ATTENDEE INFORMATION ===
+${attendeeDetails}
+
+=== MEETING CONTEXT ===
+${meetingContext}
+${transcriptionHints}
+YOUR VOICE BRIEF STRUCTURE (150-180 words total):
+
+1. Quick Situation Snapshot (15 seconds / ~25-30 words)
+2. Attendee Decode (25 seconds / ~40-50 words)
+3. Last Touchpoints (20 seconds / ~30-35 words)
+4. Key Points (20 seconds / ~30-35 words)
+5. Shadow's Recommendation (10 seconds / ~20-25 words)
+
+INTERRUPTION RULES (CRITICAL):
+- When user interrupts: STOP IMMEDIATELY
+- Answer their question directly using meeting context (<15 seconds)
+- Then RESUME from the EXACT sentence you left off
+- NO meta-phrases: NEVER say "Let me pause", "As I was saying", "Do you want me to resume", "Should I continue", "Where was I"
+- Resume naturally with NO repetition, NO restarting, NO explanations
 
 RESPONSE FORMAT:
-- Output ONLY the speech text you want to say
+- Output ONLY the speech text
 - NO markdown, NO formatting, NO stage directions
-- Just natural, conversational speech`;
+- Speak as Shadow: calm, confident, concise
+- Maximum 180 words - if you exceed this, cut content, not quality
+- Every word counts - be ruthless about brevity
+
+CRITICAL: You have access to comprehensive attendee information above. When answering questions about attendees, use their full key facts and context. When asked "Who is [name]?", provide detailed information from the attendee information section above.`;
     }
 
     /**
      * Handle user interruption during briefing
+     * NOTE: OpenAI Realtime API handles interruption automatically via server_vad
+     * This method is kept for backward compatibility but no longer manually cancels responses
      */
     handleInterruption() {
-        // Cancel any ongoing TTS or GPT requests
-        if (this.abortController) {
-            this.abortController.abort();
-            this.abortController = null;
-        }
-
-        // Update state
+        // Update state for UI feedback
         this.state = States.INTERRUPTED;
+        this.interruptedAt = Date.now();
 
         // Send interruption notification to client
         this.sendToClient({
             type: 'voice_prep_interrupted',
-            message: 'Paused for your question'
+            message: 'Listening...'
         });
 
-        console.log('🔄 Briefing interrupted, listening for question');
+        logger.info('Briefing interrupted, listening for question (API handling cancellation)');
     }
 
     /**
      * Handle user's question (during briefing or Q&A)
      */
-    async handleUserQuestion(question) {
-        // Add user question to history
-        this.conversationHistory.push({
-            role: 'user',
-            content: question
-        });
+    handleUserQuestion(question) {
+        // Deduplicate: prevent processing the same question twice
+        const questionHash = question.trim().toLowerCase();
+        if (this.lastQuestionHash === questionHash) {
+            logger.debug('Duplicate question detected, skipping', { question });
+            return;
+        }
+        this.lastQuestionHash = questionHash;
 
         // Check if this is the first question after briefing
         const elapsedTime = Date.now() - this.briefingStartTime;
@@ -302,106 +700,48 @@ RESPONSE FORMAT:
             });
         }
 
-        // Generate response
-        await this.generateAndSpeakResponse();
-    }
+        // Send question to Realtime API
+        if (!this.realtimeManager) {
+            logger.error('Cannot handle question: realtimeManager not available');
+            return;
+        }
 
-    /**
-     * Generate AI response and speak it via TTS
-     */
-    async generateAndSpeakResponse() {
-        // Create abort controller
-        this.abortController = new AbortController();
+        // Simplified: Always cancel first if speaking, then send input and request response
+        const processQuestion = () => {
+            logger.info('Processing user question', { question, isSpeaking: this.realtimeManager.isSpeaking });
+            
+            // Send the question as text input
+            this.realtimeManager.sendTextInput(question);
+            
+            // Small delay to ensure input is processed before requesting response
+            setTimeout(() => {
+                // Request response - this will be blocked if cancellation is still in progress
+                this.realtimeManager.requestResponse();
+                
+                // Update state
+                if (this.state === States.INTERRUPTED) {
+                    this.state = States.BRIEFING;
+                }
+            }, 100);
+        };
 
-        try {
-            // Call GPT-4o
-            const response = await fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.openaiApiKey}`
-                },
-                body: JSON.stringify({
-                    model: 'gpt-4o',
-                    messages: this.conversationHistory,
-                    temperature: 0.7,
-                    max_tokens: 400 // Keep responses concise for voice
-                }),
-                signal: this.abortController.signal
-            });
-
-            if (!response.ok) {
-                throw new Error(`GPT API error: ${response.status}`);
-            }
-
-            const data = await response.json();
-            const aiResponse = data.choices[0].message.content;
-
-            // Add to conversation history
-            this.conversationHistory.push({
-                role: 'assistant',
-                content: aiResponse
-            });
-
-            // Send AI response to client for TTS
-            this.sendToClient({
-                type: 'voice_prep_response',
-                text: aiResponse,
-                speaker: 'AI'
-            });
-
-            // Also request TTS generation from OpenAI
-            await this.generateTTS(aiResponse);
-
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                console.log('GPT request aborted (interrupted)');
-                return;
-            }
-
-            console.error('Error generating response:', error);
-            this.sendToClient({
-                type: 'error',
-                message: 'Failed to generate response'
-            });
+        // If AI is speaking, cancel first, then process
+        if (this.realtimeManager.isSpeaking || this.realtimeManager.isCancelling) {
+            logger.info('AI is speaking, cancelling before processing question...');
+            // Cancel the response
+            this.realtimeManager.cancelResponse();
+            
+            // Wait briefly for cancellation, then process question
+            // The requestResponse() call will be blocked if cancellation isn't complete
+            setTimeout(processQuestion, 300);
+        } else {
+            // No active response, process immediately
+            processQuestion();
         }
     }
 
-    /**
-     * Generate TTS audio for AI response
-     */
-    async generateTTS(text) {
-        try {
-            const response = await fetch('https://api.openai.com/v1/audio/speech', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.openaiApiKey}`
-                },
-                body: JSON.stringify({
-                    model: 'tts-1',
-                    voice: 'nova',
-                    input: text,
-                    speed: 1.1 // Slightly faster for briefing
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error(`TTS API error: ${response.status}`);
-            }
-
-            const audioBuffer = await response.arrayBuffer();
-
-            // Send audio to client
-            this.sendToClient({
-                type: 'voice_prep_audio',
-                audio: Buffer.from(audioBuffer).toString('base64')
-            });
-
-        } catch (error) {
-            console.error('TTS generation error:', error);
-        }
-    }
+    // Note: Response generation and TTS are now handled by Realtime API
+    // The Realtime API automatically generates audio responses
 
     /**
      * Start elapsed time tracker
@@ -432,11 +772,20 @@ RESPONSE FORMAT:
     }
 
     /**
-     * Send audio data to Deepgram
+     * Send audio data to Realtime API
      */
     sendAudio(audioData) {
-        if (this.deepgramConnection && this.deepgramConnection.getReadyState() === 1) {
-            this.deepgramConnection.send(audioData);
+        if (this.realtimeManager && this.realtimeManager.isConnected) {
+            this.realtimeManager.sendAudioInput(audioData);
+        }
+    }
+    
+    /**
+     * Commit audio buffer (trigger transcription)
+     */
+    commitAudioBuffer() {
+        if (this.realtimeManager && this.realtimeManager.isConnected) {
+            this.realtimeManager.commitAudioBuffer();
         }
     }
 
@@ -453,7 +802,7 @@ RESPONSE FORMAT:
      * Disconnect and cleanup
      */
     disconnect() {
-        console.log('Disconnecting voice prep briefing');
+        logger.info('Disconnecting voice prep briefing');
 
         // Clear timers
         if (this.sectionTimer) {
@@ -466,19 +815,10 @@ RESPONSE FORMAT:
             this.elapsedTimer = null;
         }
 
-        // Cancel any pending requests
-        if (this.abortController) {
-            this.abortController.abort();
-        }
-
-        // Close Deepgram connection
-        if (this.deepgramConnection) {
-            try {
-                this.deepgramConnection.finish();
-            } catch (error) {
-                console.error('Error closing Deepgram:', error);
-            }
-            this.deepgramConnection = null;
+        // Disconnect Realtime API
+        if (this.realtimeManager) {
+            this.realtimeManager.disconnect();
+            this.realtimeManager = null;
         }
 
         // Update state
