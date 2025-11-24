@@ -6543,7 +6543,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 // Schedule this chunk for playback
                 const source = voicePrepPlaybackContext.createBufferSource();
                 source.buffer = audioBuffer;
-                source.playbackRate = 2.0; // Speed up voice by 2x
+                source.playbackRate = 3.5; // Speed up voice by 3.5x
                 source.connect(voicePrepPlaybackContext.destination);
 
                 // Track this source so we can stop it if cancellation happens
