@@ -273,6 +273,14 @@ class VoicePrepManager {
      */
     async buildBriefingPrompt() {
         const meeting = this.brief;
+        
+        // Detect day prep mode: check for narrative and date fields
+        if (meeting.narrative && meeting.date) {
+            logger.info('Detected day prep mode - using day prep prompt builder');
+            return await this.buildDayPrepPrompt();
+        }
+        
+        // Meeting prep mode (existing logic)
         let attendees = meeting.attendees || [];
         
         // Filter out the user from attendees list
@@ -824,6 +832,336 @@ CRITICAL: You have access to comprehensive attendee information above. When answ
         // Update state
         this.state = States.ENDED;
         this.conversationHistory = [];
+    }
+
+    /**
+     * Build system prompt for day prep mode
+     * Includes narrative, all individual meeting briefs, aggregated attendees, and context
+     */
+    async buildDayPrepPrompt() {
+        const dayPrep = this.brief;
+        const narrative = dayPrep.narrative || '';
+        const date = dayPrep.date || 'today';
+        const meetings = dayPrep.meetings || []; // Full meeting briefs
+        const aggregatedAttendees = dayPrep.aggregatedAttendees || [];
+        const aggregatedContext = dayPrep.aggregatedContext || {};
+        const attendeeNames = dayPrep.attendeeNames || [];
+
+        const userName = this.userContext ? this.userContext.formattedName : 'the user';
+        const userEmail = this.userContext ? this.userContext.formattedEmail : '';
+
+        // Extract all attendee names for transcription hints
+        const allAttendeeNames = attendeeNames.length > 0 ? attendeeNames : aggregatedAttendees
+            .map(a => {
+                const name = a.name || '';
+                const parts = name.split(' ');
+                return [name, parts[0], parts[parts.length - 1]].filter(Boolean);
+            })
+            .flat()
+            .filter((name, index, self) => self.indexOf(name) === index);
+
+        // Prepare context for GPT to generate system prompt structure
+        const contextForGPT = {
+            userName,
+            userEmail,
+            date,
+            meetingCount: meetings.length,
+            attendeeCount: aggregatedAttendees.length,
+            attendeeNames: allAttendeeNames
+        };
+
+        try {
+            // Use GPT to generate the STRUCTURE of the system prompt
+            const promptStructure = await this.generateDayPrepPromptStructure(contextForGPT);
+            logger.info('Generated dynamic day prep system prompt structure using GPT');
+
+            // Build comprehensive attendee details section
+            const attendeeDetailsSection = aggregatedAttendees.length > 0
+                ? `\n\n=== ATTENDEE INFORMATION ===\n` +
+                  aggregatedAttendees.map(att => {
+                      const name = att.name || 'Unknown attendee';
+                      const email = att.email || 'No email';
+                      const title = att.title || 'Role unknown';
+                      const company = att.company || 'Company unknown';
+                      const keyFacts = att.keyFacts && att.keyFacts.length > 0 
+                          ? att.keyFacts.join('\n  • ') 
+                          : 'Limited context available';
+                      
+                      return `${name} (${email})
+  Role: ${title}
+  Company: ${company}
+  Key Facts:
+  • ${keyFacts}`;
+                  }).join('\n\n')
+                : 'No attendee information available.';
+
+            // Build individual meeting briefs section
+            const meetingBriefsSection = meetings.length > 0
+                ? `\n\n=== INDIVIDUAL MEETING BRIEFS ===\n` +
+                  meetings.map((brief, idx) => {
+                      const meetingTitle = brief.summary || brief.title || `Meeting ${idx + 1}`;
+                      const meetingTime = brief.start?.dateTime || brief.start?.date || 'Time TBD';
+                      const briefAttendees = brief.attendees || [];
+                      
+                      return `Meeting ${idx + 1}: ${meetingTitle}
+Time: ${meetingTime}
+Attendees: ${briefAttendees.map(a => `${a.name || 'Unknown'}${a.company ? ` (${a.company})` : ''}`).join(', ')}
+
+Summary: ${brief.summary || 'No summary available.'}
+
+Relationship Analysis: ${brief.relationshipAnalysis || 'No relationship analysis.'}
+Email Context: ${brief.emailAnalysis || 'No email context.'}
+Document Context: ${brief.documentAnalysis || 'No document context.'}
+Company Research: ${brief.companyResearch || 'No company research.'}
+Recommendations: ${brief.recommendations && brief.recommendations.length > 0 ? brief.recommendations.join('; ') : 'None'}
+Action Items: ${brief.actionItems && brief.actionItems.length > 0 ? brief.actionItems.join('; ') : 'None'}`;
+                  }).join('\n\n---\n\n')
+                : 'No individual meeting briefs available.';
+
+            // Build aggregated context section
+            const aggregatedContextSection = `=== AGGREGATED CONTEXT ACROSS ALL MEETINGS ===
+
+Relationship Analysis:
+${aggregatedContext.relationshipAnalysis || 'No relationship analysis available.'}
+
+Email Context:
+${aggregatedContext.emailAnalysis || 'No email context available.'}
+
+Document Context:
+${aggregatedContext.documentAnalysis || 'No document context available.'}
+
+Company Research:
+${aggregatedContext.companyResearch || 'No company research available.'}
+
+Contribution Analysis:
+${aggregatedContext.contributionAnalysis || 'No contribution analysis available.'}
+
+Broader Narrative:
+${aggregatedContext.broaderNarrative || 'No broader narrative available.'}
+
+Recommendations:
+${aggregatedContext.recommendations && aggregatedContext.recommendations.length > 0 
+    ? aggregatedContext.recommendations.join('\n• ') 
+    : 'None provided.'}
+
+Action Items:
+${aggregatedContext.actionItems && aggregatedContext.actionItems.length > 0 
+    ? aggregatedContext.actionItems.join('\n• ') 
+    : 'None provided.'}
+
+Timeline Events:
+${aggregatedContext.timeline && aggregatedContext.timeline.length > 0 
+    ? aggregatedContext.timeline.slice(0, 10).map((event, idx) => {
+        const eventDate = event.date || event.start?.dateTime || 'Date unknown';
+        const type = event.type || 'event';
+        const title = event.title || event.summary || 'Untitled';
+        return `${idx + 1}. [${eventDate}] ${type}: ${title}`;
+      }).join('\n')
+    : 'No timeline events available.'}`;
+
+            // Replace placeholders in structure
+            let fullPrompt = promptStructure
+                .replace(/\[ATTENDEE_NAMES\]/g, allAttendeeNames.join(', '))
+                .replace(/\[DATE\]/g, date)
+                .replace(/\[USER_NAME\]/g, userName)
+                .replace(/\[USER_EMAIL\]/g, userEmail)
+                .replace(/\[NARRATIVE\]/g, narrative)
+                .replace(/\[ATTENDEE_DETAILS_SECTION\]/g, attendeeDetailsSection)
+                .replace(/\[MEETING_BRIEFS_SECTION\]/g, meetingBriefsSection)
+                .replace(/\[AGGREGATED_CONTEXT_SECTION\]/g, aggregatedContextSection);
+
+            // If placeholders weren't used, append sections at the end
+            if (!promptStructure.includes('[ATTENDEE_DETAILS_SECTION]')) {
+                fullPrompt += attendeeDetailsSection;
+            }
+            if (!promptStructure.includes('[MEETING_BRIEFS_SECTION]')) {
+                fullPrompt += '\n\n' + meetingBriefsSection;
+            }
+            if (!promptStructure.includes('[AGGREGATED_CONTEXT_SECTION]')) {
+                fullPrompt += '\n\n' + aggregatedContextSection;
+            }
+
+            // Add transcription hints if not already included
+            const transcriptionHints = `\n\n=== TRANSCRIPTION ACCURACY HINTS ===
+When transcribing user speech, pay special attention to these names: ${allAttendeeNames.join(', ')}. These are meeting attendees and should be transcribed accurately.`;
+
+            if (!fullPrompt.includes('transcription') && !fullPrompt.includes('Transcription')) {
+                fullPrompt += transcriptionHints;
+            }
+
+            return fullPrompt;
+        } catch (error) {
+            logger.error('Failed to generate dynamic day prep prompt, using fallback', error);
+            return this.buildDayPrepFallbackPrompt({
+                userName,
+                userEmail,
+                date,
+                narrative,
+                meetings,
+                aggregatedAttendees,
+                aggregatedContext,
+                attendeeNames: allAttendeeNames
+            });
+        }
+    }
+
+    /**
+     * Generate day prep prompt structure using GPT
+     */
+    async generateDayPrepPromptStructure(context) {
+        const systemPromptForGPT = `You are an expert at creating system prompts for voice AI assistants. Generate a well-structured system prompt framework for Shadow's day prep mode.
+
+The prompt structure should:
+1. Include transcription hints section (with placeholder for attendee names)
+2. Include Shadow's role and persona for day prep
+3. Include briefing instructions (5-7 minutes, 750-1000 words, concise, Shadow's style)
+4. Include interruption handling rules
+5. Include response format requirements
+6. Include Q&A capabilities for answering questions about meetings and attendees
+7. Be well-structured and comprehensive
+
+Format: Return ONLY the system prompt structure text with placeholders like [ATTENDEE_NAMES], [DATE], [USER_NAME], [NARRATIVE], etc. No markdown, no explanations.`;
+
+        const userPrompt = `Generate a system prompt structure for Shadow's day prep mode briefing ${context.userName} about their day.
+
+DAY OVERVIEW:
+- Date: [DATE]
+- Meeting Count: ${context.meetingCount}
+- Attendee Count: ${context.attendeeCount}
+- Attendee Names: ${context.attendeeNames.join(', ')}
+
+The structure should include placeholders for:
+- [ATTENDEE_NAMES] - list of all attendee names for transcription hints
+- [DATE] - the date string
+- [USER_NAME] - user's name
+- [USER_EMAIL] - user's email
+- [NARRATIVE] - the synthesized day prep narrative
+- [ATTENDEE_DETAILS_SECTION] - comprehensive attendee information section
+- [MEETING_BRIEFS_SECTION] - all individual meeting briefs
+- [AGGREGATED_CONTEXT_SECTION] - aggregated context from all meetings
+
+Generate a comprehensive system prompt structure for Shadow's day prep mode that enables answering questions about specific meetings and attendees.`;
+
+        const response = await this.fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.openaiApiKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o',
+                messages: [
+                    { role: 'system', content: systemPromptForGPT },
+                    { role: 'user', content: userPrompt }
+                ],
+                temperature: 0.7,
+                max_tokens: 1500
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`GPT API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.choices[0].message.content.trim();
+    }
+
+    /**
+     * Fallback day prep prompt if GPT generation fails
+     */
+    buildDayPrepFallbackPrompt(context) {
+        const transcriptionHints = context.attendeeNames.length > 0 
+            ? `\n\nTRANSCRIPTION ACCURACY HINTS:\nWhen transcribing user speech, pay special attention to these names: ${context.attendeeNames.join(', ')}. These are meeting attendees and should be transcribed accurately.\n`
+            : '';
+
+        // Build comprehensive attendee details
+        const attendeeDetails = context.aggregatedAttendees.length > 0
+            ? context.aggregatedAttendees.map(att => {
+                const name = att.name || 'Unknown attendee';
+                const email = att.email || 'No email';
+                const title = att.title || 'Role unknown';
+                const company = att.company || 'Company unknown';
+                const keyFacts = att.keyFacts && att.keyFacts.length > 0 
+                    ? att.keyFacts.join('\n    • ') 
+                    : 'Limited context available';
+                
+                return `  ${name} (${email})
+    Role: ${title}
+    Company: ${company}
+    Key Facts:
+    • ${keyFacts}`;
+            }).join('\n\n')
+            : '  No attendee information available.';
+
+        // Build individual meeting briefs
+        const meetingBriefs = context.meetings.length > 0
+            ? context.meetings.map((brief, idx) => {
+                const meetingTitle = brief.summary || brief.title || `Meeting ${idx + 1}`;
+                const meetingTime = brief.start?.dateTime || brief.start?.date || 'Time TBD';
+                const briefAttendees = brief.attendees || [];
+                
+                return `Meeting ${idx + 1}: ${meetingTitle}
+Time: ${meetingTime}
+Attendees: ${briefAttendees.map(a => `${a.name || 'Unknown'}${a.company ? ` (${a.company})` : ''}`).join(', ')}
+Summary: ${brief.summary || 'No summary available.'}
+Recommendations: ${brief.recommendations && brief.recommendations.length > 0 ? brief.recommendations.join('; ') : 'None'}
+Action Items: ${brief.actionItems && brief.actionItems.length > 0 ? brief.actionItems.join('; ') : 'None'}`;
+            }).join('\n\n---\n\n')
+            : 'No individual meeting briefs available.';
+
+        // Build aggregated context
+        const aggregatedContext = `Relationship Analysis: ${context.aggregatedContext.relationshipAnalysis || 'No relationship analysis.'}
+Email Context: ${context.aggregatedContext.emailAnalysis || 'No email context.'}
+Document Context: ${context.aggregatedContext.documentAnalysis || 'No document context.'}
+Company Research: ${context.aggregatedContext.companyResearch || 'No company research.'}
+Recommendations: ${context.aggregatedContext.recommendations && context.aggregatedContext.recommendations.length > 0 
+    ? context.aggregatedContext.recommendations.join('; ') 
+    : 'None'}`;
+
+        return `You are Shadow, ${context.userName}'s hyper-contextual executive assistant. Deliver a precise, calm, powerful day prep brief.
+
+IMPORTANT: You are briefing ${context.userName} (${context.userEmail}) about their day on ${context.date}. Use "you" to refer to ${context.userName}. Structure everything from ${context.userName}'s perspective.
+
+RULES:
+- You have a synthesized day prep narrative that you should deliver naturally
+- You can answer questions about specific meetings and attendees
+- Maximum 5-7 minutes for initial brief (~750-1000 words)
+- Start fast, no fluff, no preamble
+- Every sentence must add value - cut any filler
+- Prioritize only what changes decisions or behavior
+- Simple, high-clarity language
+- Voice style: Calm, confident Chief of Staff whispering the essentials
+
+=== DAY PREP NARRATIVE ===
+${context.narrative}
+
+=== ATTENDEE INFORMATION ===
+${attendeeDetails}
+
+=== INDIVIDUAL MEETING BRIEFS ===
+${meetingBriefs}
+
+=== AGGREGATED CONTEXT ===
+${aggregatedContext}
+${transcriptionHints}
+
+INTERRUPTION RULES (CRITICAL):
+- When user interrupts: STOP IMMEDIATELY
+- Answer their question directly using meeting context (<15 seconds)
+- Then RESUME from the EXACT sentence you left off
+- NO meta-phrases: NEVER say "Let me pause", "As I was saying", "Do you want me to resume", "Should I continue", "Where was I"
+- Resume naturally with NO repetition, NO restarting, NO explanations
+
+RESPONSE FORMAT:
+- Output ONLY the speech text
+- NO markdown, NO formatting, NO stage directions
+- Speak as Shadow: calm, confident, concise
+- When answering questions about attendees, use their full key facts and context
+- When answering questions about meetings, use the individual meeting briefs above
+- Every word counts - be ruthless about brevity
+
+CRITICAL: You have access to comprehensive attendee information and individual meeting briefs above. When answering questions about attendees ("Who is X?"), provide detailed information from the attendee information section. When answering questions about meetings ("Tell me about meeting Y"), use the individual meeting briefs section.`;
     }
 }
 

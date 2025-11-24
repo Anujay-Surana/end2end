@@ -54,8 +54,8 @@
             position: relative;
         }
 
-        /* Chat Mode Toggle */
-        .chat-mode-toggle {
+        /* Prep View Toggle */
+        .prep-view-toggle {
             position: absolute;
             top: 0;
             left: 0;
@@ -68,25 +68,309 @@
             font-weight: 500;
             cursor: pointer;
             transition: background 0.2s;
+            z-index: 10;
         }
 
-        .chat-mode-toggle:hover {
+        .prep-view-toggle:hover {
             background: #2d2d2d;
         }
 
-        .chat-mode-toggle.active {
+        .prep-view-toggle.active {
             background: var(--color-accent);
         }
 
-        /* Chat Mode Container */
-        .chat-mode-container {
+        /* Prep View Container */
+        .prep-view-container {
             display: none;
             max-width: 600px;
             margin: 0 auto;
         }
 
-        .chat-mode-container.active {
+        .prep-view-container.active {
             display: block;
+        }
+
+        /* Chat Panel Toggle */
+        .chat-panel-toggle {
+            position: absolute;
+            top: 0;
+            left: 120px;
+            background: var(--color-primary);
+            color: white;
+            border: none;
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+            z-index: 10;
+        }
+
+        .chat-panel-toggle:hover {
+            background: #2d2d2d;
+        }
+
+        .chat-panel-toggle.active {
+            background: var(--color-accent);
+        }
+
+        /* Chat Panel Container */
+        .chat-panel-container {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: white;
+            z-index: 1000;
+            flex-direction: column;
+        }
+
+        .chat-panel-container.active {
+            display: flex;
+        }
+
+        .chat-panel-header {
+            background: var(--color-primary);
+            color: white;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .shadow-branding {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .shadow-name {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .chat-messages-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            background: #fafafa;
+        }
+
+        .chat-message {
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-message.user {
+            align-items: flex-end;
+        }
+
+        .chat-message.assistant {
+            align-items: flex-start;
+        }
+
+        .chat-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            word-wrap: break-word;
+        }
+
+        .chat-message.user .chat-bubble {
+            background: var(--color-primary);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .chat-message.assistant .chat-bubble {
+            background: white;
+            color: #333;
+            border: 1px solid #e5e7eb;
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-timestamp {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 4px;
+        }
+
+        .meeting-reminder-card {
+            background: white;
+            border: 2px solid var(--color-primary);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .reminder-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            color: var(--color-primary);
+            font-weight: 600;
+        }
+
+        .meeting-info h4 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .meeting-info p {
+            margin: 4px 0;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .prep-button-small {
+            margin-top: 12px;
+            padding: 8px 16px;
+            background: var(--color-primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .prep-button-small:hover {
+            background: #2d2d2d;
+        }
+
+        .chat-input-area {
+            padding: 16px 24px;
+            background: white;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            gap: 12px;
+        }
+
+        .chat-input-area input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .chat-input-area input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+        }
+
+        .chat-input-area button {
+            padding: 12px 24px;
+            background: var(--color-primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .chat-input-area button:hover {
+            background: #2d2d2d;
+        }
+
+        /* Test Panel */
+        .test-panel {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 2000;
+            max-width: 300px;
+        }
+
+        .test-panel-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #6b7280;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            z-index: 1999;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .test-panel-toggle:hover {
+            background: #4b5563;
+        }
+
+        .test-panel h3 {
+            margin: 0 0 16px 0;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .test-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .test-controls label {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .test-controls input[type="range"] {
+            width: 100%;
+        }
+
+        .test-controls select {
+            padding: 8px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .test-controls button {
+            padding: 10px;
+            background: var(--color-primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .test-controls button:hover {
+            background: #2d2d2d;
         }
 
         /* Date Picker Card */
@@ -2072,7 +2356,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <button id="chatModeToggle" class="chat-mode-toggle" onclick="toggleChatMode()">💬 Chat Mode</button>
+            <button id="prepViewToggle" class="prep-view-toggle" onclick="togglePrepView()">Prep View</button>
+            <button id="chatPanelToggle" class="chat-panel-toggle" onclick="toggleChatPanel()">Chat</button>
             <div id="userProfile" class="user-profile" style="display: none;">
                 <div class="user-info">
                     <div class="user-name" id="userName"></div>
@@ -2084,8 +2369,8 @@
             <button id="signInButton">Sign in with Google</button>
         </div>
 
-        <!-- Chat Mode Container -->
-        <div id="chatModeContainer" class="chat-mode-container">
+        <!-- Prep View Container -->
+        <div id="prepViewContainer" class="prep-view-container">
             <div class="date-picker-card">
                 <h2>Select Date</h2>
                 <div class="date-input-group">
@@ -2101,6 +2386,47 @@
                     <h3>🎙️ Meeting Prep</h3>
                     <p>Select a specific meeting for a 2-minute voice prep brief</p>
                 </div>
+            </div>
+        </div>
+
+        <!-- Chat Panel Container -->
+        <div id="chatPanelContainer" class="chat-panel-container">
+            <div class="chat-panel-header">
+                <div class="shadow-branding">
+                    <span class="shadow-name">Shadow</span>
+                    <span class="status-indicator" id="chatStatusIndicator">●</span>
+                </div>
+                <button onclick="toggleChatPanel()" style="background: transparent; border: 1px solid white; color: white; padding: 6px 12px; border-radius: 6px; cursor: pointer;">✕ Close</button>
+            </div>
+            <div class="chat-messages-area" id="chatMessagesArea">
+                <!-- Messages and meeting cards appear here -->
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="chatPanelInput" placeholder="Ask Shadow anything..." onkeypress="if(event.key==='Enter') sendChatPanelMessage()" />
+                <button onclick="sendChatPanelMessage()">Send</button>
+            </div>
+        </div>
+
+        <!-- Test Panel Toggle Button -->
+        <button id="testPanelToggle" class="test-panel-toggle" onclick="toggleTestPanel()">Test Panel</button>
+
+        <!-- Test Panel -->
+        <div id="testPanel" class="test-panel" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 style="margin: 0;">Test Reminders</h3>
+                <button onclick="toggleTestPanel()" style="background: transparent; border: none; font-size: 18px; cursor: pointer; color: #666;">×</button>
+            </div>
+            <div class="test-controls">
+                <label>Reminder Window (minutes):</label>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <input type="range" id="reminderWindowSlider" min="1" max="60" value="15" oninput="updateReminderWindow(this.value)" style="flex: 1;" />
+                    <span id="reminderWindowValue" style="min-width: 30px; text-align: right;">15</span>
+                </div>
+                <label style="display: block; margin-bottom: 8px;">Select Meeting:</label>
+                <select id="testMeetingSelector" style="width: 100%; margin-bottom: 12px;">
+                    <option value="">Select meeting...</option>
+                </select>
+                <button onclick="testReminder()" style="width: 100%;">Test Reminder</button>
             </div>
         </div>
 
@@ -6061,8 +6387,8 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
                 if (isDuplicate) {
                     console.log('Duplicate transcript detected, skipping', { speaker, text: text.substring(0, 50) });
-                    return;
-                }
+                return;
+            }
 
                 // Add to recent transcripts list
                 recentTranscripts.push({
@@ -6507,33 +6833,506 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         window.startVoicePrep = startVoicePrep;
         window.closeVoicePrep = closeVoicePrep;
 
-        // ==================== Chat Mode Functions ====================
-        let chatModeActive = false;
+        // ==================== Prep View Functions ====================
+        let prepViewActive = false;
 
-        function toggleChatMode() {
-            chatModeActive = !chatModeActive;
-            const chatModeContainer = document.getElementById('chatModeContainer');
+        function togglePrepView() {
+            prepViewActive = !prepViewActive;
+            const prepViewContainer = document.getElementById('prepViewContainer');
             const eventsContainer = document.getElementById('eventsContainer');
-            const toggleButton = document.getElementById('chatModeToggle');
+            const toggleButton = document.getElementById('prepViewToggle');
             const datePicker = document.getElementById('chatModeDatePicker');
 
-            if (chatModeActive) {
-                chatModeContainer.classList.add('active');
+            if (prepViewActive) {
+                prepViewContainer.classList.add('active');
                 eventsContainer.classList.remove('visible');
                 toggleButton.classList.add('active');
-                toggleButton.textContent = '📅 Calendar Mode';
+                toggleButton.textContent = 'Calendar View';
                 
-                // Always set default date to today when opening chat mode
+                // Always set default date to today when opening prep view
                 const today = new Date().toISOString().split('T')[0];
                 datePicker.value = today;
-                console.log('Chat mode opened - date picker set to:', today);
+                console.log('Prep view opened - date picker set to:', today);
             } else {
-                chatModeContainer.classList.remove('active');
+                prepViewContainer.classList.remove('active');
                 eventsContainer.classList.add('visible');
                 toggleButton.classList.remove('active');
-                toggleButton.textContent = '💬 Chat Mode';
+                toggleButton.textContent = 'Prep View';
             }
         }
+
+        // ==================== Chat Panel Functions ====================
+        let chatPanelActive = false;
+        let chatPanelWs = null;
+        let reminderInterval = null;
+        let shownReminders = new Set();
+        let reminderWindowMinutes = 15;
+
+        function toggleChatPanel() {
+            chatPanelActive = !chatPanelActive;
+            const chatPanelContainer = document.getElementById('chatPanelContainer');
+            const toggleButton = document.getElementById('chatPanelToggle');
+            const eventsContainer = document.getElementById('eventsContainer');
+            const prepViewContainer = document.getElementById('prepViewContainer');
+
+            if (chatPanelActive) {
+                chatPanelContainer.classList.add('active');
+                eventsContainer.classList.remove('visible');
+                prepViewContainer.classList.remove('active');
+                toggleButton.classList.add('active');
+                
+                // Initialize chat panel
+                initializeChatPanel();
+                
+                // Start reminder polling
+                startReminderPolling();
+            } else {
+                chatPanelContainer.classList.remove('active');
+                eventsContainer.classList.add('visible');
+                toggleButton.classList.remove('active');
+                
+                // Stop reminder polling
+                stopReminderPolling();
+                
+                // Close WebSocket if open
+                if (chatPanelWs) {
+                    chatPanelWs.close();
+                    chatPanelWs = null;
+                }
+            }
+        }
+
+        async function initializeChatPanel() {
+            // Clear messages area
+            const messagesArea = document.getElementById('chatMessagesArea');
+            messagesArea.innerHTML = '';
+            
+            // Connect WebSocket
+            await connectChatPanelWebSocket();
+            
+            // Fetch today's meetings and generate initial update
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const response = await fetch(`/api/meetings-for-day?date=${today}`);
+                const data = await response.json();
+                const meetings = data.meetings || [];
+                
+                if (meetings && meetings.length > 0) {
+                    // Generate initial update using OpenAI
+                    const updateMessage = await generateInitialUpdate(meetings);
+                    addChatMessage('assistant', updateMessage);
+                } else {
+                    addChatMessage('assistant', "You have no meetings scheduled for today. I'm here to help whenever you need me!");
+                }
+            } catch (error) {
+                console.error('Error fetching meetings:', error);
+                addChatMessage('assistant', "Hi! I'm Shadow, your executive assistant. How can I help you today?");
+            }
+        }
+
+        async function connectChatPanelWebSocket() {
+            return new Promise((resolve, reject) => {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}`;
+                
+                chatPanelWs = new WebSocket(wsUrl);
+                
+                chatPanelWs.onopen = () => {
+                    console.log('Chat panel WebSocket connected');
+                    updateChatStatus('Connected', '#10b981');
+                    resolve();
+                };
+                
+                chatPanelWs.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'chat_panel_response') {
+                            addChatMessage('assistant', data.message);
+                        }
+                    } catch (error) {
+                        console.error('Error parsing WebSocket message:', error);
+                    }
+                };
+                
+                chatPanelWs.onerror = (error) => {
+                    console.error('Chat panel WebSocket error:', error);
+                    updateChatStatus('Connection error', '#ef4444');
+                    reject(error);
+                };
+                
+                chatPanelWs.onclose = () => {
+                    console.log('Chat panel WebSocket closed');
+                    updateChatStatus('Disconnected', '#9ca3af');
+                };
+            });
+        }
+
+        async function generateInitialUpdate(meetings) {
+            try {
+                const meetingList = meetings.map((m, idx) => {
+                    // Handle time display - check if it's an all-day event (date only) vs timed event
+                    const startTime = m.start?.dateTime || m.start?.date || m.start;
+                    let timeStr = 'Time TBD';
+                    
+                    if (startTime) {
+                        if (m.start?.dateTime) {
+                            // Timed event - show time
+                            timeStr = new Date(startTime).toLocaleTimeString('en-US', {
+                                hour: 'numeric',
+                                minute: '2-digit',
+                                hour12: true
+                            });
+                        } else if (m.start?.date) {
+                            // All-day event - show "All day"
+                            timeStr = 'All day';
+                        } else if (typeof startTime === 'string') {
+                            // Try parsing as date string
+                            const parsedDate = new Date(startTime);
+                            if (!isNaN(parsedDate.getTime())) {
+                                timeStr = parsedDate.toLocaleTimeString('en-US', {
+                                    hour: 'numeric',
+                                    minute: '2-digit',
+                                    hour12: true
+                                });
+                            }
+                        }
+                    }
+                    
+                    const attendees = (m.attendees || []).map(a => a.displayName || a.email).join(', ');
+                    return `${idx + 1}. ${m.summary || 'Untitled Meeting'} at ${timeStr}${attendees ? ` with ${attendees}` : ''}`;
+                }).join('\n');
+
+                // Use the REST endpoint instead of calling OpenAI directly
+                const response = await fetch('/api/chat-panel', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: `Generate a quick update about today's meetings:\n\n${meetingList}`
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                return data.message || `You have ${meetings.length} meeting${meetings.length !== 1 ? 's' : ''} scheduled for today. Ready to help you prepare!`;
+            } catch (error) {
+                console.error('Error generating initial update:', error);
+                // Fallback to simple message
+                return `You have ${meetings.length} meeting${meetings.length !== 1 ? 's' : ''} scheduled for today. Ready to help you prepare!`;
+            }
+        }
+
+        function sendChatPanelMessage() {
+            const input = document.getElementById('chatPanelInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Add user message to UI
+            addChatMessage('user', message);
+
+            // Clear input
+            input.value = '';
+
+            // Send to server via WebSocket
+            if (chatPanelWs && chatPanelWs.readyState === WebSocket.OPEN) {
+                chatPanelWs.send(JSON.stringify({
+                    type: 'chat_panel_message',
+                    message: message
+                }));
+            } else {
+                // Fallback: use REST API
+                fetch('/api/chat-panel', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ message })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    addChatMessage('assistant', data.message);
+                })
+                .catch(error => {
+                    console.error('Error sending message:', error);
+                    addChatMessage('assistant', 'Sorry, I encountered an error. Please try again.');
+                });
+            }
+        }
+
+        function addChatMessage(role, message, timestamp = null) {
+            const messagesArea = document.getElementById('chatMessagesArea');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${role}`;
+            
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-bubble';
+            bubble.textContent = message;
+            
+            const time = timestamp || new Date();
+            const timeStr = time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            const timestampDiv = document.createElement('div');
+            timestampDiv.className = 'chat-timestamp';
+            timestampDiv.textContent = timeStr;
+            
+            messageDiv.appendChild(bubble);
+            messageDiv.appendChild(timestampDiv);
+            messagesArea.appendChild(messageDiv);
+            
+            // Scroll to bottom
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+        }
+
+        function updateChatStatus(text, color) {
+            const indicator = document.getElementById('chatStatusIndicator');
+            if (indicator) {
+                indicator.style.background = color;
+                indicator.title = text;
+            }
+        }
+
+        // ==================== Reminder System ====================
+        function startReminderPolling() {
+            // Check immediately
+            checkForReminders();
+            
+            // Then check every 60 seconds
+            reminderInterval = setInterval(checkForReminders, 60000);
+        }
+
+        function stopReminderPolling() {
+            if (reminderInterval) {
+                clearInterval(reminderInterval);
+                reminderInterval = null;
+            }
+        }
+
+        async function checkForReminders() {
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const response = await fetch(`/api/meetings-for-day?date=${today}`);
+                const data = await response.json();
+                
+                // Handle different response structures
+                let meetings = [];
+                if (Array.isArray(data)) {
+                    meetings = data;
+                } else if (data && Array.isArray(data.meetings)) {
+                    meetings = data.meetings;
+                } else if (data && Array.isArray(data.events)) {
+                    meetings = data.events;
+                } else if (data && data.items && Array.isArray(data.items)) {
+                    meetings = data.items;
+                }
+                
+                if (!meetings || meetings.length === 0) return;
+                
+                const now = new Date();
+                const reminderWindowMs = reminderWindowMinutes * 60 * 1000;
+                
+                meetings.forEach(meeting => {
+                    if (!meeting.start?.dateTime) return;
+                    
+                    const meetingStart = new Date(meeting.start.dateTime);
+                    const timeUntilMeeting = meetingStart - now;
+                    const meetingId = meeting.id || meeting.summary;
+                    
+                    // Check if meeting is within reminder window (14-15 minutes before)
+                    const minutesUntilMeeting = timeUntilMeeting / (60 * 1000);
+                    if (minutesUntilMeeting > reminderWindowMinutes - 1 && minutesUntilMeeting <= reminderWindowMinutes && !shownReminders.has(meetingId)) {
+                        showReminderCard(meeting);
+                        shownReminders.add(meetingId);
+                    }
+                });
+            } catch (error) {
+                console.error('Error checking reminders:', error);
+            }
+        }
+
+        function showReminderCard(meeting) {
+            const messagesArea = document.getElementById('chatMessagesArea');
+            const cardDiv = document.createElement('div');
+            cardDiv.className = 'meeting-reminder-card';
+            
+            // Handle time display - check if it's an all-day event (date only) vs timed event
+            const startTime = meeting.start?.dateTime || meeting.start?.date || meeting.start;
+            let timeStr = 'Time TBD';
+            
+            if (startTime) {
+                if (meeting.start?.dateTime) {
+                    // Timed event - show time
+                    timeStr = new Date(startTime).toLocaleTimeString('en-US', {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true
+                    });
+                } else if (meeting.start?.date) {
+                    // All-day event - show "All day"
+                    timeStr = 'All day';
+                } else if (typeof startTime === 'string') {
+                    // Try parsing as date string
+                    const parsedDate = new Date(startTime);
+                    if (!isNaN(parsedDate.getTime())) {
+                        timeStr = parsedDate.toLocaleTimeString('en-US', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true
+                        });
+                    }
+                }
+            }
+            
+            const attendees = (meeting.attendees || []).map(a => a.displayName || a.email).join(', ') || 'No attendees listed';
+            
+            cardDiv.innerHTML = `
+                <div class="reminder-header">
+                    <span class="reminder-text">Meeting starting in ${reminderWindowMinutes} minutes</span>
+                </div>
+                <div class="meeting-info">
+                    <h4>${meeting.summary || 'Untitled Meeting'}</h4>
+                    <p>${timeStr}</p>
+                    <p>Attendees: ${attendees}</p>
+                </div>
+                <button class="prep-button-small" onclick="startVoicePrepForMeeting('${meeting.id || ''}')">
+                    Start Prep
+                </button>
+            `;
+            
+            messagesArea.appendChild(cardDiv);
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+            
+            // Also send a text message from Shadow
+            addChatMessage('assistant', `Your meeting "${meeting.summary || 'Untitled Meeting'}" starts in ${reminderWindowMinutes} minutes. Ready to prep?`);
+        }
+
+        async function startVoicePrepForMeeting(meetingId) {
+            try {
+                // Find the meeting
+                const today = new Date().toISOString().split('T')[0];
+                const response = await fetch(`/api/meetings-for-day?date=${today}`);
+                const meetings = await response.json();
+                
+                const meeting = meetings.find(m => (m.id || '') === meetingId);
+                if (!meeting) {
+                    alert('Meeting not found');
+                    return;
+                }
+                
+                // Close chat panel
+                toggleChatPanel();
+                
+                // Start voice prep (reuse existing function)
+                if (window.selectMeetingForPrep) {
+                    await window.selectMeetingForPrep(meeting);
+                } else {
+                    // Fallback: navigate to meeting detail and start prep
+                    showMeetingDetail(meeting);
+                    setTimeout(() => {
+                        if (window.startVoicePrep) {
+                            window.startVoicePrep();
+                        }
+                    }, 500);
+                }
+            } catch (error) {
+                console.error('Error starting voice prep:', error);
+                alert('Error starting prep. Please try again.');
+            }
+        }
+
+        // ==================== Test Functions ====================
+        function testReminder() {
+            const selector = document.getElementById('testMeetingSelector');
+            const meetingId = selector.value;
+            
+            if (!meetingId) {
+                alert('Please select a meeting');
+                return;
+            }
+            
+            // Find the meeting and show reminder
+            fetch(`/api/meetings-for-day?date=${new Date().toISOString().split('T')[0]}`)
+                .then(res => res.json())
+                .then(data => {
+                    const meetings = data.meetings || [];
+                    const meeting = meetings.find(m => (m.id || '') === meetingId);
+                    if (meeting) {
+                        showReminderCard(meeting);
+                    } else {
+                        alert('Meeting not found');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error testing reminder:', error);
+                    alert('Error testing reminder');
+                });
+        }
+
+        async function populateTestMeetings() {
+            const selector = document.getElementById('testMeetingSelector');
+            selector.innerHTML = '<option value="">Select meeting...</option>';
+            
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const response = await fetch(`/api/meetings-for-day?date=${today}`);
+                const data = await response.json();
+                const meetings = data.meetings || [];
+                
+                meetings.forEach(meeting => {
+                    const option = document.createElement('option');
+                    option.value = meeting.id || '';
+                    option.textContent = `${meeting.summary || 'Untitled Meeting'} - ${meeting.start?.dateTime ? new Date(meeting.start.dateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'Time TBD'}`;
+                    selector.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error populating test meetings:', error);
+            }
+        }
+
+        function toggleTestPanel() {
+            const testPanel = document.getElementById('testPanel');
+            const toggleButton = document.getElementById('testPanelToggle');
+            
+            if (testPanel) {
+                const isVisible = testPanel.style.display !== 'none';
+                testPanel.style.display = isVisible ? 'none' : 'block';
+                toggleButton.textContent = isVisible ? 'Test Panel' : 'Hide Panel';
+                
+                if (!isVisible) {
+                    populateTestMeetings();
+                }
+            }
+        }
+
+        function updateReminderWindow(value) {
+            reminderWindowMinutes = parseInt(value, 10);
+            document.getElementById('reminderWindowValue').textContent = value;
+        }
+
+        // Keyboard shortcut for test panel (Ctrl+Shift+T)
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+                toggleTestPanel();
+            }
+        });
+
+        // Export function
+        window.toggleTestPanel = toggleTestPanel;
+
+        // Export functions
+        window.toggleChatPanel = toggleChatPanel;
+        window.sendChatPanelMessage = sendChatPanelMessage;
+        window.startVoicePrepForMeeting = startVoicePrepForMeeting;
+        window.testReminder = testReminder;
+        window.populateTestMeetings = populateTestMeetings;
+        
+        // Initialize test panel on load
+        document.addEventListener('DOMContentLoaded', () => {
+            populateTestMeetings();
+        });
 
         async function startDayPrep() {
             const datePicker = document.getElementById('chatModeDatePicker');

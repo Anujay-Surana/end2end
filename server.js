@@ -9,6 +9,7 @@ const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const VoiceConversationManager = require('./services/voiceConversation');
 const VoicePrepManager = require('./services/voicePrepBriefing');
+const ChatPanelService = require('./services/chatPanelService');
 const { fetchGmailMessages, fetchDriveFiles, fetchDriveFileContents } = require('./services/googleApi');
 const logger = require('./services/logger');
 require('dotenv').config();
@@ -58,6 +59,9 @@ logger.info('All required environment variables are set');
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+
+// Initialize Chat Panel Service
+const chatPanelService = new ChatPanelService(OPENAI_API_KEY);
 
 // Initialize Parallel AI client
 const parallelClient = new Parallel({
@@ -1356,6 +1360,34 @@ OUTPUT: Write 3-4 sentences following the structure above, using SPECIFIC detail
     }
 });
 
+// Chat Panel REST endpoint (fallback if WebSocket unavailable)
+const { requireAuth } = require('./middleware/auth');
+app.post('/api/chat-panel', requireAuth, async (req, res) => {
+    try {
+        const { message } = req.body;
+        if (!message) {
+            return res.status(400).json({ error: 'Message is required' });
+        }
+
+        // Fetch today's meetings for context
+        let meetings = [];
+        try {
+            const { fetchCalendarEvents } = require('./services/googleApi');
+            const { getUserId } = require('./middleware/auth');
+            const userId = getUserId(req);
+            // TODO: Fetch user's meetings - for now, empty array
+        } catch (error) {
+            logger.error({ error: error.message }, 'Error fetching meetings for chat panel');
+        }
+
+        const response = await chatPanelService.generateResponse(message, [], meetings);
+        res.json({ message: response });
+    } catch (error) {
+        logger.error({ error: error.message }, 'Error in chat panel endpoint');
+        res.status(500).json({ error: 'Failed to generate response' });
+    }
+});
+
 // ===== REAL-TIME MEETING ASSISTANT WEBSOCKET =====
 
 wss.on('connection', (ws) => {
@@ -1832,6 +1864,50 @@ wss.on('connection', (ws) => {
             }
 
             // Voice Prep: Start 2-minute briefing
+            else if (data.type === 'chat_panel_message') {
+                console.log('💬 Chat panel message:', data.message);
+
+                // Initialize conversation history if not exists
+                if (!ws.chatPanelHistory) {
+                    ws.chatPanelHistory = [];
+                }
+
+                // Add user message to history
+                ws.chatPanelHistory.push({ role: 'user', content: data.message });
+
+                // Fetch today's meetings for context
+                let meetings = [];
+                try {
+                    const { fetchCalendarEvents } = require('./services/googleApi');
+                    const { getUserId } = require('./middleware/auth');
+                    const userId = getUserId(req);
+                    // Note: We need access to req for user context, but WebSocket doesn't have req
+                    // For now, we'll work without user-specific meetings
+                    // TODO: Store user context in ws object during connection
+                } catch (error) {
+                    logger.error({ error: error.message }, 'Error fetching meetings for chat panel');
+                }
+
+                // Generate response
+                chatPanelService.generateResponse(data.message, ws.chatPanelHistory, meetings)
+                    .then(response => {
+                        // Add assistant response to history
+                        ws.chatPanelHistory.push({ role: 'assistant', content: response });
+
+                        // Send response to client
+                        ws.send(JSON.stringify({
+                            type: 'chat_panel_response',
+                            message: response
+                        }));
+                    })
+                    .catch(error => {
+                        logger.error({ error: error.message }, 'Error generating chat panel response');
+                        ws.send(JSON.stringify({
+                            type: 'chat_panel_response',
+                            message: 'Sorry, I encountered an error. Please try again.'
+                        }));
+                    });
+            }
             else if (data.type === 'voice_prep_start') {
                 console.log('🎤 Starting voice prep briefing');
 
