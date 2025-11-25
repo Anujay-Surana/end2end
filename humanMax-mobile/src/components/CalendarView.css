@@ -1,0 +1,206 @@
+@import '../styles/design-system.css';
+
+.calendar-view {
+  padding: var(--spacing-md);
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-lg);
+  gap: var(--spacing-md);
+}
+
+.nav-button {
+  background-color: var(--color-black);
+  color: var(--color-white);
+  border: none;
+  border-radius: var(--border-radius-md);
+  width: var(--touch-target-min);
+  height: var(--touch-target-min);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.nav-button:active {
+  opacity: 0.7;
+}
+
+.date-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-black);
+  margin: 0;
+  flex: 1;
+  text-align: center;
+  letter-spacing: -0.3px;
+}
+
+.refresh-button {
+  background-color: var(--color-black);
+  color: var(--color-white);
+  border: none;
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  min-height: var(--touch-target-min);
+  cursor: pointer;
+  transition: opacity 0.2s;
+  margin-bottom: var(--spacing-md);
+  width: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.refresh-button:active:not(:disabled) {
+  opacity: 0.7;
+}
+
+.refresh-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error-message {
+  background-color: var(--color-gray-100);
+  color: var(--color-gray-900);
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-md);
+  margin-bottom: var(--spacing-md);
+  border: var(--border-width) solid var(--color-gray-200);
+  font-size: var(--font-size-sm);
+}
+
+.loading {
+  text-align: center;
+  padding: var(--spacing-2xl);
+  color: var(--color-gray-600);
+  font-size: var(--font-size-base);
+}
+
+.meeting-detail-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--spacing-md);
+  padding-top: calc(var(--spacing-md) + var(--safe-area-top));
+  padding-bottom: calc(var(--spacing-md) + var(--safe-area-bottom));
+}
+
+.meeting-detail-content {
+  background-color: var(--color-white);
+  border-radius: var(--border-radius-lg);
+  padding: var(--spacing-lg);
+  max-width: 500px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+.close-button {
+  position: absolute;
+  top: var(--spacing-md);
+  right: var(--spacing-md);
+  background: none;
+  border: none;
+  font-size: var(--font-size-2xl);
+  cursor: pointer;
+  color: var(--color-gray-600);
+  line-height: 1;
+  width: var(--touch-target-min);
+  height: var(--touch-target-min);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.close-button:active {
+  opacity: 0.7;
+}
+
+.meeting-detail-content h3 {
+  margin-top: 0;
+  margin-bottom: var(--spacing-md);
+  color: var(--color-black);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  padding-right: var(--spacing-xl);
+}
+
+.meeting-description {
+  color: var(--color-gray-600);
+  margin-bottom: var(--spacing-md);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-relaxed);
+}
+
+.meeting-time {
+  font-weight: var(--font-weight-medium);
+  margin-bottom: var(--spacing-sm);
+  color: var(--color-black);
+  font-size: var(--font-size-base);
+}
+
+.meeting-location {
+  color: var(--color-gray-600);
+  margin-bottom: var(--spacing-md);
+  font-size: var(--font-size-sm);
+}
+
+.meeting-attendees h4 {
+  margin-bottom: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-black);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.meeting-attendees ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.meeting-attendees li {
+  padding: var(--spacing-xs) 0;
+  color: var(--color-gray-600);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+
+@media (max-width: 768px) {
+  .calendar-view {
+    padding: var(--spacing-sm);
+  }
+
+  .date-title {
+    font-size: var(--font-size-base);
+  }
+
+  .meeting-detail-content {
+    padding: var(--spacing-md);
+    max-height: 85vh;
+  }
+}

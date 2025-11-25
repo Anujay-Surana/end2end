@@ -28,6 +28,21 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
             return res.status(400).json({ error: 'Authorization code required' });
         }
 
+        // Determine redirect URI based on request origin
+        // Check if this is a mobile request (from Capacitor app)
+        const isMobileRequest = req.headers['x-capacitor-platform'] === 'ios' ||
+                                req.headers['x-capacitor-platform'] === 'android' ||
+                                req.headers['user-agent']?.includes('CapacitorHttp');
+        
+        // Get host and protocol (Express trust proxy will set req.protocol correctly for Railway)
+        const host = req.get('host') || 'end2end-production.up.railway.app';
+        // Force HTTPS if host is Railway (Express trust proxy should handle this, but be explicit)
+        const protocol = host.includes('railway.app') ? 'https' : req.protocol;
+        
+        const redirectUri = isMobileRequest
+            ? `${protocol}://${host}/auth/google/mobile-callback`
+            : 'postmessage'; // For Google Identity Services web flow
+
         // Exchange code for tokens
         const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
@@ -36,7 +51,7 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
                 code,
                 client_id: process.env.GOOGLE_CLIENT_ID,
                 client_secret: process.env.GOOGLE_CLIENT_SECRET,
-                redirect_uri: 'postmessage', // For Google Identity Services
+                redirect_uri: redirectUri,
                 grant_type: 'authorization_code'
             })
         });
@@ -150,6 +165,39 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
             error: 'Authentication failed',
             message: error.message
         });
+    }
+});
+
+/**
+ * GET /auth/google/mobile-callback
+ * Mobile OAuth redirect endpoint: Receives OAuth code from Google and redirects to app
+ * The app will then call POST /auth/google/callback to exchange the code
+ */
+router.get('/google/mobile-callback', authLimiter, async (req, res) => {
+    try {
+        const { code, state, error } = req.query;
+
+        // Handle OAuth errors
+        if (error) {
+            console.error('OAuth error:', error);
+            const errorDescription = req.query.error_description || error;
+            return res.redirect(`com.humanmax.app://auth/callback?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription)}`);
+        }
+
+        if (!code) {
+            return res.redirect(`com.humanmax.app://auth/callback?error=missing_code&error_description=${encodeURIComponent('Authorization code required')}`);
+        }
+
+        // Simply redirect to app with code and state
+        // App will call POST /auth/google/callback to exchange code
+        const redirectUrl = `com.humanmax.app://auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state || '')}`;
+        res.redirect(redirectUrl);
+
+    } catch (error) {
+        console.error('Mobile auth callback error:', error);
+        
+        const errorMessage = error.message || 'Authentication failed';
+        return res.redirect(`com.humanmax.app://auth/callback?error=auth_failed&error_description=${encodeURIComponent(errorMessage)}`);
     }
 });
 

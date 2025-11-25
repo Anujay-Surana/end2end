@@ -1,0 +1,95 @@
+@import '../styles/design-system.css';
+
+.meeting-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.meeting-item {
+  background-color: var(--color-white);
+  border: var(--border-width) solid var(--color-gray-200);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-md);
+  cursor: pointer;
+  transition: border-color 0.2s;
+  display: flex;
+  gap: var(--spacing-md);
+  align-items: flex-start;
+  min-height: var(--touch-target-min);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.meeting-item:active {
+  border-color: var(--color-black);
+  background-color: var(--color-gray-100);
+}
+
+.meeting-item.selected {
+  border-color: var(--color-black);
+  background-color: var(--color-gray-100);
+}
+
+.meeting-time-badge {
+  background-color: var(--color-black);
+  color: var(--color-white);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--border-radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  min-width: 80px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.meeting-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.meeting-title {
+  margin: 0 0 var(--spacing-sm) 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-black);
+  line-height: var(--line-height-tight);
+}
+
+.meeting-location {
+  margin: var(--spacing-xs) 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-600);
+  line-height: var(--line-height-normal);
+}
+
+.meeting-attendees-count {
+  margin: var(--spacing-xs) 0 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-400);
+  line-height: var(--line-height-normal);
+}
+
+.no-meetings {
+  text-align: center;
+  padding: var(--spacing-2xl) var(--spacing-md);
+  color: var(--color-gray-600);
+}
+
+.no-meetings p {
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-relaxed);
+}
+
+@media (max-width: 768px) {
+  .meeting-item {
+    padding: var(--spacing-sm);
+    gap: var(--spacing-sm);
+  }
+
+  .meeting-time-badge {
+    min-width: 70px;
+    font-size: var(--font-size-xs);
+    padding: var(--spacing-xs) var(--spacing-sm);
+  }
+}

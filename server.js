@@ -15,6 +15,10 @@ const logger = require('./services/logger');
 require('dotenv').config();
 
 const app = express();
+
+// Trust proxy for Railway (allows Express to detect HTTPS from X-Forwarded-Proto header)
+app.set('trust proxy', 1);
+
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
@@ -82,9 +86,30 @@ try {
 // Enable CORS for our frontend
 // Environment-aware CORS configuration
 const corsOptions = {
-    origin: process.env.NODE_ENV === 'production' 
-        ? process.env.ALLOWED_ORIGINS?.split(',') || false  // Restrict to specific origins in production
-        : true,  // Allow all origins in development
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps, Postman, etc.)
+        if (!origin) {
+            return callback(null, true);
+        }
+        
+        // In production, check allowed origins
+        if (process.env.NODE_ENV === 'production') {
+            const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
+            // Allow Capacitor app origins, Railway domain, and localhost
+            if (origin.startsWith('capacitor://') || 
+                origin.startsWith('ionic://') ||
+                origin.includes('localhost') ||
+                origin.includes('railway.app') ||
+                origin.includes('end2end-production.up.railway.app') ||
+                allowedOrigins.includes(origin)) {
+                return callback(null, true);
+            }
+            return callback(new Error('Not allowed by CORS'));
+        }
+        
+        // In development, allow all origins (including Capacitor)
+        callback(null, true);
+    },
     credentials: true, // Allow cookies
     optionsSuccessStatus: 200 // Some legacy browsers (IE11, various SmartTVs) choke on 204
 };
