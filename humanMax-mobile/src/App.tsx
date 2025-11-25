@@ -25,11 +25,19 @@ function App() {
   useEffect(() => {
     initializeApp();
     
-    // Initialize notifications and background sync
+    // Initialize notifications and background sync (non-blocking)
     if (Capacitor.isNativePlatform()) {
-      notificationService.initialize();
-      backgroundSyncService.initialize();
+      // Don't await - let these initialize in background
+      notificationService.initialize().catch(() => {});
+      backgroundSyncService.initialize().catch(() => {});
     }
+
+    // Listen for sign-in events from OAuth callback
+    const handleUserSignedIn = (event: CustomEvent) => {
+      console.log('User signed in event received:', event.detail);
+      setUser(event.detail);
+    };
+    window.addEventListener('userSignedIn', handleUserSignedIn as EventListener);
 
     // Handle app state changes
     if (Capacitor.isNativePlatform()) {
@@ -43,6 +51,13 @@ function App() {
         }
       });
     }
+    
+    return () => {
+      window.removeEventListener('userSignedIn', handleUserSignedIn as EventListener);
+      if (Capacitor.isNativePlatform()) {
+        CapacitorApp.removeAllListeners();
+      }
+    };
 
     return () => {
       if (Capacitor.isNativePlatform()) {
@@ -51,46 +66,72 @@ function App() {
     };
   }, []);
 
-  const initializeApp = async () => {
-    try {
-      // Configure status bar for iOS
-      if (Capacitor.isNativePlatform()) {
-        await StatusBar.setStyle({ style: Style.Light });
-        await StatusBar.setBackgroundColor({ color: '#ffffff' });
-      }
-
-      // Check for existing session
-      const storedUser = await authService.loadStoredUser();
-      if (storedUser) {
-        setUser(storedUser);
-        // Verify session is still valid
-        const currentUser = await authService.checkSession();
-        if (currentUser) {
-          setUser(currentUser);
-        } else {
-          setUser(null);
-        }
-      } else {
-        // Try to check session from server
-        const currentUser = await authService.checkSession();
-        if (currentUser) {
-          setUser(currentUser);
-        }
-      }
-    } catch (error) {
-      console.error('Error initializing app:', error);
-    } finally {
-      setLoading(false);
-      // Hide splash screen
-      if (Capacitor.isNativePlatform()) {
-        await SplashScreen.hide();
-      }
+  const initializeApp = () => {
+    // Hide splash screen FIRST - show UI immediately (don't await anything)
+    setLoading(false);
+    if (Capacitor.isNativePlatform()) {
+      SplashScreen.hide().catch(() => {});
     }
+
+    // Configure status bar for iOS (non-blocking, fire-and-forget)
+    if (Capacitor.isNativePlatform()) {
+      StatusBar.setStyle({ style: Style.Light }).catch(() => {});
+      StatusBar.setBackgroundColor({ color: '#ffffff' }).catch(() => {});
+    }
+
+    // Load cached user and verify session in background (completely non-blocking)
+    // Use setTimeout to ensure this doesn't block rendering
+    setTimeout(() => {
+      authService.loadStoredUser()
+        .then((storedUser) => {
+          if (storedUser) {
+            setUser(storedUser); // Show UI immediately with cached user
+          }
+          
+          // Verify session in background (non-blocking)
+          authService.checkSession()
+            .then((currentUser) => {
+              if (currentUser) {
+                setUser(currentUser);
+              } else if (storedUser) {
+                // Session expired, clear cached user
+                setUser(null);
+              }
+            })
+            .catch(() => {
+              // Network error - keep cached user if available
+              if (!storedUser) {
+                setUser(null);
+              }
+            });
+        })
+        .catch(() => {
+          // No cached user - try to check session
+          authService.checkSession()
+            .then((currentUser) => {
+              if (currentUser) {
+                setUser(currentUser);
+              } else {
+                setUser(null);
+              }
+            })
+            .catch(() => {
+              setUser(null);
+            });
+        });
+    }, 0); // Execute after current call stack, doesn't block rendering
   };
 
   const handleSignIn = async () => {
-    const currentUser = await authService.checkSession();
-    setUser(currentUser);
+    // Check if user was set by auth service (from OAuth callback)
+    const currentUser = authService.getCurrentUser();
+    if (currentUser) {
+      setUser(currentUser);
+    } else {
+      // Fallback: check session
+      const sessionUser = await authService.checkSession();
+      setUser(sessionUser);
+    }
   };
 
   const handleSignOut = () => {

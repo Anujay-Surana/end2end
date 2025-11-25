@@ -30,9 +30,18 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
 
         // Determine redirect URI based on request origin
         // Check if this is a mobile request (from Capacitor app)
-        const isMobileRequest = req.headers['x-capacitor-platform'] === 'ios' ||
-                                req.headers['x-capacitor-platform'] === 'android' ||
+        // HTTP headers are case-insensitive, but Express normalizes them to lowercase
+        const capacitorPlatform = req.headers['x-capacitor-platform'] || req.headers['X-Capacitor-Platform'];
+        const isMobileRequest = capacitorPlatform === 'ios' ||
+                                capacitorPlatform === 'android' ||
                                 req.headers['user-agent']?.includes('CapacitorHttp');
+        
+        console.log('POST /auth/google/callback:', {
+            capacitorPlatform,
+            isMobileRequest,
+            userAgent: req.headers['user-agent'],
+            allHeaders: Object.keys(req.headers).filter(h => h.toLowerCase().includes('capacitor'))
+        });
         
         // Get host and protocol (Express trust proxy will set req.protocol correctly for Railway)
         const host = req.get('host') || 'end2end-production.up.railway.app';
@@ -42,6 +51,8 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
         const redirectUri = isMobileRequest
             ? `${protocol}://${host}/auth/google/mobile-callback`
             : 'postmessage'; // For Google Identity Services web flow
+
+        console.log('Using redirect URI:', redirectUri);
 
         // Exchange code for tokens
         const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
@@ -58,8 +69,17 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
 
         if (!tokenResponse.ok) {
             const error = await tokenResponse.json();
-            console.error('Token exchange error:', error);
-            return res.status(400).json({ error: 'Failed to exchange authorization code' });
+            console.error('Token exchange error:', {
+                status: tokenResponse.status,
+                statusText: tokenResponse.statusText,
+                error,
+                redirectUri,
+                isMobileRequest
+            });
+            return res.status(400).json({ 
+                error: 'Failed to exchange authorization code',
+                details: error.error_description || error.error || 'Unknown error'
+            });
         }
 
         const tokens = await tokenResponse.json();

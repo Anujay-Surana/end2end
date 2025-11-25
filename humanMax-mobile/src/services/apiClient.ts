@@ -15,13 +15,18 @@ import type {
 // Find your Mac's IP: ifconfig | grep "inet " | grep -v 127.0.0.1
 // Or use your Mac's hostname.local (e.g., anujay-mac.local)
 const getApiBaseUrl = () => {
-  if (Capacitor.isNativePlatform()) {
-    // On device, use Mac's IP address or hostname
-    // Update this to your Mac's IP address for device testing
-    // For production, use your actual backend URL
-    return import.meta.env.VITE_API_URL || 'http://anujay-mac.local:8080';
+  // Use environment variable if set, otherwise fallback to Railway production URL
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
   }
-  return import.meta.env.VITE_API_URL || 'http://localhost:8080';
+  
+  if (Capacitor.isNativePlatform()) {
+    // For production, use Railway HTTPS URL
+    return 'https://end2end-production.up.railway.app';
+  }
+  
+  // For local development
+  return 'http://localhost:8080';
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -34,6 +39,7 @@ class ApiClient {
     this.client = axios.create({
       baseURL: API_BASE_URL,
       withCredentials: true, // Important for session cookies
+      timeout: 10000, // 10 second timeout to prevent indefinite waiting
       headers: {
         'Content-Type': 'application/json',
       },
@@ -82,9 +88,17 @@ class ApiClient {
   }
 
   private async handleError(error: AxiosError<ApiError>): Promise<never> {
+    console.error('API Error:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.message,
+    });
+    
     if (error.response) {
       // Server responded with error
-      throw new Error(error.response.data?.message || error.response.data?.error || 'An error occurred');
+      const errorMessage = error.response.data?.message || error.response.data?.error || 'An error occurred';
+      throw new Error(errorMessage);
     } else if (error.request) {
       // Request made but no response
       throw new Error('Network error. Please check your connection.');

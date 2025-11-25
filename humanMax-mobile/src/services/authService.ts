@@ -35,6 +35,7 @@ class AuthService {
   private currentUser: User | null = null;
   private accessToken: string | null = null;
   private tokenClient: any = null;
+  private processingCallback = false; // Prevent duplicate processing
 
   constructor() {
     // Only initialize Google Identity Services for web platform
@@ -125,55 +126,95 @@ class AuthService {
   private setupAppUrlListener() {
     // Listen for OAuth callback from browser via deep link
     App.addListener('appUrlOpen', async (data) => {
+      // Prevent duplicate processing
+      if (this.processingCallback) {
+        console.log('Already processing callback, ignoring duplicate');
+        return;
+      }
+
       try {
-        const url = new URL(data.url);
+        console.log('Received app URL:', data.url);
         
-        // Check if this is our OAuth callback deep link: com.humanmax.app://auth/callback
-        if (url.protocol === 'com.humanmax.app:' && url.pathname === '/auth/callback') {
-          if (url.searchParams.has('code')) {
-            const code = url.searchParams.get('code');
-            const state = url.searchParams.get('state');
-            
-            // Verify state matches (if provided)
-            if (state) {
-              const storedState = await Preferences.get({ key: 'oauth_state' });
-              if (storedState.value !== state) {
-                await Browser.close().catch(() => {});
-                const error = new Error('Invalid OAuth state');
-                if ((this as any).signInReject) {
-                  (this as any).signInReject(error);
-                }
-                return;
+        // Parse URL - handle both com.humanmax.app:// and com.humanmax.app: formats
+        let url: URL;
+        try {
+          url = new URL(data.url);
+        } catch (e) {
+          // If URL parsing fails, try fixing the protocol
+          const fixedUrl = data.url.replace(/^com\.humanmax\.app:/, 'com.humanmax.app://');
+          url = new URL(fixedUrl);
+        }
+        
+        console.log('Parsed URL:', { protocol: url.protocol, pathname: url.pathname, hasCode: url.searchParams.has('code'), fullUrl: data.url });
+        
+        // Check if this is our OAuth callback deep link
+        // Note: When URL is com.humanmax.app://auth/callback, pathname becomes /callback
+        // because the URL parser treats com.humanmax.app as host and /auth/callback as path
+        const isOurCallback = (url.protocol === 'com.humanmax.app:' || url.protocol === 'com.humanmax.app://') 
+          && (url.pathname === '/auth/callback' || url.pathname === '/callback' || data.url.includes('/auth/callback'));
+        
+        if (!isOurCallback) {
+          console.log('Not our callback, ignoring. Protocol:', url.protocol, 'Pathname:', url.pathname);
+          return; // Not our callback, ignore
+        }
+        
+        console.log('Confirmed this is our OAuth callback! Processing...');
+
+        this.processingCallback = true;
+
+        if (url.searchParams.has('code')) {
+          const code = url.searchParams.get('code');
+          const state = url.searchParams.get('state');
+          
+          console.log('Processing OAuth callback with code');
+          
+          // Verify state matches (if provided)
+          if (state) {
+            const storedState = await Preferences.get({ key: 'oauth_state' });
+            if (storedState.value && storedState.value !== state) {
+              console.error('Invalid OAuth state');
+              await Browser.close().catch(() => {});
+              const error = new Error('Invalid OAuth state');
+              if ((this as any).signInReject) {
+                (this as any).signInReject(error);
               }
-              await Preferences.remove({ key: 'oauth_state' });
+              this.processingCallback = false;
+              return;
             }
-            
-            // Close browser and exchange code for session
-            await Browser.close().catch(() => {});
-            await this.exchangeCodeForSession(code!);
-          } else if (url.searchParams.has('error')) {
-            const error = url.searchParams.get('error');
-            const errorDescription = url.searchParams.get('error_description') || error;
-            await Browser.close().catch(() => {});
-            const err = new Error(errorDescription || 'OAuth error');
-            if ((this as any).signInReject) {
-              (this as any).signInReject(err);
-            }
+            await Preferences.remove({ key: 'oauth_state' });
           }
+          
+          // Close browser and exchange code for session
+          await Browser.close().catch(() => {});
+          await this.exchangeCodeForSession(code!);
+          this.processingCallback = false;
+        } else if (url.searchParams.has('error')) {
+          const error = url.searchParams.get('error');
+          const errorDescription = url.searchParams.get('error_description') || error;
+          console.error('OAuth error:', error, errorDescription);
+          await Browser.close().catch(() => {});
+          const err = new Error(errorDescription || 'OAuth error');
+          if ((this as any).signInReject) {
+            (this as any).signInReject(err);
+          }
+          this.processingCallback = false;
         }
       } catch (error: any) {
         console.error('Error handling app URL:', error);
         await Browser.close().catch(() => {});
         if ((this as any).signInReject) {
-          (this as any).signInReject(new Error('Failed to process OAuth callback'));
+          (this as any).signInReject(new Error('Failed to process OAuth callback: ' + (error.message || 'Unknown error')));
         }
+        this.processingCallback = false;
       }
     });
   }
 
   private async exchangeCodeForSession(code: string): Promise<void> {
     try {
+      console.log('Exchanging OAuth code for session...', { codeLength: code.length });
       const data = await apiClient.googleCallback(code);
+      console.log('Code exchange response:', { success: data.success, hasUser: !!data.user, error: (data as any).error });
       
       if (data.success && data.user) {
         this.currentUser = data.user;
@@ -192,14 +233,24 @@ class AuthService {
           });
         }
 
+        console.log('Sign-in successful, user:', data.user.email);
+
         // Resolve pending sign-in promise if exists
         if ((this as any).signInResolve) {
+          console.log('Resolving sign-in promise');
           (this as any).signInResolve(this.currentUser);
           (this as any).signInResolve = null;
           (this as any).signInReject = null;
+        } else {
+          console.warn('No signInResolve handler found - sign-in completed but promise may have timed out');
+          // Even if promise timed out, user is signed in - trigger app update via event
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('userSignedIn', { detail: this.currentUser }));
+          }
         }
       } else {
         const error = new Error((data as any).error || 'Sign in failed');
+        console.error('Sign-in failed:', error.message);
         if ((this as any).signInReject) {
           (this as any).signInReject(error);
           (this as any).signInResolve = null;
@@ -208,13 +259,25 @@ class AuthService {
         throw error;
       }
     } catch (error: any) {
-      console.error('Error exchanging code:', error);
+      console.error('Error exchanging code:', {
+        message: error?.message,
+        response: error?.response?.data,
+        status: error?.response?.status,
+        fullError: error
+      });
+      
+      const errorMessage = error?.response?.data?.details || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to exchange authorization code';
+      
+      const finalError = new Error(errorMessage);
       if ((this as any).signInReject) {
-        (this as any).signInReject(error);
+        (this as any).signInReject(finalError);
         (this as any).signInResolve = null;
         (this as any).signInReject = null;
       }
-      throw error;
+      throw finalError;
     }
   }
 
@@ -229,9 +292,12 @@ class AuthService {
   }
 
   private async signInWithBrowser(): Promise<User> {
+    console.log('Starting Browser OAuth flow...');
+    
     // Generate a state token for security
     const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     await Preferences.set({ key: 'oauth_state', value: state });
+    console.log('Generated OAuth state:', state);
 
     // Build Google OAuth URL with redirect to backend
     const redirectUri = `${API_URL}/auth/google/mobile-callback`;
@@ -244,24 +310,39 @@ class AuthService {
       `&prompt=consent` +
       `&state=${encodeURIComponent(state)}`;
 
+    console.log('Opening OAuth URL in browser...');
     // Open in system browser
     await Browser.open({ url: oauthUrl });
 
     // Wait for callback via appUrlOpen listener
     return new Promise((resolve, reject) => {
+      console.log('Waiting for OAuth callback...');
+      
       const timeout = setTimeout(() => {
+        console.error('OAuth timeout - no callback received');
         Browser.close().catch(() => {});
-        reject(new Error('Sign in timeout. Please try again.'));
+        // Check if user was signed in via event (in case promise timed out but callback succeeded)
+        const currentUser = this.getCurrentUser();
+        if (currentUser) {
+          console.log('User was signed in via event, resolving promise');
+          resolve(currentUser);
+        } else {
+          reject(new Error('Sign in timeout. Please try again.'));
+        }
+        (this as any).signInResolve = null;
+        (this as any).signInReject = null;
       }, 300000); // 5 minute timeout
 
       // Store resolve/reject for use in callback
       (this as any).signInResolve = (user: User) => {
+        console.log('OAuth callback resolved, user:', user.email);
         clearTimeout(timeout);
         resolve(user);
         (this as any).signInResolve = null;
         (this as any).signInReject = null;
       };
       (this as any).signInReject = (error: Error) => {
+        console.error('OAuth callback rejected:', error.message);
         clearTimeout(timeout);
         reject(error);
         (this as any).signInResolve = null;
