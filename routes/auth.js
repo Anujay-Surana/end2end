@@ -181,17 +181,80 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
         if (error) {
             console.error('OAuth error:', error);
             const errorDescription = req.query.error_description || error;
-            return res.redirect(`com.humanmax.app://auth/callback?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription)}`);
+            const errorUrl = `com.humanmax.app://auth/callback?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription)}`;
+            // Return HTML page with deep link fallback
+            return res.send(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Sign-in Error</title>
+                    <script>
+                        window.location.href = '${errorUrl}';
+                        setTimeout(function() {
+                            document.body.innerHTML = '<div style="font-family: -apple-system, sans-serif; text-align: center; padding: 40px;"><h1>Sign-in Error</h1><p>Please return to the HumanMax app.</p></div>';
+                        }, 1000);
+                    </script>
+                </head>
+                <body>
+                    <h1>Redirecting...</h1>
+                </body>
+                </html>
+            `);
         }
 
         if (!code) {
-            return res.redirect(`com.humanmax.app://auth/callback?error=missing_code&error_description=${encodeURIComponent('Authorization code required')}`);
+            // Return HTML page with deep link fallback
+            return res.send(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Redirecting...</title>
+                    <script>
+                        window.location.href = 'com.humanmax.app://auth/callback?error=missing_code&error_description=${encodeURIComponent('Authorization code required')}';
+                        setTimeout(function() {
+                            document.body.innerHTML = '<h1>Redirecting to app...</h1><p>If the app doesn\'t open, please return to the HumanMax app.</p>';
+                        }, 1000);
+                    </script>
+                </head>
+                <body>
+                    <h1>Redirecting to app...</h1>
+                </body>
+                </html>
+            `);
         }
 
-        // Simply redirect to app with code and state
+        // Return HTML page with deep link (better Safari compatibility)
         // App will call POST /auth/google/callback to exchange code
         const redirectUrl = `com.humanmax.app://auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state || '')}`;
-        res.redirect(redirectUrl);
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Redirecting to HumanMax...</title>
+                <script>
+                    // Try to open deep link
+                    window.location.href = '${redirectUrl}';
+                    
+                    // Fallback: Show message if app doesn't open
+                    setTimeout(function() {
+                        document.body.innerHTML = '<div style="font-family: -apple-system, sans-serif; text-align: center; padding: 40px;"><h1>✅ Sign-in Successful!</h1><p>Please return to the HumanMax app.</p><p style="color: #666; font-size: 14px;">If you see this message, the app should have opened automatically.</p></div>';
+                    }, 2000);
+                </script>
+            </head>
+            <body>
+                <div style="font-family: -apple-system, sans-serif; text-align: center; padding: 40px;">
+                    <h1>Redirecting to HumanMax...</h1>
+                    <p>Please wait...</p>
+                </div>
+            </body>
+            </html>
+        `);
 
     } catch (error) {
         console.error('Mobile auth callback error:', error);
