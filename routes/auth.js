@@ -226,6 +226,7 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
                 picture: user.picture_url
             },
             session: {
+                token: session.session_token, // Include session token for mobile apps (cookies may not work)
                 expires_at: session.expires_at
             },
             access_token: access_token,
