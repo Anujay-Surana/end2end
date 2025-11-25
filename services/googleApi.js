@@ -420,10 +420,19 @@ async function fetchDriveFileContents(accessTokenOrAccount, files) {
 async function fetchUserProfile(accessToken, retryCount = 0) {
     const maxRetries = 3;
     try {
+        if (!accessToken) {
+            throw new Error('Access token is missing or undefined');
+        }
+        
+        console.log('Fetching user profile with token (preview):', accessToken.substring(0, 20) + '...');
+        
         const response = await fetchWithRetry(
             'https://www.googleapis.com/oauth2/v2/userinfo',
             {
-                headers: { 'Authorization': `Bearer ${accessToken}` }
+                headers: { 
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                }
             }
         );
 
@@ -433,7 +442,9 @@ async function fetchUserProfile(accessToken, retryCount = 0) {
             console.error('User info API error details:', {
                 status: response.status,
                 statusText: response.statusText,
-                body: errorText
+                body: errorText,
+                tokenPreview: accessToken ? accessToken.substring(0, 20) + '...' : 'MISSING',
+                hasToken: !!accessToken
             });
             throw new Error(`User info API error: ${response.status} - ${errorText || response.statusText}`);
         }

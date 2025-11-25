@@ -121,26 +121,29 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
                 googleError: tokens.error
             });
         }
-        console.log('Token exchange response:', {
+        
+        console.log('✅ Token exchange successful! Response:', {
             hasAccessToken: !!tokens.access_token,
             hasRefreshToken: !!tokens.refresh_token,
             tokenType: tokens.token_type,
             expiresIn: tokens.expires_in,
             scope: tokens.scope,
-            error: tokens.error,
-            errorDescription: tokens.error_description
+            accessTokenPreview: tokens.access_token ? tokens.access_token.substring(0, 20) + '...' : 'MISSING',
+            fullResponseKeys: Object.keys(tokens)
         });
         
         const { access_token, refresh_token, expires_in, scope } = tokens;
 
         // Validate access_token is present
         if (!access_token) {
-            console.error('❌ No access_token in token response:', tokens);
+            console.error('❌ No access_token in token response! Full response:', JSON.stringify(tokens, null, 2));
             return res.status(400).json({ 
                 error: 'Failed to exchange authorization code',
                 details: 'No access token received from Google'
             });
         }
+        
+        console.log('✅ Access token received, length:', access_token.length);
 
         // Validate refresh_token is present (required for token refresh)
         if (!refresh_token) {
