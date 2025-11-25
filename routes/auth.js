@@ -55,6 +55,13 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
         console.log('Using redirect URI:', redirectUri);
 
         // Exchange code for tokens
+        console.log('Exchanging code with Google:', {
+            codeLength: code.length,
+            redirectUri,
+            clientId: process.env.GOOGLE_CLIENT_ID ? 'present' : 'missing',
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET ? 'present' : 'missing'
+        });
+        
         const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -67,23 +74,66 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
             })
         });
 
-        if (!tokenResponse.ok) {
-            const error = await tokenResponse.json();
-            console.error('Token exchange error:', {
-                status: tokenResponse.status,
-                statusText: tokenResponse.statusText,
-                error,
-                redirectUri,
-                isMobileRequest
-            });
-            return res.status(400).json({ 
-                error: 'Failed to exchange authorization code',
-                details: error.error_description || error.error || 'Unknown error'
+        const responseText = await tokenResponse.text();
+        let tokens;
+        let error;
+        
+        try {
+            tokens = JSON.parse(responseText);
+        } catch (e) {
+            console.error('Failed to parse token response as JSON:', responseText);
+            return res.status(500).json({ 
+                error: 'Invalid response from Google',
+                details: 'Failed to parse token response'
             });
         }
 
-        const tokens = await tokenResponse.json();
+        if (!tokenResponse.ok) {
+            error = tokens;
+            console.error('Token exchange error:', {
+                status: tokenResponse.status,
+                statusText: tokenResponse.statusText,
+                error: error,
+                redirectUri,
+                isMobileRequest,
+                rawResponse: responseText.substring(0, 500) // First 500 chars
+            });
+            return res.status(400).json({ 
+                error: 'Failed to exchange authorization code',
+                details: error.error_description || error.error || 'Unknown error',
+                googleError: error.error
+            });
+        }
+        
+        // Check if response contains error even if status is OK (shouldn't happen, but just in case)
+        if (tokens.error) {
+            console.error('Token response contains error despite OK status:', tokens);
+            return res.status(400).json({ 
+                error: 'Failed to exchange authorization code',
+                details: tokens.error_description || tokens.error || 'Unknown error',
+                googleError: tokens.error
+            });
+        }
+        console.log('Token exchange response:', {
+            hasAccessToken: !!tokens.access_token,
+            hasRefreshToken: !!tokens.refresh_token,
+            tokenType: tokens.token_type,
+            expiresIn: tokens.expires_in,
+            scope: tokens.scope,
+            error: tokens.error,
+            errorDescription: tokens.error_description
+        });
+        
         const { access_token, refresh_token, expires_in, scope } = tokens;
+
+        // Validate access_token is present
+        if (!access_token) {
+            console.error('❌ No access_token in token response:', tokens);
+            return res.status(400).json({ 
+                error: 'Failed to exchange authorization code',
+                details: 'No access token received from Google'
+            });
+        }
 
         // Validate refresh_token is present (required for token refresh)
         if (!refresh_token) {
@@ -91,6 +141,7 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
             // Log warning but continue - some OAuth flows don't return refresh_token on first auth
         }
 
+        console.log('Fetching user profile with access token...');
         // Get user profile with retry logic
         let profile;
         let retryCount = 0;
@@ -98,9 +149,11 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
         while (retryCount < maxRetries) {
             try {
                 profile = await fetchUserProfile(access_token);
+                console.log('✅ User profile fetched successfully:', { email: profile.email });
                 break; // Success, exit retry loop
             } catch (error) {
                 retryCount++;
+                console.error(`❌ Profile fetch failed (attempt ${retryCount}/${maxRetries}):`, error.message);
                 if (retryCount >= maxRetries) {
                     throw new Error(`Failed to fetch user profile after ${maxRetries} attempts: ${error.message}`);
                 }
@@ -502,3 +555,4 @@ router.get('/me', requireAuth, async (req, res) => {
 });
 
 module.exports = router;
+
