@@ -43,16 +43,23 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
             allHeaders: Object.keys(req.headers).filter(h => h.toLowerCase().includes('capacitor'))
         });
         
-        // Get host and protocol (Express trust proxy will set req.protocol correctly for Railway)
-        const host = req.get('host') || 'end2end-production.up.railway.app';
-        // Force HTTPS if host is Railway (Express trust proxy should handle this, but be explicit)
-        const protocol = host.includes('railway.app') ? 'https' : req.protocol;
-        
-        const redirectUri = isMobileRequest
-            ? `${protocol}://${host}/auth/google/mobile-callback`
-            : 'postmessage'; // For Google Identity Services web flow
+        // For mobile requests, use the exact Railway URL to ensure it matches Google Cloud Console
+        // This must match EXACTLY what's registered in Google Cloud Console
+        let redirectUri;
+        if (isMobileRequest) {
+            // Hardcode Railway URL to ensure exact match with Google Cloud Console
+            redirectUri = 'https://end2end-production.up.railway.app/auth/google/mobile-callback';
+        } else {
+            // For web, use postmessage (Google Identity Services)
+            redirectUri = 'postmessage';
+        }
 
-        console.log('Using redirect URI:', redirectUri);
+        console.log('Using redirect URI:', redirectUri, {
+            isMobileRequest,
+            host: req.get('host'),
+            protocol: req.protocol,
+            xForwardedProto: req.headers['x-forwarded-proto']
+        });
 
         // Exchange code for tokens
         console.log('Exchanging code with Google:', {
