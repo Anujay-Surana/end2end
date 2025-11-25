@@ -237,20 +237,76 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Redirecting to HumanMax...</title>
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                        text-align: center;
+                        padding: 40px 20px;
+                        background: #000;
+                        color: #fff;
+                        margin: 0;
+                    }
+                    .container {
+                        max-width: 400px;
+                        margin: 0 auto;
+                    }
+                    h1 { margin-top: 0; }
+                    .button {
+                        display: inline-block;
+                        margin-top: 20px;
+                        padding: 12px 24px;
+                        background: #fff;
+                        color: #000;
+                        text-decoration: none;
+                        border-radius: 8px;
+                        font-weight: 500;
+                    }
+                </style>
                 <script>
-                    // Try to open deep link
-                    window.location.href = '${redirectUrl}';
+                    // Try multiple methods to open deep link
+                    function openApp() {
+                        const url = '${redirectUrl}';
+                        
+                        // Method 1: Direct location change
+                        window.location.href = url;
+                        
+                        // Method 2: Try iframe (for Safari)
+                        setTimeout(function() {
+                            const iframe = document.createElement('iframe');
+                            iframe.style.display = 'none';
+                            iframe.src = url;
+                            document.body.appendChild(iframe);
+                            
+                            setTimeout(function() {
+                                document.body.removeChild(iframe);
+                            }, 1000);
+                        }, 100);
+                        
+                        // Method 3: Show manual button after delay
+                        setTimeout(function() {
+                            document.getElementById('manual-button').style.display = 'block';
+                        }, 1500);
+                    }
                     
-                    // Fallback: Show message if app doesn't open
-                    setTimeout(function() {
-                        document.body.innerHTML = '<div style="font-family: -apple-system, sans-serif; text-align: center; padding: 40px;"><h1>✅ Sign-in Successful!</h1><p>Please return to the HumanMax app.</p><p style="color: #666; font-size: 14px;">If you see this message, the app should have opened automatically.</p></div>';
-                    }, 2000);
+                    // Auto-trigger on load
+                    window.onload = openApp;
+                    
+                    // Also try on user interaction (Safari requires this)
+                    document.addEventListener('click', function() {
+                        openApp();
+                    }, { once: true });
                 </script>
             </head>
             <body>
-                <div style="font-family: -apple-system, sans-serif; text-align: center; padding: 40px;">
-                    <h1>Redirecting to HumanMax...</h1>
-                    <p>Please wait...</p>
+                <div class="container">
+                    <h1>✅ Sign-in Successful!</h1>
+                    <p>Opening HumanMax app...</p>
+                    <a href="${redirectUrl}" id="manual-button" class="button" style="display: none;">
+                        Open HumanMax App
+                    </a>
+                    <p style="color: #666; font-size: 14px; margin-top: 30px;">
+                        If the app doesn't open, tap the button above.
+                    </p>
                 </div>
             </body>
             </html>
