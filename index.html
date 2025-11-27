@@ -2499,6 +2499,22 @@
                 <div class="meeting-status-large" id="detailStatus"></div>
             </div>
 
+            <!-- Analysis Buttons (Isolated Analysis) -->
+            <div style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0;">
+                <div style="margin-bottom: 10px; font-weight: 600; color: #333; font-size: 14px;">📊 Isolated Analysis</div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="analysis-button" onclick="showUserContextAnalysis()" style="background: #6366f1; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">
+                        👤 User Context
+                    </button>
+                    <button class="analysis-button" onclick="showAttendeeExtractAnalysis()" style="background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">
+                        📋 Attendee Extract
+                    </button>
+                    <button class="analysis-button" onclick="showRelevantContentAnalysis()" style="background: #f59e0b; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">
+                        📎 Relevant Content
+                    </button>
+                </div>
+            </div>
+
             <div class="tab-navigation">
                 <button class="tab-button active" onclick="switchTab('overview')">Overview</button>
                 <button class="tab-button" onclick="switchTab('attendees')">Attendees</button>
@@ -2917,6 +2933,7 @@
             userProfile = null;
             interactiveBrief = null;
             meetingBrief = null;
+            currentBriefData = null;
             currentMeetingId = null;
             currentEmails = [];
             currentFiles = [];
@@ -3388,6 +3405,8 @@
 
             // CRITICAL: Clear prep data to prevent cross-meeting contamination
             meetingBrief = null;
+            currentBriefData = null;
+            currentBriefData = null;
             currentMeetingId = null;
             interactiveBrief = null;
 
@@ -3415,6 +3434,7 @@
             currentAttachments = [];
             currentFiles = [];
             meetingBrief = null;
+            currentBriefData = null;
             currentMeetingId = null;
             interactiveBrief = null;
 
@@ -4467,6 +4487,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
                 // Store brief globally for meeting assistant
                 meetingBrief = brief;
+                currentBriefData = brief; // Store for isolated analysis buttons
                 currentMeetingId = meeting.id;
 
                 // Add metadata for validation
@@ -5358,6 +5379,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         let scriptProcessor = null;
         let mediaStream = null;
         let meetingBrief = null;
+        let currentBriefData = null; // Store brief data for isolated analysis buttons
         let currentMeetingId = null;
         let prepRequestInProgress = false;
 
@@ -5383,6 +5405,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 if (currentMeetingId !== currentMeeting.id) {
                     alert('Meeting prep is out of sync. Please generate a new prep for this meeting.');
                     meetingBrief = null;
+            currentBriefData = null;
                     currentMeetingId = null;
                     document.getElementById('enterMeetingButton').style.display = 'none';
                     return;
@@ -6007,6 +6030,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             interactivePrepWs = null;
             interactiveBrief = null;
             meetingBrief = null;
+            currentBriefData = null;
             currentMeetingId = null;
             chatMessagesArray = [];
             conversationHistory = [];
@@ -8009,6 +8033,127 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         window.addNewAccount = addNewAccount;
         window.setPrimaryAccount = setPrimaryAccount;
         window.removeAccount = removeAccount;
+
+        // ===== ISOLATED ANALYSIS MODALS =====
+        
+        let currentBriefData = null; // Store brief data when prep is done
+        
+        function showUserContextAnalysis() {
+            if (!currentBriefData) {
+                alert('Please run "Prep Me" first to generate analysis data.');
+                return;
+            }
+            
+            const userContext = currentBriefData._extractionData?.userContext || currentBriefData.userContext || null;
+            const modal = createAnalysisModal('User Context & Profile', renderUserContextTab(userContext));
+            document.body.appendChild(modal);
+        }
+        
+        function showAttendeeExtractAnalysis() {
+            if (!currentBriefData) {
+                alert('Please run "Prep Me" first to generate analysis data.');
+                return;
+            }
+            
+            const attendeeExtractions = currentBriefData._extractionData?.attendeeExtractions || currentBriefData.attendeeExtractions || [];
+            const modal = createAnalysisModal('Attendee Information Extraction', renderAttendeeExtractTab(attendeeExtractions));
+            document.body.appendChild(modal);
+        }
+        
+        function showRelevantContentAnalysis() {
+            if (!currentBriefData) {
+                alert('Please run "Prep Me" first to generate analysis data.');
+                return;
+            }
+            
+            const relevantContent = currentBriefData.relevantContent || currentBriefData._extractionData?.relevantContent || null;
+            const modal = createAnalysisModal('Relevant Content (with Relevancy Reasoning)', renderRelevantContentTab(relevantContent));
+            document.body.appendChild(modal);
+        }
+        
+        function createAnalysisModal(title, content) {
+            const modal = document.createElement('div');
+            modal.className = 'analysis-modal-overlay';
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.7);
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            `;
+            
+            modal.innerHTML = `
+                <div class="analysis-modal-content" style="
+                    background: white;
+                    border-radius: 12px;
+                    max-width: 90%;
+                    max-height: 90vh;
+                    width: 1200px;
+                    display: flex;
+                    flex-direction: column;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                ">
+                    <div style="
+                        padding: 20px 24px;
+                        border-bottom: 1px solid #e0e0e0;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    ">
+                        <h2 style="margin: 0; font-size: 24px; color: #333;">${title}</h2>
+                        <button onclick="this.closest('.analysis-modal-overlay').remove()" style="
+                            background: #f3f4f6;
+                            border: none;
+                            width: 36px;
+                            height: 36px;
+                            border-radius: 50%;
+                            cursor: pointer;
+                            font-size: 20px;
+                            color: #666;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        ">×</button>
+                    </div>
+                    <div style="
+                        padding: 24px;
+                        overflow-y: auto;
+                        flex: 1;
+                    ">
+                        ${content}
+                    </div>
+                </div>
+            `;
+            
+            // Close on overlay click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            // Close on Escape key
+            const escapeHandler = (e) => {
+                if (e.key === 'Escape') {
+                    modal.remove();
+                    document.removeEventListener('keydown', escapeHandler);
+                }
+            };
+            document.addEventListener('keydown', escapeHandler);
+            
+            return modal;
+        }
+        
+        // Expose to window
+        window.showUserContextAnalysis = showUserContextAnalysis;
+        window.showAttendeeExtractAnalysis = showAttendeeExtractAnalysis;
+        window.showRelevantContentAnalysis = showRelevantContentAnalysis;
 
     </script>
 </body>

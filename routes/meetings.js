@@ -441,7 +441,15 @@ If emails are very limited, extract at least: their role/company, frequency of c
                             }, 'Email synthesis parse result');
                             
                             if (Array.isArray(parsed) && parsed.length > 0) {
-                                keyFacts = parsed.filter(f => f && typeof f === 'string' && f.length > 10);
+                                // Handle both string arrays and object arrays with "fact" property
+                                keyFacts = parsed
+                                    .map(f => {
+                                        if (typeof f === 'string') return f;
+                                        if (f && typeof f === 'object' && f.fact) return f.fact;
+                                        if (f && typeof f === 'object' && f.text) return f.text;
+                                        return null;
+                                    })
+                                    .filter(f => f && typeof f === 'string' && f.length > 10);
                                 console.log(`    ✓ Extracted ${keyFacts.length} facts from emails`);
                             } else {
                                 logger.warn({ requestId: req.requestId, attendeeEmail, parsed, rawSynthesis: localSynthesis.substring(0, 300) }, 'Email synthesis returned empty or invalid array');
@@ -580,7 +588,15 @@ Return JSON array of 3-6 facts (15-80 words each).`,
                                         }, 'Web synthesis parse result');
                                         
                                         if (Array.isArray(webParsed) && webParsed.length > 0) {
-                                            const newFacts = webParsed.filter(f => f && typeof f === 'string' && f.length > 10);
+                                            // Handle both string arrays and object arrays with "fact" property
+                                            const newFacts = webParsed
+                                                .map(f => {
+                                                    if (typeof f === 'string') return f;
+                                                    if (f && typeof f === 'object' && f.fact) return f.fact;
+                                                    if (f && typeof f === 'object' && f.text) return f.text;
+                                                    return null;
+                                                })
+                                                .filter(f => f && typeof f === 'string' && f.length > 10);
                                             keyFacts.push(...newFacts);
                                             source = keyFacts.length > 0 ? 'local+web' : 'web';
                                             console.log(`    ✓ Extracted ${newFacts.length} facts from web search`);
