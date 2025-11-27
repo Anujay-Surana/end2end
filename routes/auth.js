@@ -265,7 +265,7 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
         if (error) {
             console.error('OAuth error:', error);
             const errorDescription = req.query.error_description || error;
-            const errorUrl = `com.humanmax.app://auth/callback?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription)}`;
+            const errorUrl = `com.shadow.app://auth/callback?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription)}`;
             // Return HTML page with deep link fallback
             return res.send(`
                 <!DOCTYPE html>
@@ -277,7 +277,7 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
                     <script>
                         window.location.href = '${errorUrl}';
                         setTimeout(function() {
-                            document.body.innerHTML = '<div style="font-family: -apple-system, sans-serif; text-align: center; padding: 40px;"><h1>Sign-in Error</h1><p>Please return to the HumanMax app.</p></div>';
+                            document.body.innerHTML = '<div style="font-family: -apple-system, sans-serif; text-align: center; padding: 40px;"><h1>Sign-in Error</h1><p>Please return to the Shadow app.</p></div>';
                         }, 1000);
                     </script>
                 </head>
@@ -298,9 +298,9 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
                     <title>Redirecting...</title>
                     <script>
-                        window.location.href = 'com.humanmax.app://auth/callback?error=missing_code&error_description=${encodeURIComponent('Authorization code required')}';
+                        window.location.href = 'com.shadow.app://auth/callback?error=missing_code&error_description=${encodeURIComponent('Authorization code required')}';
                         setTimeout(function() {
-                            document.body.innerHTML = '<h1>Redirecting to app...</h1><p>If the app doesn\'t open, please return to the HumanMax app.</p>';
+                            document.body.innerHTML = '<h1>Redirecting to app...</h1><p>If the app doesn\'t open, please return to the Shadow app.</p>';
                         }, 1000);
                     </script>
                 </head>
@@ -313,14 +313,14 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
 
         // Return HTML page with deep link (better Safari compatibility)
         // App will call POST /auth/google/callback to exchange code
-        const redirectUrl = `com.humanmax.app://auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state || '')}`;
+        const redirectUrl = `com.shadow.app://auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state || '')}`;
         res.send(`
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Redirecting to HumanMax...</title>
+                <title>Redirecting to Shadow...</title>
                 <style>
                     body {
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -384,9 +384,9 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
             <body>
                 <div class="container">
                     <h1>✅ Sign-in Successful!</h1>
-                    <p>Opening HumanMax app...</p>
+                    <p>Opening Shadow app...</p>
                     <a href="${redirectUrl}" id="manual-button" class="button" style="display: none;">
-                        Open HumanMax App
+                        Open Shadow App
                     </a>
                     <p style="color: #666; font-size: 14px; margin-top: 30px;">
                         If the app doesn't open, tap the button above.
@@ -400,7 +400,7 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
         console.error('Mobile auth callback error:', error);
         
         const errorMessage = error.message || 'Authentication failed';
-        return res.redirect(`com.humanmax.app://auth/callback?error=auth_failed&error_description=${encodeURIComponent(errorMessage)}`);
+        return res.redirect(`com.shadow.app://auth/callback?error=auth_failed&error_description=${encodeURIComponent(errorMessage)}`);
     }
 });
 

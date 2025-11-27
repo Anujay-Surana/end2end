@@ -10,7 +10,12 @@ html, body {
   width: 100%;
   height: 100%;
   overflow-x: hidden;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  overscroll-behavior-x: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
@@ -106,18 +111,22 @@ body {
 
 .app-main {
   flex: 1;
-  padding: var(--spacing-md);
-  padding-bottom: calc(var(--spacing-md) + var(--safe-area-bottom));
-  max-width: 800px;
-  margin: 0 auto;
+  padding: 0;
+  padding-bottom: 0;
+  max-width: 100%;
+  margin: 0;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
 }
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .app-main {
-    padding: var(--spacing-sm);
-    padding-bottom: calc(var(--spacing-sm) + var(--safe-area-bottom));
+    padding: 0;
+    padding-bottom: 0;
   }
 
   .app-nav {

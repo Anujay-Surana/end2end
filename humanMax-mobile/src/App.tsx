@@ -157,7 +157,7 @@ function App() {
       <div className="app">
         <nav className="app-nav">
           <div className="nav-content">
-            <h1 className="app-title">HumanMax</h1>
+            <h1 className="app-title">Shadow</h1>
             <div className="nav-actions">
               <button
                 className="nav-button"

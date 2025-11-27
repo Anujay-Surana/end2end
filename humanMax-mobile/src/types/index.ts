@@ -7,6 +7,7 @@ export interface User {
 }
 
 export interface Session {
+  token?: string; // Session token for Authorization header (mobile apps)
   expires_at: string;
 }
 

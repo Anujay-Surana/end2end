@@ -26,7 +26,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSignIn }) => {
   return (
     <div className="auth-view">
       <div className="auth-container">
-        <h1 className="auth-title">HumanMax</h1>
+        <h1 className="auth-title">Shadow</h1>
         <p className="auth-subtitle">AI-Powered Meeting Preparation</p>
         <button
           className="auth-sign-in-button"

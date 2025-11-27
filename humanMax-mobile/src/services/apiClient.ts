@@ -5,7 +5,6 @@ import type {
   AuthResponse,
   AccountsResponse,
   MeetingsResponse,
-  MeetingPrepResponse,
   DayPrepResponse,
   ApiError,
   Account,
@@ -45,10 +44,24 @@ class ApiClient {
       },
     });
 
-    // Request interceptor for adding auth tokens if needed
+    // Request interceptor for adding auth tokens
     this.client.interceptors.request.use(
       async (config) => {
-        // Session cookies are handled automatically with withCredentials
+        // For Capacitor apps, cookies may not work reliably
+        // Use Authorization header with session token instead
+        if (Capacitor.isNativePlatform()) {
+          try {
+            const { Preferences } = await import('@capacitor/preferences');
+            const { value: sessionToken } = await Preferences.get({ key: 'session_token' });
+            if (sessionToken) {
+              config.headers = config.headers || {};
+              config.headers['Authorization'] = `Bearer ${sessionToken}`;
+            }
+          } catch (error) {
+            console.warn('Failed to get session token for request:', error);
+          }
+        }
+        // Session cookies are handled automatically with withCredentials for web
         return config;
       },
       (error) => {
@@ -194,13 +207,21 @@ class ApiClient {
     }
   }
 
-  async prepMeeting(meeting: any, attendees: any[], accessToken?: string): Promise<MeetingPrepResponse> {
+  async prepMeeting(meeting: any, attendees: any[], accessToken?: string): Promise<any> {
     try {
-      const response = await this.client.post<MeetingPrepResponse>('/api/prep-meeting', {
-        meeting,
-        attendees,
-        accessToken,
-      });
+      // Prep meeting can take 2+ minutes, use longer timeout (5 minutes = 300000ms)
+      // Backend returns brief object directly, not wrapped in { success, prep }
+      const response = await this.client.post<any>(
+        '/api/prep-meeting',
+        {
+          meeting,
+          attendees,
+          accessToken,
+        },
+        {
+          timeout: 300000, // 5 minutes for prep generation
+        }
+      );
       return response.data;
     } catch (error) {
       return this.handleError(error as AxiosError<ApiError>);
@@ -209,7 +230,14 @@ class ApiClient {
 
   async dayPrep(date: string): Promise<DayPrepResponse> {
     try {
-      const response = await this.client.post<DayPrepResponse>('/api/day-prep', { date });
+      // Day prep can also take a long time, use longer timeout (5 minutes = 300000ms)
+      const response = await this.client.post<DayPrepResponse>(
+        '/api/day-prep',
+        { date },
+        {
+          timeout: 300000, // 5 minutes for day prep generation
+        }
+      );
       return response.data;
     } catch (error) {
       return this.handleError(error as AxiosError<ApiError>);

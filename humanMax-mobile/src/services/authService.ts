@@ -7,7 +7,8 @@ import type { User } from '../types';
 
 // Google OAuth configuration
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly';
+// Include userinfo scopes to fetch user profile (email, name, picture)
+const SCOPES = 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly';
 // Use HTTPS for Railway (Railway uses HTTPS by default)
 const API_URL = import.meta.env.VITE_API_URL || 'https://end2end-production.up.railway.app';
 
@@ -135,22 +136,22 @@ class AuthService {
       try {
         console.log('Received app URL:', data.url);
         
-        // Parse URL - handle both com.humanmax.app:// and com.humanmax.app: formats
+        // Parse URL - handle both com.shadow.app:// and com.shadow.app: formats
         let url: URL;
         try {
           url = new URL(data.url);
         } catch (e) {
           // If URL parsing fails, try fixing the protocol
-          const fixedUrl = data.url.replace(/^com\.humanmax\.app:/, 'com.humanmax.app://');
+          const fixedUrl = data.url.replace(/^com\.shadow\.app:/, 'com.shadow.app://');
           url = new URL(fixedUrl);
         }
         
         console.log('Parsed URL:', { protocol: url.protocol, pathname: url.pathname, hasCode: url.searchParams.has('code'), fullUrl: data.url });
         
         // Check if this is our OAuth callback deep link
-        // Note: When URL is com.humanmax.app://auth/callback, pathname becomes /callback
-        // because the URL parser treats com.humanmax.app as host and /auth/callback as path
-        const isOurCallback = (url.protocol === 'com.humanmax.app:' || url.protocol === 'com.humanmax.app://') 
+        // Note: When URL is com.shadow.app://auth/callback, pathname becomes /callback
+        // because the URL parser treats com.shadow.app as host and /auth/callback as path
+        const isOurCallback = (url.protocol === 'com.shadow.app:' || url.protocol === 'com.shadow.app://') 
           && (url.pathname === '/auth/callback' || url.pathname === '/callback' || data.url.includes('/auth/callback'));
         
         if (!isOurCallback) {
@@ -225,6 +226,14 @@ class AuthService {
           key: 'user',
           value: JSON.stringify(data.user),
         });
+        
+        // Store session token for Authorization header (cookies may not work in Capacitor)
+        if (data.session?.token) {
+          await Preferences.set({
+            key: 'session_token',
+            value: data.session.token,
+          });
+        }
         
         if (data.access_token) {
           await Preferences.set({
@@ -471,6 +480,7 @@ class AuthService {
       this.accessToken = null;
       await Preferences.remove({ key: 'user' });
       await Preferences.remove({ key: 'access_token' });
+      await Preferences.remove({ key: 'session_token' });
     }
   }
 
