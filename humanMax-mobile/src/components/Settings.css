@@ -16,12 +16,14 @@
 }
 
 .user-section,
-.accounts-section {
+.accounts-section,
+.notifications-section {
   margin-bottom: var(--spacing-xl);
 }
 
 .user-section h3,
-.accounts-section h3 {
+.accounts-section h3,
+.notifications-section h3 {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   margin-bottom: var(--spacing-md);
@@ -211,6 +213,33 @@
   text-align: center;
   padding: var(--spacing-2xl);
   font-size: var(--font-size-base);
+}
+
+.test-notification-button {
+  background-color: var(--color-black);
+  color: var(--color-white);
+  border: none;
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  min-height: var(--touch-target-min);
+  cursor: pointer;
+  transition: opacity 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  width: 100%;
+  margin-bottom: var(--spacing-sm);
+}
+
+.test-notification-button:active {
+  opacity: 0.7;
+}
+
+.notification-hint {
+  color: var(--color-gray-600);
+  font-size: var(--font-size-sm);
+  margin: 0;
+  line-height: 1.5;
 }
 
 @media (max-width: 768px) {

@@ -47,7 +47,11 @@ class AuthService {
     
     // Setup app URL listener for Browser plugin OAuth callbacks
     if (Capacitor.isNativePlatform()) {
+      console.log('📱 Native platform detected, setting up app URL listener...');
       this.setupAppUrlListener();
+      console.log('✅ App URL listener setup complete');
+    } else {
+      console.log('🌐 Web platform detected, skipping app URL listener');
     }
   }
 
@@ -125,8 +129,40 @@ class AuthService {
   }
 
   private setupAppUrlListener() {
+    console.log('🔧 Setting up app URL listener for com.kordn8.shadow://...');
+    
+    // Test if we can manually trigger a test URL
+    console.log('🧪 Testing URL scheme by attempting to open test URL...');
+    
+    // Also listen for app state changes to detect when app comes back from browser
+    App.addListener('appStateChange', async ({ isActive }) => {
+      console.log('📱 App state changed, isActive:', isActive);
+      if (isActive) {
+        console.log('📱 App is now active');
+        if (this.processingCallback) {
+          console.log('⚠️ App became active while waiting for OAuth callback - appUrlOpen may have been missed');
+          // Give it a moment for appUrlOpen to fire if it's going to
+          setTimeout(async () => {
+            if (this.processingCallback) {
+              console.log('❌ Still processing callback but appUrlOpen never fired after becoming active');
+              console.log('❌ This means the deep link redirect from Safari failed');
+              console.log('❌ Check Safari console for redirect errors');
+              try {
+                // Try to close browser in case it's still open
+                await Browser.close().catch(() => {});
+              } catch (e) {
+                // Browser might already be closed
+              }
+            }
+          }, 1000);
+        }
+      }
+    });
+    
     // Listen for OAuth callback from browser via deep link
     App.addListener('appUrlOpen', async (data) => {
+      console.log('🎯 appUrlOpen listener triggered!');
+      console.log('📥 Received data:', JSON.stringify(data));
       // Prevent duplicate processing
       if (this.processingCallback) {
         console.log('Already processing callback, ignoring duplicate');
@@ -134,32 +170,93 @@ class AuthService {
       }
 
       try {
-        console.log('Received app URL:', data.url);
+        console.log('🔗 Received app URL:', data.url);
+        console.log('🔗 Full data object:', JSON.stringify(data));
         
-        // Parse URL - handle both com.shadow.app:// and com.shadow.app: formats
+        // Parse URL - handle both com.kordn8.shadow:// and com.kordn8.shadow: formats
         let url: URL;
+        let rawUrl = data.url;
+        
         try {
-          url = new URL(data.url);
+          url = new URL(rawUrl);
         } catch (e) {
+          console.log('⚠️ URL parsing failed, trying to fix protocol...');
           // If URL parsing fails, try fixing the protocol
-          const fixedUrl = data.url.replace(/^com\.shadow\.app:/, 'com.shadow.app://');
-          url = new URL(fixedUrl);
+          rawUrl = rawUrl.replace(/^com\.kordn8\.shadow:/, 'com.kordn8.shadow://');
+          try {
+            url = new URL(rawUrl);
+          } catch (e2) {
+            console.error('❌ Failed to parse URL even after fixing:', e2);
+            // Last resort: try to extract params manually
+            const urlMatch = rawUrl.match(/com\.kordn8\.shadow:\/\/[^?]+\?(.+)/);
+            if (urlMatch) {
+              const params = new URLSearchParams(urlMatch[1]);
+              console.log('📋 Extracted params manually:', Object.fromEntries(params));
+              // Process manually if we have code or error
+              if (params.has('code') || params.has('error')) {
+                console.log('✅ Found code or error in URL, processing manually...');
+                if (params.has('code')) {
+                  const code = params.get('code');
+                  await Browser.close().catch(() => {});
+                  await this.exchangeCodeForSession(code!);
+                  this.processingCallback = false;
+                  return;
+                } else if (params.has('error')) {
+                  const error = params.get('error');
+                  const errorDescription = params.get('error_description') || error;
+                  console.error('OAuth error:', error, errorDescription);
+                  await Browser.close().catch(() => {});
+                  const err = new Error(errorDescription || 'OAuth error');
+                  if ((this as any).signInReject) {
+                    (this as any).signInReject(err);
+                  }
+                  this.processingCallback = false;
+                  return;
+                }
+              }
+            }
+            return; // Can't parse, give up
+          }
         }
         
-        console.log('Parsed URL:', { protocol: url.protocol, pathname: url.pathname, hasCode: url.searchParams.has('code'), fullUrl: data.url });
+        console.log('📋 Parsed URL:', { 
+          protocol: url.protocol, 
+          hostname: url.hostname,
+          pathname: url.pathname, 
+          search: url.search,
+          hasCode: url.searchParams.has('code'),
+          hasError: url.searchParams.has('error'),
+          fullUrl: data.url 
+        });
         
         // Check if this is our OAuth callback deep link
-        // Note: When URL is com.shadow.app://auth/callback, pathname becomes /callback
-        // because the URL parser treats com.shadow.app as host and /auth/callback as path
-        const isOurCallback = (url.protocol === 'com.shadow.app:' || url.protocol === 'com.shadow.app://') 
-          && (url.pathname === '/auth/callback' || url.pathname === '/callback' || data.url.includes('/auth/callback'));
+        // Be more lenient with matching - just check if it contains our bundle ID and callback
+        const hasOurBundleId = rawUrl.includes('com.kordn8.shadow') || url.protocol.includes('kordn8.shadow');
+        const hasCallback = rawUrl.includes('callback') || url.pathname.includes('callback');
+        const hasCodeOrError = url.searchParams.has('code') || url.searchParams.has('error');
+        
+        console.log('🔍 URL matching:', {
+          hasOurBundleId, 
+          hasCallback, 
+          hasCodeOrError,
+          protocol: url.protocol,
+          pathname: url.pathname
+        });
+        
+        const isOurCallback = hasOurBundleId && (hasCallback || hasCodeOrError);
         
         if (!isOurCallback) {
-          console.log('Not our callback, ignoring. Protocol:', url.protocol, 'Pathname:', url.pathname);
+          console.log('❌ Not our callback, ignoring. Details:', {
+            protocol: url.protocol,
+            pathname: url.pathname,
+            hasOurBundleId,
+            hasCallback,
+            hasCodeOrError
+          });
           return; // Not our callback, ignore
         }
         
-        console.log('Confirmed this is our OAuth callback! Processing...');
+        console.log('✅ Confirmed this is our OAuth callback! Processing...');
 
         this.processingCallback = true;
 
@@ -320,6 +417,7 @@ class AuthService {
       `&state=${encodeURIComponent(state)}`;
 
     console.log('Opening OAuth URL in browser...');
+    console.log('OAuth URL:', oauthUrl);
     // Open in system browser
     await Browser.open({ url: oauthUrl });
 

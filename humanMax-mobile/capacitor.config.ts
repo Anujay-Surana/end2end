@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.shadow.app',
+  appId: 'com.kordn8.shadow',
   appName: 'Shadow',
   webDir: 'dist',
   // Remove server config for device builds - use bundled web assets
@@ -12,7 +12,7 @@ const config: CapacitorConfig = {
   // },
   ios: {
     contentInset: 'automatic',
-    scheme: 'com.shadow.app'
+    scheme: 'com.kordn8.shadow'
   }
 };
 

@@ -248,6 +248,8 @@ export const VoicePrep: React.FC<VoicePrepProps> = ({ meeting, brief, onClose })
                 }
           } else if (data.type === 'realtime_audio_done') {
             setStatus('Listening...');
+            setIsListening(true);
+            setIsSpeaking(false);
             console.log('Audio playback complete');
           } else if (data.type === 'voice_prep_section_change') {
             setStatus(data.message || 'Processing...');
@@ -255,7 +257,7 @@ export const VoicePrep: React.FC<VoicePrepProps> = ({ meeting, brief, onClose })
               setTranscript((prev) => prev + `\n\n[${data.section}]\n`);
             }
           } else if (data.type === 'realtime_transcript' || data.type === 'response.audio_transcript.delta') {
-            // Receive transcript from OpenAI Realtime API
+            // Receive transcript from OpenAI Realtime API (partial)
             if (data.text || data.delta) {
               const transcriptText = data.text || data.delta || '';
               setTranscript((prev) => {
@@ -264,10 +266,21 @@ export const VoicePrep: React.FC<VoicePrepProps> = ({ meeting, brief, onClose })
               });
             }
           } else if (data.type === 'voice_prep_transcript') {
-            setTranscript((prev) => {
-              const newText = prev ? prev + '\n' + data.text : data.text;
-              return newText;
-            });
+            // Final transcript from user (question)
+            if (data.text && data.isFinal) {
+              setTranscript((prev) => {
+                const questionText = `\n\n[You]: ${data.text}\n`;
+                return prev ? prev + questionText : questionText;
+              });
+              setStatus('Processing your question...');
+              setIsListening(false);
+            } else if (data.text) {
+              // Partial transcript
+              setTranscript((prev) => {
+                const newText = prev ? prev + data.text : data.text;
+                return newText;
+              });
+            }
           } else if (data.type === 'voice_prep_audio') {
             // Receive TTS audio (base64 encoded)
             console.log('Received voice_prep_audio');
@@ -283,6 +296,9 @@ export const VoicePrep: React.FC<VoicePrepProps> = ({ meeting, brief, onClose })
             setStatus(data.message || 'Processing...');
           } else if (data.type === 'voice_prep_interrupted') {
             setStatus(data.message || 'Listening...');
+            setIsListening(true);
+            setIsSpeaking(false);
+            console.log('Briefing interrupted - ready for question');
           } else if (data.type === 'realtime_ready' || data.type === 'realtime_session_ready') {
             // Session is ready, wait for briefing to start
             console.log('Realtime API ready');

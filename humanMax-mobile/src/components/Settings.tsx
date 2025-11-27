@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { authService } from '../services/authService';
 import { apiClient } from '../services/apiClient';
+import { notificationService } from '../services/notificationService';
 import type { Account } from '../types';
 import './Settings.css';
 
@@ -69,6 +70,15 @@ export const Settings: React.FC<SettingsProps> = ({ onSignOut }) => {
     }
   };
 
+  const handleTestNotification = async () => {
+    try {
+      await notificationService.sendTestNotification();
+      alert('Test notification sent! Check your notifications.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to send test notification');
+    }
+  };
+
   const user = authService.getCurrentUser();
 
   return (
@@ -134,6 +144,16 @@ export const Settings: React.FC<SettingsProps> = ({ onSignOut }) => {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="notifications-section">
+        <h3>Notifications</h3>
+        <button className="test-notification-button" onClick={handleTestNotification}>
+          🔔 Test Notification
+        </button>
+        <p className="notification-hint">
+          Send a test notification to verify notifications are working correctly.
+        </p>
       </div>
 
       <div className="sign-out-section">

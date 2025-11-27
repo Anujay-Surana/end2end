@@ -1,4 +1,5 @@
 import { PushNotifications } from '@capacitor/push-notifications';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 import type { Meeting } from '../types';
@@ -200,9 +201,111 @@ class NotificationService {
       return;
     }
 
-    // For native, notifications are handled by the system
-    // This would typically be done server-side via APNs
-    console.log('Notification:', { title, body, data });
+    // For native, use Local Notifications
+    try {
+      const permission = await LocalNotifications.checkPermissions();
+      if (permission.display !== 'granted') {
+        const request = await LocalNotifications.requestPermissions();
+        if (request.display !== 'granted') {
+          console.warn('Local notification permission not granted');
+          return;
+        }
+      }
+
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            title,
+            body,
+            id: Date.now(),
+            schedule: { at: new Date(Date.now() + 100) }, // Show immediately
+            sound: 'default',
+            attachments: undefined,
+            actionTypeId: '',
+            extra: data,
+          },
+        ],
+      });
+    } catch (error) {
+      console.error('Error sending local notification:', error);
+    }
+  }
+
+  /**
+   * Send a test notification (for testing purposes)
+   */
+  async sendTestNotification(): Promise<void> {
+    await this.sendNotification(
+      'Test Meeting Reminder',
+      'This is a test notification. Your meeting "Team Standup" starts in 15 minutes.',
+      { type: 'test', meetingId: 'test-123' }
+    );
+  }
+
+  /**
+   * Schedule a local notification for a meeting reminder
+   */
+  async scheduleLocalReminder(
+    meeting: Meeting,
+    minutesBefore: number = 15
+  ): Promise<void> {
+    if (!Capacitor.isNativePlatform()) {
+      this.scheduleWebNotification(meeting, minutesBefore);
+      return;
+    }
+
+    const startTime = meeting.start?.dateTime
+      ? new Date(meeting.start.dateTime)
+      : meeting.start?.date
+      ? new Date(meeting.start.date)
+      : null;
+
+    if (!startTime) {
+      console.warn('Cannot schedule reminder: no start time');
+      return;
+    }
+
+    const reminderTime = new Date(startTime.getTime() - minutesBefore * 60 * 1000);
+    const now = new Date();
+
+    if (reminderTime <= now) {
+      console.warn('Reminder time is in the past');
+      return;
+    }
+
+    try {
+      const permission = await LocalNotifications.checkPermissions();
+      if (permission.display !== 'granted') {
+        const request = await LocalNotifications.requestPermissions();
+        if (request.display !== 'granted') {
+          console.warn('Local notification permission not granted');
+          return;
+        }
+      }
+
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            title: meeting.summary || meeting.title || 'Meeting Reminder',
+            body: `Your meeting starts in ${minutesBefore} minutes`,
+            id: parseInt(meeting.id?.replace(/\D/g, '') || '0') || Date.now(),
+            schedule: { at: reminderTime },
+            sound: 'default',
+            attachments: undefined,
+            actionTypeId: '',
+            extra: {
+              type: 'meeting_reminder',
+              meetingId: meeting.id,
+              minutesBefore,
+            },
+          },
+        ],
+      });
+
+      console.log(`Scheduled reminder for meeting "${meeting.summary || meeting.title}" at ${reminderTime.toLocaleString()}`);
+    } catch (error) {
+      console.error('Error scheduling local notification:', error);
+    }
   }
 }
 

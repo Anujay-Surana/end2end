@@ -260,12 +260,28 @@ router.post('/google/callback', authLimiter, validateOAuthCallback, async (req, 
 router.get('/google/mobile-callback', authLimiter, async (req, res) => {
     try {
         const { code, state, error } = req.query;
+        console.log('📱 Mobile callback hit! Query params:', { 
+            hasCode: !!code, 
+            codeLength: code?.length, 
+            state, 
+            error,
+            allParams: Object.keys(req.query)
+        });
 
         // Handle OAuth errors
         if (error) {
             console.error('OAuth error:', error);
             const errorDescription = req.query.error_description || error;
-            const errorUrl = `com.shadow.app://auth/callback?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription)}`;
+            const errorUrl = `com.kordn8.shadow://auth/callback?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription)}`;
+            // HTML-encode for use in HTML attributes
+            const htmlEncodedErrorUrl = errorUrl
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+            // Escape for JavaScript
+            const escapedErrorUrl = errorUrl.replace(/'/g, "\\'");
             // Return HTML page with deep link fallback
             return res.send(`
                 <!DOCTYPE html>
@@ -275,7 +291,7 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
                     <title>Sign-in Error</title>
                     <script>
-                        window.location.href = '${errorUrl}';
+                        window.location.href = '${escapedErrorUrl}';
                         setTimeout(function() {
                             document.body.innerHTML = '<div style="font-family: -apple-system, sans-serif; text-align: center; padding: 40px;"><h1>Sign-in Error</h1><p>Please return to the Shadow app.</p></div>';
                         }, 1000);
@@ -283,6 +299,9 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
                 </head>
                 <body>
                     <h1>Redirecting...</h1>
+                    <a href="${htmlEncodedErrorUrl}" style="display: inline-block; margin-top: 20px; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 8px;">
+                        Open Shadow App
+                    </a>
                 </body>
                 </html>
             `);
@@ -290,6 +309,16 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
 
         if (!code) {
             // Return HTML page with deep link fallback
+            const missingCodeUrl = `com.kordn8.shadow://auth/callback?error=missing_code&error_description=${encodeURIComponent('Authorization code required')}`;
+            // HTML-encode for use in HTML attributes
+            const htmlEncodedMissingCodeUrl = missingCodeUrl
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+            // Escape for JavaScript
+            const escapedMissingCodeUrl = missingCodeUrl.replace(/'/g, "\\'");
             return res.send(`
                 <!DOCTYPE html>
                 <html>
@@ -298,7 +327,7 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
                     <title>Redirecting...</title>
                     <script>
-                        window.location.href = 'com.shadow.app://auth/callback?error=missing_code&error_description=${encodeURIComponent('Authorization code required')}';
+                        window.location.href = '${escapedMissingCodeUrl}';
                         setTimeout(function() {
                             document.body.innerHTML = '<h1>Redirecting to app...</h1><p>If the app doesn\'t open, please return to the Shadow app.</p>';
                         }, 1000);
@@ -306,6 +335,9 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
                 </head>
                 <body>
                     <h1>Redirecting to app...</h1>
+                    <a href="${htmlEncodedMissingCodeUrl}" style="display: inline-block; margin-top: 20px; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 8px;">
+                        Open Shadow App
+                    </a>
                 </body>
                 </html>
             `);
@@ -313,94 +345,200 @@ router.get('/google/mobile-callback', authLimiter, async (req, res) => {
 
         // Return HTML page with deep link (better Safari compatibility)
         // App will call POST /auth/google/callback to exchange code
-        const redirectUrl = `com.shadow.app://auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state || '')}`;
-        res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Redirecting to Shadow...</title>
-                <style>
-                    body {
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                        text-align: center;
-                        padding: 40px 20px;
-                        background: #000;
-                        color: #fff;
-                        margin: 0;
+        const redirectUrl = `com.kordn8.shadow://auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state || '')}`;
+        
+        console.log('🔗 Generated redirect URL:', redirectUrl);
+        console.log('🔗 Redirect URL length:', redirectUrl.length);
+        console.log('🔗 Code length:', code.length);
+        console.log('🔗 State:', state);
+        
+        // Escape for JavaScript (single quotes)
+        const escapedRedirectUrl = redirectUrl.replace(/'/g, "\\'");
+        
+        // HTML-encode for use in HTML attributes (ampersands, quotes, etc.)
+        const htmlEncodedRedirectUrl = redirectUrl
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        
+        console.log('🔗 HTML-encoded redirect URL:', htmlEncodedRedirectUrl);
+        
+        res.send(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting to Shadow...</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            text-align: center;
+            padding: 40px 20px;
+            background: #000;
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 { margin-bottom: 20px; font-size: 24px; }
+        p { margin-bottom: 20px; color: #ccc; }
+        .button {
+            display: inline-block;
+            padding: 14px 28px;
+            background: #fff;
+            color: #000;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            min-width: 200px;
+            transition: opacity 0.2s;
+        }
+        .button:active {
+            opacity: 0.8;
+        }
+        .hint {
+            color: #666;
+            font-size: 14px;
+            margin-top: 30px;
+        }
+    </style>
+    <script>
+        var redirectUrl = '${escapedRedirectUrl}';
+        console.log('🔗 Redirect URL:', redirectUrl);
+        console.log('🔗 Redirect URL (decoded):', decodeURIComponent(redirectUrl));
+        console.log('🔗 Window location before:', window.location.href);
+        
+        // Function to attempt redirect
+        function attemptRedirect() {
+            console.log('🔄 Attempting redirect to:', redirectUrl);
+            try {
+                // Method 1: Direct window.location assignment
+                console.log('Method 1: window.location.href');
+                window.location.href = redirectUrl;
+                
+                // Method 2: Create and click anchor (more reliable for custom schemes)
+                setTimeout(function() {
+                    console.log('Method 2: Creating anchor element');
+                    var link = document.createElement('a');
+                    link.href = redirectUrl;
+                    link.style.display = 'none';
+                    document.body.appendChild(link);
+                    console.log('Clicking anchor...');
+                    link.click();
+                    setTimeout(function() {
+                        if (link.parentNode) {
+                            document.body.removeChild(link);
+                        }
+                    }, 100);
+                }, 100);
+                
+                // Method 3: Try window.open as fallback
+                setTimeout(function() {
+                    console.log('Method 3: window.open');
+                    try {
+                        window.open(redirectUrl, '_blank');
+                    } catch(e) {
+                        console.error('Method 3 failed:', e);
                     }
-                    .container {
-                        max-width: 400px;
-                        margin: 0 auto;
-                    }
-                    h1 { margin-top: 0; }
-                    .button {
-                        display: inline-block;
-                        margin-top: 20px;
-                        padding: 12px 24px;
-                        background: #fff;
-                        color: #000;
-                        text-decoration: none;
-                        border-radius: 8px;
-                        font-weight: 500;
-                    }
-                </style>
-                <script>
-                    // Try multiple methods to open deep link
-                    function openApp() {
-                        const url = '${redirectUrl}';
-                        
-                        // Method 1: Direct location change
-                        window.location.href = url;
-                        
-                        // Method 2: Try iframe (for Safari)
-                        setTimeout(function() {
-                            const iframe = document.createElement('iframe');
-                            iframe.style.display = 'none';
-                            iframe.src = url;
-                            document.body.appendChild(iframe);
-                            
-                            setTimeout(function() {
-                                document.body.removeChild(iframe);
-                            }, 1000);
-                        }, 100);
-                        
-                        // Method 3: Show manual button after delay
-                        setTimeout(function() {
-                            document.getElementById('manual-button').style.display = 'block';
-                        }, 1500);
-                    }
-                    
-                    // Auto-trigger on load
-                    window.onload = openApp;
-                    
-                    // Also try on user interaction (Safari requires this)
-                    document.addEventListener('click', function() {
-                        openApp();
-                    }, { once: true });
-                </script>
-            </head>
-            <body>
-                <div class="container">
-                    <h1>✅ Sign-in Successful!</h1>
-                    <p>Opening Shadow app...</p>
-                    <a href="${redirectUrl}" id="manual-button" class="button" style="display: none;">
-                        Open Shadow App
-                    </a>
-                    <p style="color: #666; font-size: 14px; margin-top: 30px;">
-                        If the app doesn't open, tap the button above.
-                    </p>
-                </div>
-            </body>
-            </html>
-        `);
+                }, 200);
+            } catch(e) {
+                console.error('Redirect attempt error:', e);
+            }
+        }
+        
+        // IMMEDIATE redirect attempt (executes as soon as script loads)
+        (function() {
+            console.log('⚡️ Immediate redirect attempt');
+            attemptRedirect();
+        })();
+        
+        // Also try on DOM ready
+        document.addEventListener('DOMContentReady', function() {
+            console.log('📄 DOM ready, attempting redirect again...');
+            attemptRedirect();
+        });
+        
+        // Also try on window load
+        window.addEventListener('load', function() {
+            console.log('📄 Window loaded, attempting redirect again...');
+            setTimeout(function() {
+                attemptRedirect();
+            }, 100);
+        });
+        
+        // Function for manual button click
+        function openApp() {
+            console.log('🔘 Button clicked! Opening:', redirectUrl);
+            attemptRedirect();
+            return false;
+        }
+        
+        // Log when page becomes visible (user might have switched apps)
+        document.addEventListener('visibilitychange', function() {
+            console.log('👁️ Visibility changed, hidden:', document.hidden);
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>✅ Sign-in Successful!</h1>
+        <p>Opening Shadow app...</p>
+        <a href="${htmlEncodedRedirectUrl}" onclick="openApp(); return false;" class="button">
+            Open Shadow App
+        </a>
+        <p class="hint">If the app doesn't open automatically, tap the button above.</p>
+    </div>
+</body>
+</html>`);
 
     } catch (error) {
         console.error('Mobile auth callback error:', error);
         
         const errorMessage = error.message || 'Authentication failed';
-        return res.redirect(`com.shadow.app://auth/callback?error=auth_failed&error_description=${encodeURIComponent(errorMessage)}`);
+        const errorUrl = `com.kordn8.shadow://auth/callback?error=auth_failed&error_description=${encodeURIComponent(errorMessage)}`;
+        
+        // HTML-encode for use in HTML attributes
+        const htmlEncodedErrorUrl = errorUrl
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        // Escape for JavaScript
+        const escapedErrorUrl = errorUrl.replace(/'/g, "\\'");
+        
+        // Return HTML page (can't use res.redirect for custom URL schemes)
+        return res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Authentication Error</title>
+                <script>
+                    window.location.href = '${escapedErrorUrl}';
+                </script>
+            </head>
+            <body>
+                <h1>Authentication Error</h1>
+                <p>Please return to the Shadow app.</p>
+                <a href="${htmlEncodedErrorUrl}" style="display: inline-block; margin-top: 20px; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 8px;">
+                    Open Shadow App
+                </a>
+            </body>
+            </html>
+        `);
     }
 });
 
