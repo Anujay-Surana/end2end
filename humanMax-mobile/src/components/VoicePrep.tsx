@@ -72,7 +72,7 @@ export const VoicePrep: React.FC<VoicePrepProps> = ({ meeting, brief, onClose })
       // Schedule seamless playback at 2x speed
       const source = context.createBufferSource();
       source.buffer = audioBuffer;
-      source.playbackRate.value = 2.0; // Speed up audio by 2x
+      source.playbackRate.value = 1.5; // Speed up audio by 1.5x
       source.connect(context.destination);
       
       const currentTime = context.currentTime;
@@ -80,8 +80,8 @@ export const VoicePrep: React.FC<VoicePrepProps> = ({ meeting, brief, onClose })
       
       source.start(startTime);
       
-      // Update next play time to prevent gaps (account for 2x speed)
-      const duration = audioBuffer.duration / 2.0; // Duration is shorter at 2x speed
+      // Update next play time to prevent gaps (account for 1.5x speed)
+      const duration = audioBuffer.duration / 1.5; // Duration is shorter at 1.5x speed
       nextPlayTimeRef.current = startTime + duration;
       
       setIsSpeaking(true);
@@ -295,7 +295,26 @@ export const VoicePrep: React.FC<VoicePrepProps> = ({ meeting, brief, onClose })
           } else if (data.type === 'voice_prep_status') {
             setStatus(data.message || 'Processing...');
           } else if (data.type === 'voice_prep_interrupted') {
-            setStatus(data.message || 'Listening...');
+            // Briefing was interrupted - STOP ALL AUDIO IMMEDIATELY
+            console.log('🛑 Briefing interrupted - stopping all audio');
+            
+            // Stop any currently playing audio
+            if (playbackAudioContextRef.current) {
+              try {
+                // Stop all sources and close context to force immediate silence
+                playbackAudioContextRef.current.close().catch(() => {});
+                playbackAudioContextRef.current = null; // Force recreation
+              } catch (e) {
+                console.error('Error stopping audio context:', e);
+              }
+            }
+            
+            // Clear any queued audio
+            audioBufferQueueRef.current = [];
+            isPlayingAudioRef.current = false;
+            nextPlayTimeRef.current = 0;
+            
+            setStatus(data.message || 'Listening for your question...');
             setIsListening(true);
             setIsSpeaking(false);
             console.log('Briefing interrupted - ready for question');

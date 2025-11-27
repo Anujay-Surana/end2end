@@ -7,6 +7,7 @@
 const { callGPT } = require('./gptService');
 const logger = require('./logger');
 const { getUserContext } = require('./userContext');
+const { intelligentlyAggregate } = require('./intelligentDayAggregation');
 
 /**
  * Synthesize day prep from multiple meeting briefs
@@ -145,17 +146,27 @@ async function synthesizeDayPrep(selectedDate, meetings, briefs, requestId, req 
             .flat()
             .filter((name, index, self) => self.indexOf(name) === index); // Remove duplicates
         
-        // Aggregate context across all meetings
+        // Intelligently aggregate context across all meetings (not just concatenate)
+        const intelligentAggregation = await intelligentlyAggregate(briefs);
+        
+        // Build aggregated context with intelligent insights
         const aggregatedContext = {
-            relationshipAnalysis: meetingContext.map(m => m.relationshipAnalysis).filter(Boolean).join('\n\n'),
-            emailAnalysis: meetingContext.map(m => m.emailAnalysis).filter(Boolean).join('\n\n'),
-            documentAnalysis: meetingContext.map(m => m.documentAnalysis).filter(Boolean).join('\n\n'),
+            // Use intelligent aggregation results
+            relationshipAnalysis: intelligentAggregation.relationshipAnalysis,
+            emailAnalysis: intelligentAggregation.emailAnalysis,
+            documentAnalysis: intelligentAggregation.documentAnalysis,
             companyResearch: meetingContext.map(m => m.companyResearch).filter(Boolean).join('\n\n'),
             contributionAnalysis: meetingContext.map(m => m.contributionAnalysis).filter(Boolean).join('\n\n'),
             broaderNarrative: meetingContext.map(m => m.broaderNarrative).filter(Boolean).join('\n\n'),
             recommendations: [...new Set(meetingContext.flatMap(m => m.recommendations || []))],
-            actionItems: [...new Set(meetingContext.flatMap(m => m.actionItems || []))],
-            timeline: meetingContext.flatMap(m => m.timeline || [])
+            actionItems: intelligentAggregation.actionItems,
+            timeline: intelligentAggregation.timeline,
+            
+            // NEW: Add intelligent insights
+            conflicts: intelligentAggregation.conflicts,
+            themes: intelligentAggregation.themes,
+            keyPeople: intelligentAggregation.keyPeople,
+            dependencies: intelligentAggregation.dependencies
         };
 
         // Get user context
@@ -376,7 +387,17 @@ ${meetingContextSection}
 AGGREGATED CONTEXT:
 ${aggregatedContextSection}
 
-Generate the day prep brief now. Speak naturally, as if you're briefing ${userName} while ${userContext ? 'they' : 'the user'} are getting ready for ${userContext ? 'their' : 'the'} day. Use "you" consistently to refer to ${userName}.`;
+${aggregatedContext.conflicts && aggregatedContext.conflicts.length > 0 ? `\n⚠️  CONFLICTS DETECTED (${aggregatedContext.conflicts.length}):\n${aggregatedContext.conflicts.map(c => `- ${c.meetings.join(' vs ')}: ${c.description} (${c.severity} severity)`).join('\n')}` : ''}
+
+${aggregatedContext.themes && aggregatedContext.themes.length > 0 ? `\n🎯 THEMATIC THREADS (${aggregatedContext.themes.length}):\n${aggregatedContext.themes.map(t => `- ${t.theme}: Connects ${t.meetings.join(', ')} - ${t.description}`).join('\n')}` : ''}
+
+${aggregatedContext.keyPeople && aggregatedContext.keyPeople.length > 0 ? `\n👥 KEY PEOPLE ACROSS MEETINGS:\n${aggregatedContext.keyPeople.map(p => `- ${p.name}: ${p.roleAcrossMeetings}`).join('\n')}` : ''}
+
+${aggregatedContext.dependencies && aggregatedContext.dependencies.length > 0 ? `\n🔗 MEETING DEPENDENCIES:\n${aggregatedContext.dependencies.map(d => `- ${d.meeting} depends on ${d.dependsOn}: ${d.reason}`).join('\n')}` : ''}
+
+Generate the day prep brief now. Speak naturally, as if you're briefing ${userName} while ${userContext ? 'they' : 'the user'} are getting ready for ${userContext ? 'their' : 'the'} day. Use "you" consistently to refer to ${userName}.
+
+IMPORTANT: Use the conflicts, themes, key people, and dependencies to create a COHESIVE day narrative, not just a list of meetings. Connect the dots between meetings. Highlight strategic sequencing if dependencies exist.`;
 
         const response = await callGPT([
             {

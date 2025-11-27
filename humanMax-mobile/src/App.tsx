@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen';
@@ -154,20 +154,43 @@ function App() {
 
   return (
     <Router>
-      <div className="app">
-        <nav className="app-nav">
-          <div className="nav-content">
-            <h1 className="app-title">Shadow</h1>
-            <div className="nav-actions">
-              <button
-                className="nav-button"
-                onClick={() => setShowDayPrep(true)}
-              >
-                Day Prep
-              </button>
-            </div>
+      <AppContent 
+        selectedMeeting={selectedMeeting}
+        setSelectedMeeting={setSelectedMeeting}
+        showDayPrep={showDayPrep}
+        setShowDayPrep={setShowDayPrep}
+        currentDate={currentDate}
+        handleSignOut={handleSignOut}
+      />
+    </Router>
+  );
+}
+
+function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowDayPrep, currentDate, handleSignOut }: any) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  
+  return (
+    <div className="app">
+      <nav className="app-nav">
+        <div className="nav-content">
+          <h1 className="app-title">Shadow</h1>
+          <div className="nav-actions">
+            <button
+              className="nav-button"
+              onClick={() => setShowDayPrep(true)}
+            >
+              Day Prep
+            </button>
+            <button
+              className={`nav-button ${location.pathname === '/settings' ? 'active' : ''}`}
+              onClick={() => navigate('/settings')}
+            >
+              ⚙️ Settings
+            </button>
           </div>
-        </nav>
+        </div>
+      </nav>
 
         <main className="app-main">
           <Routes>
@@ -199,7 +222,6 @@ function App() {
           />
         )}
       </div>
-    </Router>
   );
 }
 

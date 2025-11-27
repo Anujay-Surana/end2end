@@ -15,6 +15,8 @@ const { ensureAllTokensValid } = require('../services/tokenRefresh');
 const { fetchAllAccountContext, fetchCalendarFromAllAccounts, mergeAndDeduplicateCalendarEvents } = require('../services/multiAccountFetcher');
 const { callGPT, synthesizeResults, safeParseJSON, sleep } = require('../services/gptService');
 const { getUserContext, filterUserFromAttendees, getPromptPrefix } = require('../services/userContext');
+const { calculateRecencyScore, detectStaleness, analyzeTrend, scoreAndRankEmails } = require('../services/temporalScoring');
+const { filterByAdaptiveThreshold, determineOptimalDocumentCount, calculateSignalQuality } = require('../services/dynamicThresholds');
 
 /**
  * POST /api/prep-meeting
@@ -637,12 +639,21 @@ Return JSON array of 3-6 facts (15-80 words each).`,
 
                 let allRelevantIndices = [];
 
-                // PASS 1: Relevance filtering in batches of 25 (reduced for better accuracy)
-                for (let batchStart = 0; batchStart < emails.length; batchStart += 25) {
-                    const batchEnd = Math.min(batchStart + 25, emails.length);
-                    const batchEmails = emails.slice(batchStart, batchEnd);
-
-                    console.log(`     Relevance check batch ${Math.floor(batchStart / 25) + 1}/${Math.ceil(emails.length / 25)} (${batchEmails.length} emails)...`);
+                // PASS 1: Relevance filtering in PARALLEL batches of 25
+                const batchSize = 25;
+                const batches = [];
+                for (let batchStart = 0; batchStart < emails.length; batchStart += batchSize) {
+                    batches.push({
+                        start: batchStart,
+                        end: Math.min(batchStart + batchSize, emails.length),
+                        emails: emails.slice(batchStart, Math.min(batchStart + batchSize, emails.length))
+                    });
+                }
+                
+                console.log(`  🚀 Processing ${batches.length} email batches in PARALLEL...`);
+                
+                const relevancePromises = batches.map(async (batch, batchIndex) => {
+                    console.log(`     Relevance check batch ${batchIndex + 1}/${batches.length} (${batch.emails.length} emails)...`);
 
                     const userContextPrefix = userContext ? `You are preparing a brief for ${userContext.formattedName} (${userContext.formattedEmail}). ` : '';
                     const relevanceCheck = await callGPT([{
@@ -677,7 +688,7 @@ Return JSON with email indices to INCLUDE (relative to this batch):
 {"relevant_indices": [0, 3, 7, ...]}`,
                     }, {
                         role: 'user',
-                        content: `Emails to filter:\n${batchEmails.map((e, i) => {
+                        content: `Emails to filter:\n${batch.emails.map((e, i) => {
                             const bodyPreview = (e.body || e.snippet || '').substring(0, 2000);
                             const snippet = e.snippet?.substring(0, 200) || '';
                             const daysAgo = e.date ? Math.floor((new Date() - new Date(e.date)) / (1000 * 60 * 60 * 24)) : 'unknown';
@@ -694,28 +705,29 @@ Return JSON with email indices to INCLUDE (relative to this batch):
                     let batchIndices = [];
                     try {
                         const parsed = safeParseJSON(relevanceCheck);
-                        batchIndices = (parsed.relevant_indices || []).map(idx => batchStart + idx);
+                        batchIndices = (parsed.relevant_indices || []).map(idx => batch.start + idx);
                     } catch (e) {
                         logger.error({
                             requestId: req.requestId,
                             error: e.message,
-                            batchStart: batchStart,
-                            batchSize: batchEmails.length,
+                            batchStart: batch.start,
+                            batchSize: batch.emails.length,
                             meetingTitle: meetingTitle
                         }, 'Failed to parse email relevance check - excluding batch from analysis');
-                        console.log(`  ⚠️  Failed to parse relevance check for batch ${Math.floor(batchStart / 25) + 1}, excluding from analysis`);
+                        console.log(`  ⚠️  Failed to parse relevance check for batch ${batchIndex + 1}, excluding from analysis`);
                         // Stricter fallback: include none on failure (prevents irrelevant emails)
                         batchIndices = [];
                     }
 
-                    allRelevantIndices.push(...batchIndices);
-                    console.log(`     ✓ Found ${batchIndices.length}/${batchEmails.length} relevant emails in this batch`);
+                    console.log(`     ✓ Found ${batchIndices.length}/${batch.emails.length} relevant emails in batch ${batchIndex + 1}`);
+                    return batchIndices;
+                });
 
-                    // Rate limiting: wait 5 seconds between batches (OpenAI TPM limit: 30k tokens/min)
-                    if (batchStart + 25 < emails.length) {
-                        await sleep(5000);
-                    }
-                }
+                // Execute all relevance checks in parallel
+                const relevanceResults = await Promise.all(relevancePromises);
+                relevanceResults.forEach(indices => {
+                    allRelevantIndices.push(...indices);
+                });
 
                 console.log(`  ✓ Total relevant emails: ${allRelevantIndices.length}/${emails.length}`);
 
@@ -723,6 +735,19 @@ Return JSON with email indices to INCLUDE (relative to this batch):
                     emailAnalysis = `No email threads found directly related to "${meetingTitle}"${meetingDate ? ` (scheduled for ${meetingDate.readable})` : ''}.`;
                 } else {
                     relevantEmails = allRelevantIndices.map(i => emails[i]).filter(Boolean);
+                    
+                    // Apply temporal scoring to rank emails by recency + relevance
+                    console.log(`  ⏰ Applying temporal scoring to ${relevantEmails.length} emails...`);
+                    relevantEmails = scoreAndRankEmails(relevantEmails, 0.8, {
+                        recencyWeight: 0.3,  // 30% weight on recency
+                        attendeeBoost: 0.1,
+                        threadBoost: 0.1
+                    });
+                    
+                    // Log temporal distribution
+                    const recentCount = relevantEmails.filter(e => e._daysOld !== null && e._daysOld <= 30).length;
+                    const oldCount = relevantEmails.filter(e => e._daysOld !== null && e._daysOld > 180).length;
+                    console.log(`  📊 Email temporal distribution: ${recentCount} from last 30 days, ${oldCount} older than 6 months`);
                     
                     // Group emails by thread (subject + key participants)
                     const threadMap = new Map();
@@ -785,16 +810,21 @@ Return JSON with email indices to INCLUDE (relative to this batch):
                     
                     console.log(`  📧 Grouped into ${threadMap.size} email threads`);
 
-                    console.log(`  📊 Extracting context from ${relevantEmails.length} relevant emails (processing in batches of 20)...`);
+                    console.log(`  📊 Extracting context from ${relevantEmails.length} relevant emails (processing in PARALLEL batches of 20)...`);
 
-                    // PASS 2: Extract context in batches of 20
-                    let allExtractedData = [];
-
-                    for (let batchStart = 0; batchStart < relevantEmails.length; batchStart += 20) {
-                        const batchEnd = Math.min(batchStart + 20, relevantEmails.length);
-                        const batchEmails = relevantEmails.slice(batchStart, batchEnd);
-
-                        console.log(`     Context extraction batch ${Math.floor(batchStart / 20) + 1}/${Math.ceil(relevantEmails.length / 20)} (${batchEmails.length} emails)...`);
+                    // PASS 2: Extract context in PARALLEL batches of 20
+                    const extractionBatchSize = 20;
+                    const extractionBatches = [];
+                    for (let batchStart = 0; batchStart < relevantEmails.length; batchStart += extractionBatchSize) {
+                        extractionBatches.push({
+                            start: batchStart,
+                            end: Math.min(batchStart + extractionBatchSize, relevantEmails.length),
+                            emails: relevantEmails.slice(batchStart, Math.min(batchStart + extractionBatchSize, relevantEmails.length))
+                        });
+                    }
+                    
+                    const extractionPromises = extractionBatches.map(async (batch, batchIndex) => {
+                        console.log(`     Context extraction batch ${batchIndex + 1}/${extractionBatches.length} (${batch.emails.length} emails)...`);
 
                         const userContextPrefix = userContext ? `You are preparing a brief for ${userContext.formattedName} (${userContext.formattedEmail}). ` : '';
                         const topicsExtraction = await callGPT([{
@@ -824,7 +854,7 @@ Be THOROUGH and SPECIFIC: Include names, dates, document references, patterns ac
 Each point should be 15-80 words with concrete details. Structure everything from ${userContext ? userContext.formattedName + "'s" : "the user's"} perspective.`,
                         }, {
                             role: 'user',
-                            content: `Emails:\n${batchEmails.map(e => {
+                            content: `Emails:\n${batch.emails.map(e => {
                                 const body = e.body || e.snippet || '';
                                 // Use first 6000 + last 2000 chars for better context preservation
                                 const bodyPreview = body.length > 8000 
@@ -840,16 +870,16 @@ Each point should be 15-80 words with concrete details. Structure everything fro
 
                         try {
                             const batchData = safeParseJSON(topicsExtraction);
-                            allExtractedData.push(batchData);
+                            console.log(`     ✓ Extracted context from batch ${batchIndex + 1}`);
+                            return batchData;
                         } catch (e) {
-                            console.log(`  ⚠️  Failed to parse topics extraction for batch`);
+                            console.log(`  ⚠️  Failed to parse topics extraction for batch ${batchIndex + 1}`);
+                            return null;
                         }
+                    });
 
-                        // Rate limiting: wait 5 seconds between batches (OpenAI TPM limit: 30k tokens/min)
-                        if (batchStart + 20 < relevantEmails.length) {
-                            await sleep(5000);
-                        }
-                    }
+                    // Execute all context extractions in parallel
+                    const allExtractedData = (await Promise.all(extractionPromises)).filter(data => data !== null);
 
                     // Merge all batch results with deduplication
                     let extractedData = {
@@ -993,16 +1023,24 @@ Guidelines:
                 filesWithContent = textBasedFiles;
 
                 if (filesWithContent.length > 0) {
-                    console.log(`  📊 Deep analysis of ${filesWithContent.length} prioritized documents (processing in batches of 5)...`);
+                    console.log(`  📊 Deep analysis of ${filesWithContent.length} prioritized documents (processing in PARALLEL batches of 5)...`);
 
-                    const allDocInsights = [];
-
-                    for (let i = 0; i < filesWithContent.length; i += 5) {
-                        const batch = filesWithContent.slice(i, i + 5);
-                        console.log(`     Document analysis batch ${Math.floor(i / 5) + 1}/${Math.ceil(filesWithContent.length / 5)} (${batch.length} files)...`);
+                    // Create batches for progress logging
+                    const docBatchSize = 5;
+                    const docBatches = [];
+                    for (let i = 0; i < filesWithContent.length; i += docBatchSize) {
+                        docBatches.push({
+                            index: Math.floor(i / docBatchSize),
+                            files: filesWithContent.slice(i, i + docBatchSize)
+                        });
+                    }
+                    
+                    // Process all batches in parallel
+                    const docBatchPromises = docBatches.map(async (batch) => {
+                        console.log(`     Document analysis batch ${batch.index + 1}/${docBatches.length} (${batch.files.length} files)...`);
 
                         const batchInsights = await Promise.all(
-                            batch.map(async (file) => {
+                            batch.files.map(async (file) => {
                                 try {
                                     const insight = await callGPT([{
                                         role: 'system',
@@ -1034,23 +1072,44 @@ Focus on: decisions, data, action items, proposals, problems, solutions, timelin
                             })
                         );
 
-                        allDocInsights.push(...batchInsights);
+                        console.log(`     ✓ Batch ${batch.index + 1} complete: ${batchInsights.filter(b => b.insights.length > 0).length}/${batchInsights.length} docs with insights`);
+                        return batchInsights;
+                    });
 
-                        // Rate limiting: wait 5 seconds between batches (OpenAI TPM limit: 30k tokens/min)
-                        if (i + 5 < filesWithContent.length) {
-                            await sleep(5000);
-                        }
-                    }
+                    // Execute all document analysis in parallel
+                    const allDocInsights = (await Promise.all(docBatchPromises)).flat();
 
-                    console.log(`  ✓ Analyzed ${allDocInsights.length} documents`);
+                    console.log(`  ✓ Analyzed ${allDocInsights.length} documents in PARALLEL`);
 
                     const allInsights = allDocInsights.filter(d => d.insights.length > 0);
 
+                    // Detect staleness in documents
+                    const stalenessResults = filesWithContent.map(file => ({
+                        fileName: file.name,
+                        modifiedDate: file.modifiedTime,
+                        staleness: detectStaleness(file.content || file.name),
+                        recencyScore: calculateRecencyScore(file.modifiedTime, 0.01)
+                    }));
+                    
+                    const staleDocuments = stalenessResults.filter(r => r.staleness.isStale);
+                    if (staleDocuments.length > 0) {
+                        console.log(`  ⚠️  Detected ${staleDocuments.length} potentially stale documents:`);
+                        staleDocuments.forEach(doc => {
+                            console.log(`     - ${doc.fileName}: ${doc.staleness.indicators.map(i => i.value).join(', ')}`);
+                        });
+                    }
+
                     if (allInsights.length > 0) {
                         const userContextPrefix = userContext ? `You are preparing a brief for ${userContext.formattedName} (${userContext.formattedEmail}). ` : '';
+                        
+                        // Include staleness warnings in prompt
+                        const stalenessWarning = staleDocuments.length > 0 
+                            ? `\n\nWARNING - POTENTIALLY OUTDATED CONTENT: ${staleDocuments.length} documents contain temporal references that may be outdated:\n${staleDocuments.map(d => `- "${d.fileName}": ${d.staleness.indicators.map(i => i.value).join(', ')}`).join('\n')}\n\nWhen synthesizing, FLAG any information that may be outdated and note the document's last modified date.`
+                            : '';
+                        
                         const docNarrative = await callGPT([{
                             role: 'system',
-                            content: `${userContextPrefix}You are creating a comprehensive document analysis for meeting prep. Synthesize these document insights into a detailed paragraph (6-12 sentences) from ${userContext ? userContext.formattedName + "'s" : "the user's"} perspective.
+                            content: `${userContextPrefix}You are creating a comprehensive document analysis for meeting prep. Synthesize these document insights into a detailed paragraph (6-12 sentences) from ${userContext ? userContext.formattedName + "'s" : "the user's"} perspective.${stalenessWarning}
 
 Document Insights:
 ${JSON.stringify(allInsights, null, 2)}
@@ -1544,6 +1603,14 @@ ${e.type === 'meeting' ? `Meeting: ${e.name}\nAttendees: ${e.participants.join('
             
             // Limit to top 100 most relevant events
             const limitedTimeline = prioritizedTimeline.slice(0, 100);
+            
+            // Analyze trend/velocity in timeline
+            const trendAnalysis = analyzeTrend(limitedTimeline);
+            console.log(`  📈 Timeline trend: ${trendAnalysis.trend} - ${trendAnalysis.description}`);
+            
+            // Add trend context to timeline metadata
+            brief._timelineTrend = trendAnalysis;
+            
             console.log(`  ✓ Timeline built: ${limitedTimeline.length} events${meetingDate ? ` (meeting scheduled for ${meetingDate.readable})` : ''} (intelligently filtered for meeting relevance)`);
 
             // ===== STEP 7: RECOMMENDATIONS =====
@@ -1698,9 +1765,9 @@ Broader Narrative:
 ${broaderNarrative ? (broaderNarrative.length > 2000 ? broaderNarrative.substring(0, 2000) + '\n[...truncated...]' : broaderNarrative) : 'No broader narrative'}
 
 Key Timeline Events (from broader narrative analysis):
-${limitedTimeline && limitedTimeline.length > 0 ? limitedTimeline.slice(0, 15).map(e => `- ${e.type}: ${e.name || e.subject} (${e.date ? new Date(e.date).toLocaleDateString() : 'unknown date'})`).join('\n') : 'Timeline events will be analyzed'}
+${brief._timelineTrend ? `TREND: ${brief._timelineTrend.description}\n` : ''}${limitedTimeline && limitedTimeline.length > 0 ? limitedTimeline.slice(0, 15).map(e => `- ${e.type}: ${e.name || e.subject} (${e.date ? new Date(e.date).toLocaleDateString() : 'unknown date'})`).join('\n') : 'Timeline events will be analyzed'}
 
-Analyze deeply: What is this meeting REALLY about? Use ALL the collated information to understand the complete picture.`
+Analyze deeply: What is this meeting REALLY about? Use ALL the collated information to understand the complete picture. Consider the timeline trend when analyzing momentum and urgency.`
             }], 2500);
 
             let purposeData = {};
@@ -1784,6 +1851,7 @@ Write as if briefing ${userContext ? userContext.formattedName : 'an executive'}
                         name: e.name || e.subject,
                         snippet: e.snippet || e.description || ''
                     })),
+                    timelineTrend: brief._timelineTrend || null,
                     recommendations: parsedRecommendations.slice(0, 3)
                 },
                 1000 // Increased tokens for better summary
