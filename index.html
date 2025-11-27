@@ -4549,6 +4549,9 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                         <button class="brief-tab-button" onclick="switchBriefTab('company')">Company Intel</button>
                         <button class="brief-tab-button" onclick="switchBriefTab('strategy')">Recommendations</button>
                         <button class="brief-tab-button" onclick="switchBriefTab('actions')">Action Items</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('userContext')">👤 User Context</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('attendeeExtract')">📋 Attendee Extract</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('relevantContent')">📎 Relevant Content</button>
                     </div>
 
                     <!-- Tab: Attendees -->
@@ -4722,6 +4725,30 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                             ` : '<p style="color: #888;">No action items identified.</p>'}
                         </div>
                     </div>
+
+                    <!-- Tab: User Context -->
+                    <div id="brief-tab-userContext" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>👤 User Context & Profile</h3>
+                            ${renderUserContextTab(brief._extractionData?.userContext || brief.userContext || null)}
+                        </div>
+                    </div>
+
+                    <!-- Tab: Attendee Extract -->
+                    <div id="brief-tab-attendeeExtract" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>📋 Attendee Information Extraction</h3>
+                            ${renderAttendeeExtractTab(brief._extractionData?.attendeeExtractions || brief.attendeeExtractions || [])}
+                        </div>
+                    </div>
+
+                    <!-- Tab: Relevant Content -->
+                    <div id="brief-tab-relevantContent" class="brief-tab-content">
+                        <div class="analysis-section">
+                            <h3>📎 Relevant Content (with Relevancy Reasoning)</h3>
+                            ${renderRelevantContentTab(brief.relevantContent || brief._extractionData?.relevantContent || null)}
+                        </div>
+                    </div>
                 </div>
             `;
         }
@@ -4761,6 +4788,9 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             modalBody.innerHTML = `
                 <div class="brief-tabs">
                     <button class="brief-tab-button active" onclick="switchBriefTab('overview')">Overview</button>
+                    <button class="brief-tab-button" onclick="switchBriefTab('userContext')">User Context</button>
+                    <button class="brief-tab-button" onclick="switchBriefTab('attendeeExtract')">Attendee Info</button>
+                    <button class="brief-tab-button" onclick="switchBriefTab('relevantContent')">Relevant Content</button>
                     <button class="brief-tab-button" onclick="switchBriefTab('attendees')">Attendees</button>
                     <button class="brief-tab-button" onclick="switchBriefTab('emails')">Email Analysis</button>
                     <button class="brief-tab-button" onclick="switchBriefTab('documents')">Documents</button>
@@ -4770,6 +4800,18 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
                 <div id="brief-tab-overview" class="brief-tab-content active">
                     ${renderOverviewTab(meeting, dynamicsAnalysis)}
+                </div>
+
+                <div id="brief-tab-userContext" class="brief-tab-content">
+                    ${renderUserContextTab(briefData._extractionData?.userContext)}
+                </div>
+
+                <div id="brief-tab-attendeeExtract" class="brief-tab-content">
+                    ${renderAttendeeExtractTab(briefData._extractionData?.attendeeExtractions)}
+                </div>
+
+                <div id="brief-tab-relevantContent" class="brief-tab-content">
+                    ${renderRelevantContentTab(briefData._extractionData?.relevantContent)}
                 </div>
 
                 <div id="brief-tab-attendees" class="brief-tab-content">
@@ -4928,6 +4970,201 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     <h4>Strategic Recommendations</h4>
                     <button class="copy-section-btn" onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText)">Copy</button>
                     <div>${formatMarkdown(strategyAnalysis || 'No strategic analysis available')}</div>
+                </div>
+            `;
+        }
+
+        function renderUserContextTab(userContext) {
+            if (!userContext || userContext.error) {
+                return `
+                    <div class="insight-card">
+                        <h4>User Context</h4>
+                        <p style="color: #999;">${userContext?.error || userContext?.note || 'User context not available'}</p>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="insight-card">
+                    <h4>User Profile: ${userContext.name || 'Unknown'}</h4>
+                    <p><strong>Email:</strong> ${userContext.email || 'N/A'}</p>
+                    
+                    ${userContext.communicationStyle ? `
+                        <div style="margin-top: 20px;">
+                            <h5>Communication Style</h5>
+                            <p><strong>Style:</strong> ${userContext.communicationStyle.style || 'Unknown'}</p>
+                            <p><strong>Formality:</strong> ${userContext.communicationStyle.formality || 'Unknown'}</p>
+                            <p><strong>Verbosity:</strong> ${userContext.communicationStyle.verbosity || 'Unknown'}</p>
+                            <p><strong>Tone:</strong> ${userContext.communicationStyle.tone || 'Unknown'}</p>
+                            ${userContext.communicationStyle.characteristics && userContext.communicationStyle.characteristics.length > 0 ? `
+                                <p><strong>Characteristics:</strong></p>
+                                <ul>
+                                    ${userContext.communicationStyle.characteristics.map(c => `<li>${c}</li>`).join('')}
+                                </ul>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+                    
+                    ${userContext.expertise ? `
+                        <div style="margin-top: 20px;">
+                            <h5>Domain Expertise</h5>
+                            <p><strong>Level:</strong> ${userContext.expertise.level || 'Unknown'}</p>
+                            <p><strong>Technical Depth:</strong> ${userContext.expertise.technicalDepth || 'Unknown'}</p>
+                            ${userContext.expertise.domains && userContext.expertise.domains.length > 0 ? `
+                                <p><strong>Domains:</strong> ${userContext.expertise.domains.join(', ')}</p>
+                            ` : ''}
+                            ${userContext.expertise.specializations && userContext.expertise.specializations.length > 0 ? `
+                                <p><strong>Specializations:</strong> ${userContext.expertise.specializations.join(', ')}</p>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+                    
+                    ${userContext.workingPatterns ? `
+                        <div style="margin-top: 20px;">
+                            <h5>Working Patterns</h5>
+                            <p><strong>Meetings per Week:</strong> ${userContext.workingPatterns.meetingsPerWeek || 'N/A'}</p>
+                            <p><strong>One-on-One Ratio:</strong> ${Math.round((userContext.workingPatterns.oneOnOneRatio || 0) * 100)}%</p>
+                            <p><strong>Organizer Ratio:</strong> ${Math.round((userContext.workingPatterns.organizerRatio || 0) * 100)}%</p>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        function renderAttendeeExtractTab(attendeeExtractions) {
+            if (!attendeeExtractions || attendeeExtractions.length === 0) {
+                return `
+                    <div class="insight-card">
+                        <h4>Attendee Information Extraction</h4>
+                        <p style="color: #999;">No attendee extraction data available</p>
+                    </div>
+                `;
+            }
+
+            return attendeeExtractions.map(extraction => {
+                const data = extraction.extractionData || {};
+                return `
+                    <div class="attendee-card" style="margin-bottom: 20px;">
+                        <div class="attendee-card-header">
+                            <h4>${extraction.name || extraction.email}</h4>
+                            <p>${extraction.email} • ${extraction.company || 'Unknown Company'}</p>
+                        </div>
+                        
+                        <div class="attendee-insights">
+                            ${data.emailsFrom || data.emailsTo ? `
+                                <div class="insight-section">
+                                    <div class="insight-label">Email Data:</div>
+                                    <div class="insight-value">
+                                        <p>Emails FROM: ${data.emailsFrom || 0}</p>
+                                        <p>Emails TO: ${data.emailsTo || 0}</p>
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            ${data.emailFacts && data.emailFacts.length > 0 ? `
+                                <div class="insight-section">
+                                    <div class="insight-label">Extracted from Emails:</div>
+                                    ${data.emailFacts.map(fact => `
+                                        <div class="insight-value">
+                                            <p>${fact}</p>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                            
+                            ${data.webFacts && data.webFacts.length > 0 ? `
+                                <div class="insight-section">
+                                    <div class="insight-label">Extracted from Web Search:</div>
+                                    ${data.webFacts.map(fact => `
+                                        <div class="insight-value">
+                                            <p>${fact}</p>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                            
+                            ${data.webSearchResults && data.webSearchResults.length > 0 ? `
+                                <div class="insight-section">
+                                    <div class="insight-label">Web Search Results:</div>
+                                    ${data.webSearchResults.slice(0, 3).map(result => `
+                                        <div class="insight-value">
+                                            <strong>${result.title || 'Web Result'}</strong><br>
+                                            <p>${(result.excerpt || result.snippet || 'No content').substring(0, 300)}...</p>
+                                            <a href="${result.url || '#'}" class="source-citation" target="_blank">Source</a>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderRelevantContentTab(relevantContent) {
+            if (!relevantContent) {
+                return `
+                    <div class="insight-card">
+                        <h4>Relevant Content</h4>
+                        <p style="color: #999;">No relevant content data available</p>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="insight-card">
+                    <h4>Relevant Emails (${relevantContent.emails?.length || 0})</h4>
+                    ${relevantContent.emails && relevantContent.emails.length > 0 ? `
+                        <div style="max-height: 600px; overflow-y: auto;">
+                            ${relevantContent.emails.map((email, idx) => `
+                                <div style="border: 1px solid #ddd; padding: 12px; margin-bottom: 12px; border-radius: 4px; background: #f9fafb;">
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                        <strong>${email.subject || 'No Subject'}</strong>
+                                        <span style="color: #666; font-size: 0.9em;">${email.date ? new Date(email.date).toLocaleDateString() : 'Unknown date'}${email.daysOld !== null ? ` (${email.daysOld} days ago)` : ''}</span>
+                                    </div>
+                                    <p style="color: #666; font-size: 0.9em;"><strong>From:</strong> ${email.from || 'N/A'} | <strong>To:</strong> ${email.to || 'N/A'}</p>
+                                    ${email.relevanceReasoning ? `
+                                        <div style="background: #e0f2fe; padding: 8px; border-radius: 4px; margin: 8px 0; border-left: 3px solid #0284c7;">
+                                            <strong style="color: #0284c7;">✓ Relevance:</strong> <span style="color: #0369a1;">${email.relevanceReasoning}</span>
+                                        </div>
+                                    ` : ''}
+                                    ${email.relevanceScore !== undefined ? `
+                                        <div style="color: #666; font-size: 0.85em; margin-bottom: 8px;">
+                                            Relevance Score: ${(email.relevanceScore * 100).toFixed(0)}%
+                                        </div>
+                                    ` : ''}
+                                    <p style="margin-top: 8px; color: #374151;">${email.snippet || email.body || 'No preview'}</p>
+                                    ${email.daysOld !== null ? `<p style="margin-top: 4px; color: #666; font-size: 0.85em;">Age: ${email.daysOld} days old</p>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<p style="color: #999;">No relevant emails found</p>'}
+                </div>
+
+                <div class="insight-card" style="margin-top: 20px;">
+                    <h4>Relevant Documents (${relevantContent.documents?.length || 0})</h4>
+                    ${relevantContent.documents && relevantContent.documents.length > 0 ? `
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${relevantContent.documents.map((doc, idx) => `
+                                <div style="border: 1px solid #ddd; padding: 12px; margin-bottom: 12px; border-radius: 4px;">
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                        <strong>${doc.name || 'Unnamed Document'}</strong>
+                                        <span style="color: #666; font-size: 0.9em;">${doc.modifiedTime ? new Date(doc.modifiedTime).toLocaleDateString() : 'Unknown date'}</span>
+                                    </div>
+                                    <p style="color: #666; font-size: 0.9em;"><strong>Type:</strong> ${doc.mimeType || 'Unknown'} | <strong>Owner:</strong> ${doc.owner || 'Unknown'}</p>
+                                    <div style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+                                        <strong>Why Relevant:</strong> ${doc.relevanceReasoning || 'Document is relevant to meeting'}
+                                    </div>
+                                    ${doc.recencyScore ? `<p style="margin-top: 4px; color: #666; font-size: 0.85em;">Recency Score: ${doc.recencyScore.toFixed(2)}</p>` : ''}
+                                    ${doc.staleness && doc.staleness.isStale ? `
+                                        <div style="margin-top: 8px; padding: 8px; background: #fff3cd; border-radius: 4px;">
+                                            <strong>⚠️ Potentially Stale:</strong> ${doc.staleness.indicators.map(i => i.value).join(', ')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<p style="color: #999;">No relevant documents found</p>'}
                 </div>
             `;
         }

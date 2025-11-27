@@ -113,6 +113,15 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
         const brief = {
             summary: '',
             attendees: [],
+            // Store detailed extraction data for UI display
+            _extractionData: {
+                userContext: null,
+                attendeeExtractions: [],
+                relevantContent: {
+                    emails: [],
+                    documents: []
+                }
+            },
             companies: [],
             actionItems: [],
             context: '',
@@ -612,14 +621,25 @@ Return JSON array of 3-6 facts (15-80 words each).`,
                     source = 'basic';
                 }
                 
-                return {
+                const attendeeResult = {
                     name: name,
                     email: attendeeEmail,
                     company: company,
                     title: title || `${company} team member`,
                     keyFacts: finalKeyFacts,
-                    dataSource: source
+                    dataSource: source,
+                    // Store full extraction data for UI
+                    _extractionData: {
+                        emailsFrom: attendeeEmails.length,
+                        emailsTo: emailsToAttendee.length,
+                        emailData: emailDataForSynthesis.slice(0, 10), // Store sample emails
+                        webSearchResults: resultsToUse || [],
+                        emailFacts: keyFacts.filter((f, idx) => idx < keyFacts.length - (resultsToUse ? resultsToUse.length : 0)),
+                        webFacts: resultsToUse ? keyFacts.slice(-(resultsToUse.length)) : []
+                    }
                 };
+                
+                return attendeeResult;
                 });
                 
                 const batchResults = (await Promise.all(attendeePromises)).filter(a => a !== null);
@@ -627,6 +647,24 @@ Return JSON array of 3-6 facts (15-80 words each).`,
             }
             
             brief.attendees = allAttendeeResults;
+            
+            // Store attendee extraction data for UI
+            brief._extractionData.attendeeExtractions = allAttendeeResults.map(att => ({
+                name: att.name,
+                email: att.email,
+                company: att.company,
+                title: att.title,
+                keyFacts: att.keyFacts || [],
+                extractionData: {
+                    emailsFrom: att._extractionData?.emailsFrom || 0,
+                    emailsTo: att._extractionData?.emailsTo || 0,
+                    emailFacts: att._extractionData?.emailFacts || [],
+                    webFacts: att._extractionData?.webFacts || [],
+                    webSearchResults: att._extractionData?.webSearchResults || [],
+                    emailData: att._extractionData?.emailData || []
+                }
+            }));
+            
             console.log(`  ✓ Processed ${brief.attendees.length} attendees`);
 
             // ===== STEP 2: EMAIL RELEVANCE FILTERING + BATCH EXTRACTION =====
@@ -684,8 +722,8 @@ ATTENDEE PRIORITIZATION: Prioritize emails with multiple meeting attendees (high
 
 COMPREHENSIVE OVER SELECTIVE: Include 60-80% of emails (err on the side of inclusion), but weight recent emails and emails with more attendees higher in your decision
 
-Return JSON with email indices to INCLUDE (relative to this batch):
-{"relevant_indices": [0, 3, 7, ...]}`,
+Return JSON with email indices to INCLUDE (relative to this batch) AND reasoning:
+{"relevant_indices": [0, 3, 7, ...], "reasoning": {"0": "why email 0 is relevant", "3": "why email 3 is relevant", ...}}`,
                     }, {
                         role: 'user',
                         content: `Emails to filter:\n${batch.emails.map((e, i) => {
@@ -703,9 +741,17 @@ Return JSON with email indices to INCLUDE (relative to this batch):
                     }], 1000);
 
                     let batchIndices = [];
+                    let batchReasoning = {};
                     try {
                         const parsed = safeParseJSON(relevanceCheck);
                         batchIndices = (parsed.relevant_indices || []).map(idx => batch.start + idx);
+                        // Store reasoning for each relevant email
+                        if (parsed.reasoning) {
+                            Object.keys(parsed.reasoning).forEach(relativeIdx => {
+                                const absoluteIdx = batch.start + parseInt(relativeIdx);
+                                batchReasoning[absoluteIdx] = parsed.reasoning[relativeIdx];
+                            });
+                        }
                     } catch (e) {
                         logger.error({
                             requestId: req.requestId,
@@ -720,21 +766,53 @@ Return JSON with email indices to INCLUDE (relative to this batch):
                     }
 
                     console.log(`     ✓ Found ${batchIndices.length}/${batch.emails.length} relevant emails in batch ${batchIndex + 1}`);
-                    return batchIndices;
+                    return { indices: batchIndices, reasoning: batchReasoning };
                 });
 
                 // Execute all relevance checks in parallel
                 const relevanceResults = await Promise.all(relevancePromises);
-                relevanceResults.forEach(indices => {
-                    allRelevantIndices.push(...indices);
+                const allRelevanceReasoning = {};
+                relevanceResults.forEach(result => {
+                    allRelevantIndices.push(...result.indices);
+                    Object.assign(allRelevanceReasoning, result.reasoning);
                 });
+                
+                // Store reasoning in brief for UI access
+                if (!brief._extractionData) brief._extractionData = {};
+                brief._extractionData.emailRelevanceReasoning = allRelevanceReasoning;
 
                 console.log(`  ✓ Total relevant emails: ${allRelevantIndices.length}/${emails.length}`);
 
                 if (allRelevantIndices.length === 0) {
                     emailAnalysis = `No email threads found directly related to "${meetingTitle}"${meetingDate ? ` (scheduled for ${meetingDate.readable})` : ''}.`;
                 } else {
-                    relevantEmails = allRelevantIndices.map(i => emails[i]).filter(Boolean);
+                    relevantEmails = allRelevantIndices.map(i => {
+                        const email = emails[i];
+                        if (email) {
+                            // Add relevance reasoning to email
+                            email._relevanceReasoning = allRelevanceReasoning[i] || 'Included based on meeting relevance';
+                            email._relevanceIndex = i;
+                        }
+                        return email;
+                    }).filter(Boolean);
+                    
+                    // Store relevant content for UI with reasoning
+                    if (!brief._extractionData.relevantContent) brief._extractionData.relevantContent = {};
+                    brief._extractionData.relevantContent.emails = relevantEmails.map((e, idx) => {
+                        const originalIdx = allRelevantIndices[idx];
+                        return {
+                            subject: e.subject,
+                            from: e.from,
+                            to: e.to,
+                            date: e.date,
+                            snippet: e.snippet || (e.body || '').substring(0, 200),
+                            relevanceReasoning: allRelevanceReasoning[originalIdx] || e._relevanceReasoning || 
+                                'Relevant to meeting context - includes attendees or discusses related topics',
+                            relevanceScore: e._temporalScore || 0.8,
+                            daysOld: e._daysOld,
+                            body: (e.body || e.snippet || '').substring(0, 1000) // Include more content for display
+                        };
+                    });
                     
                     // Apply temporal scoring to rank emails by recency + relevance
                     console.log(`  ⏰ Applying temporal scoring to ${relevantEmails.length} emails...`);
@@ -1083,12 +1161,23 @@ Focus on: decisions, data, action items, proposals, problems, solutions, timelin
 
                     const allInsights = allDocInsights.filter(d => d.insights.length > 0);
 
-                    // Detect staleness in documents
+                    // Detect staleness in documents and store relevance data
                     const stalenessResults = filesWithContent.map(file => ({
                         fileName: file.name,
                         modifiedDate: file.modifiedTime,
                         staleness: detectStaleness(file.content || file.name),
                         recencyScore: calculateRecencyScore(file.modifiedTime, 0.01)
+                    }));
+                    
+                    // Store relevant documents for UI
+                    brief._extractionData.relevantContent.documents = filesWithContent.map(file => ({
+                        name: file.name,
+                        modifiedTime: file.modifiedTime,
+                        mimeType: file.mimeType,
+                        owner: file.owner,
+                        relevanceReasoning: `Document "${file.name}" is relevant to meeting "${meetingTitle}" based on content analysis`,
+                        recencyScore: calculateRecencyScore(file.modifiedTime, 0.01),
+                        staleness: detectStaleness(file.content || file.name)
                     }));
                     
                     const staleDocuments = stalenessResults.filter(r => r.staleness.isStale);
@@ -1098,6 +1187,13 @@ Focus on: decisions, data, action items, proposals, problems, solutions, timelin
                             console.log(`     - ${doc.fileName}: ${doc.staleness.indicators.map(i => i.value).join(', ')}`);
                         });
                     }
+                    
+                    // Store document staleness info for UI
+                    if (!brief._extractionData) brief._extractionData = {};
+                    brief._extractionData.documentStaleness = {};
+                    stalenessResults.forEach(r => {
+                        brief._extractionData.documentStaleness[r.fileName] = r.staleness;
+                    });
 
                     if (allInsights.length > 0) {
                         const userContextPrefix = userContext ? `You are preparing a brief for ${userContext.formattedName} (${userContext.formattedEmail}). ` : '';
@@ -1859,6 +1955,41 @@ Write as if briefing ${userContext ? userContext.formattedName : 'an executive'}
 
             console.log(`  ✓ Executive summary: ${brief.summary?.length || 0} chars`);
 
+            // ===== BUILD USER CONTEXT/PROFILE =====
+            if (userContext && emails && emails.length > 0) {
+                console.log(`\n  👤 Building user context/profile...`);
+                try {
+                    const { buildUserProfile } = require('../services/userProfiling');
+                    const userSentEmails = emails.filter(e => {
+                        const from = (e.from || '').toLowerCase();
+                        return from.includes(userContext.email.toLowerCase());
+                    });
+                    
+                    if (userSentEmails.length >= 5) {
+                        brief._extractionData.userContext = await buildUserProfile(
+                            userContext,
+                            userSentEmails,
+                            filesWithContent.filter(f => f.ownerEmail?.toLowerCase().includes(userContext.email.toLowerCase())),
+                            calendarEvents
+                        );
+                        console.log(`  ✓ User context built: ${brief._extractionData.userContext.communicationStyle ? 'communication style' : ''} ${brief._extractionData.userContext.expertise ? 'expertise' : ''}`);
+                    } else {
+                        brief._extractionData.userContext = {
+                            name: userContext.name,
+                            email: userContext.email,
+                            note: 'Insufficient data for full profile (need 5+ emails)'
+                        };
+                    }
+                } catch (e) {
+                    console.log(`  ⚠️  User profiling failed: ${e.message}`);
+                    brief._extractionData.userContext = {
+                        name: userContext.name,
+                        email: userContext.email,
+                        error: e.message
+                    };
+                }
+            }
+            
             // ===== ASSEMBLE FINAL BRIEF =====
             brief.emailAnalysis = emailAnalysis;
             brief.documentAnalysis = documentAnalysis;
@@ -1869,6 +2000,33 @@ Write as if briefing ${userContext ? userContext.formattedName : 'an executive'}
             brief.timeline = limitedTimeline;
             brief.recommendations = parsedRecommendations;
             brief.actionItems = parsedActionItems;
+            
+            // Store relevant content with reasoning for UI (already stored above, but ensure it's in brief.relevantContent too)
+            brief.relevantContent = brief._extractionData?.relevantContent || {
+                emails: relevantEmails.map((email, idx) => ({
+                    subject: email.subject,
+                    from: email.from,
+                    to: email.to,
+                    date: email.date,
+                    snippet: (email.body || email.snippet || '').substring(0, 300),
+                    relevanceReasoning: brief._extractionData?.emailRelevanceReasoning?.[allRelevantIndices[idx]] || email._relevanceReasoning || 'Relevant to meeting context',
+                    temporalScore: email._temporalScore,
+                    daysOld: email._daysOld,
+                    body: (email.body || email.snippet || '').substring(0, 1000)
+                })),
+                documents: filesWithContent.map(file => {
+                    const stalenessResult = brief._extractionData?.documentStaleness?.[file.name];
+                    return {
+                        name: file.name,
+                        modifiedTime: file.modifiedTime,
+                        owner: file.owner,
+                        mimeType: file.mimeType,
+                        recencyScore: calculateRecencyScore(file.modifiedTime),
+                        relevanceReasoning: `Document "${file.name}" is relevant to meeting "${meetingTitle}" based on content analysis`,
+                        staleness: stalenessResult || null
+                    };
+                })
+            };
 
             // Add stats
             brief.stats = {
