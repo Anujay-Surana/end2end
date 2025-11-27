@@ -4483,7 +4483,46 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     throw error;
                 }
 
-                const brief = await response.json();
+                const responseText = await response.text();
+                console.log('📥 Raw response length:', responseText.length);
+                console.log('📥 Raw response preview:', responseText.substring(0, 500));
+                
+                let brief;
+                try {
+                    brief = JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error('❌ Failed to parse JSON response:', parseError);
+                    console.error('Response text:', responseText.substring(0, 1000));
+                    throw new Error('Invalid JSON response from server');
+                }
+
+                // Debug: Log brief structure
+                console.log('📋 Brief received:', {
+                    hasSummary: !!brief.summary,
+                    summaryLength: brief.summary?.length || 0,
+                    hasAttendees: !!brief.attendees,
+                    attendeesCount: brief.attendees?.length || 0,
+                    hasEmailAnalysis: !!brief.emailAnalysis,
+                    emailAnalysisLength: brief.emailAnalysis?.length || 0,
+                    hasDocumentAnalysis: !!brief.documentAnalysis,
+                    documentAnalysisLength: brief.documentAnalysis?.length || 0,
+                    hasRelationshipAnalysis: !!brief.relationshipAnalysis,
+                    relationshipAnalysisLength: brief.relationshipAnalysis?.length || 0,
+                    hasTimeline: !!brief.timeline,
+                    timelineCount: brief.timeline?.length || 0,
+                    hasRecommendations: !!brief.recommendations,
+                    recommendationsCount: brief.recommendations?.length || 0,
+                    hasActionItems: !!brief.actionItems,
+                    actionItemsCount: brief.actionItems?.length || 0,
+                    briefKeys: Object.keys(brief),
+                    briefSample: JSON.stringify(brief).substring(0, 1000)
+                });
+                
+                // Check if brief is actually empty
+                if (!brief.summary && (!brief.attendees || brief.attendees.length === 0)) {
+                    console.error('❌ Brief appears to be empty!', brief);
+                    alert('Warning: Brief received but appears to be empty. Check console for details.');
+                }
 
                 // Store brief globally for meeting assistant
                 meetingBrief = brief;
@@ -4495,7 +4534,19 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 meetingBrief._generatedAt = Date.now();
 
                 // Render the clean brief
-                renderModernBrief(brief, meeting);
+                try {
+                    renderModernBrief(brief, meeting);
+                } catch (renderError) {
+                    console.error('❌ Error rendering brief:', renderError);
+                    console.error('Error stack:', renderError.stack);
+                    modalBody.innerHTML = `
+                        <div class="prep-content">
+                            <p style="color: #d32f2f;">Error rendering brief: ${renderError.message}</p>
+                            <p style="color: #666; font-size: 13px; margin-top: 10px;">Check console for details.</p>
+                            <pre style="background: #f5f5f5; padding: 10px; margin-top: 10px; overflow: auto; max-height: 300px;">${renderError.stack}</pre>
+                        </div>
+                    `;
+                }
 
                 // Show "Entering Meeting" button
                 const enterMeetingBtn = document.getElementById('enterMeetingButton');
@@ -4545,34 +4596,58 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
         function renderModernBrief(brief, meeting) {
             const modalBody = document.getElementById('prepModalBody');
+            
+            // Debug: Log what we're trying to render
+            console.log('🎨 Rendering brief:', {
+                briefType: typeof brief,
+                briefIsNull: brief === null,
+                briefIsUndefined: brief === undefined,
+                hasSummary: !!brief?.summary,
+                hasAttendees: !!brief?.attendees,
+                meetingType: typeof meeting,
+                meetingSummary: meeting?.summary
+            });
 
             const getInitials = (name) => {
+                if (!name || typeof name !== 'string') return '??';
                 return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
             };
+
+            // Validate brief data
+            if (!brief || typeof brief !== 'object') {
+                console.error('❌ Invalid brief data:', brief);
+                modalBody.innerHTML = `
+                    <div class="prep-content">
+                        <p style="color: #d32f2f;">Error: Invalid brief data received from server.</p>
+                        <p style="color: #666; font-size: 13px; margin-top: 10px;">Brief type: ${typeof brief}, Brief: ${JSON.stringify(brief).substring(0, 200)}</p>
+                    </div>
+                `;
+                return;
+            }
 
             // Create tabbed interface with comprehensive sections
             modalBody.innerHTML = `
                 <div class="modern-brief">
                     <!-- Hero Card -->
                     <div class="brief-hero-card">
-                        <h2>${meeting.summary}</h2>
-                        <div class="meeting-time">${formatMeetingTime(meeting)}</div>
-                        ${brief.summary ? `<p class="executive-summary">${brief.summary}</p>` : ''}
+                        <h2>${meeting?.summary || 'Meeting'}</h2>
+                        <div class="meeting-time">${meeting ? formatMeetingTime(meeting) : ''}</div>
+                        ${brief.summary ? `<p class="executive-summary">${brief.summary}</p>` : '<p class="executive-summary" style="color: #999;">No summary available</p>'}
                     </div>
 
                     <!-- Tab Navigation -->
                     <div class="brief-tabs">
-                        <button class="brief-tab-button active" onclick="switchBriefTab('attendees')">Attendees</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('relationships')">Relationships</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('timeline')">Timeline</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('emails')">Email Analysis</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('documents')">Documents</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('company')">Company Intel</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('strategy')">Recommendations</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('actions')">Action Items</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('userContext')">👤 User Context</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('attendeeExtract')">📋 Attendee Extract</button>
-                        <button class="brief-tab-button" onclick="switchBriefTab('relevantContent')">📎 Relevant Content</button>
+                        <button class="brief-tab-button active" onclick="switchBriefTab('attendees', event)">Attendees</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('relationships', event)">Relationships</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('timeline', event)">Timeline</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('emails', event)">Email Analysis</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('documents', event)">Documents</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('company', event)">Company Intel</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('strategy', event)">Recommendations</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('actions', event)">Action Items</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('userContext', event)">👤 User Context</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('attendeeExtract', event)">📋 Attendee Extract</button>
+                        <button class="brief-tab-button" onclick="switchBriefTab('relevantContent', event)">📎 Relevant Content</button>
                     </div>
 
                     <!-- Tab: Attendees -->
@@ -4775,7 +4850,9 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         }
 
         // Tab switching function
-        window.switchBriefTab = function(tabName) {
+        window.switchBriefTab = function(tabName, eventElement) {
+            console.log('🔄 Switching to tab:', tabName);
+            
             // Hide all tabs
             document.querySelectorAll('.brief-tab-content').forEach(tab => {
                 tab.classList.remove('active');
@@ -4786,11 +4863,27 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
             // Show selected tab
             const selectedTab = document.getElementById(`brief-tab-${tabName}`);
-            const selectedButton = event.target;
-            if (selectedTab) {
-                selectedTab.classList.add('active');
-                selectedButton.classList.add('active');
+            if (!selectedTab) {
+                console.error('❌ Tab not found:', `brief-tab-${tabName}`);
+                return;
             }
+            
+            selectedTab.classList.add('active');
+            
+            // Find and activate the button that was clicked
+            if (eventElement && eventElement.target) {
+                eventElement.target.classList.add('active');
+            } else {
+                // Fallback: find button by tab name
+                const buttons = document.querySelectorAll('.brief-tab-button');
+                buttons.forEach(btn => {
+                    if (btn.getAttribute('onclick')?.includes(`'${tabName}'`)) {
+                        btn.classList.add('active');
+                    }
+                });
+            }
+            
+            console.log('✅ Tab switched successfully');
         };
 
         function formatMeetingTime(meeting) {
