@@ -8036,7 +8036,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
 
         // ===== ISOLATED ANALYSIS MODALS =====
         
-        let currentBriefData = null; // Store brief data when prep is done
+        // Note: currentBriefData is already declared above with other variables
         
         function showUserContextAnalysis() {
             if (!currentBriefData) {
