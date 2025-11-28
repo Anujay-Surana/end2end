@@ -17,7 +17,6 @@ const { callGPT, synthesizeResults, safeParseJSON, sleep } = require('../service
 const { getUserContext, filterUserFromAttendees, getPromptPrefix } = require('../services/userContext');
 const { calculateRecencyScore, detectStaleness, analyzeTrend, scoreAndRankEmails } = require('../services/temporalScoring');
 const { filterByAdaptiveThreshold, determineOptimalDocumentCount, calculateSignalQuality } = require('../services/dynamicThresholds');
-const logger = require('../services/logger');
 
 /**
  * Understand meeting context dynamically from available information
