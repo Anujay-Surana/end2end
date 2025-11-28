@@ -38,9 +38,10 @@ class ChatPanelService {
                     'Authorization': `Bearer ${this.openaiApiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'gpt-5',
+                    model: 'gpt-4o',
                     messages: messages,
-                    max_completion_tokens: 500,
+                    max_tokens: 500,
+                    temperature: 0.7
                 })
             });
 
@@ -122,7 +123,8 @@ class ChatPanelService {
                             content: `Generate a quick update about today's meetings:\n\n${meetingList}`
                         }
                     ],
-                    max_completion_tokens: 200,
+                    max_tokens: 200,
+                    temperature: 0.7
                 })
             });
 

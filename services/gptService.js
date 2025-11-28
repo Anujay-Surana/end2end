@@ -24,37 +24,61 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
     const maxRetries = 3;
     const timeoutMs = 60000; // 60 second timeout
 
+    // Log request details
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const messageCount = Array.isArray(messages) ? messages.length : 0;
+    const firstMessagePreview = messages && messages[0] ? (messages[0].content || '').substring(0, 100) : 'N/A';
+    
+    console.log(`\n📤 [${requestId}] GPT-5 API Request:`);
+    console.log(`   Model: gpt-5`);
+    console.log(`   Max completion tokens: ${maxTokens}`);
+    console.log(`   Messages: ${messageCount}`);
+    console.log(`   First message preview: ${firstMessagePreview}...`);
+    console.log(`   Retry attempt: ${retryCount + 1}/${maxRetries + 1}`);
+
     try {
         // Create AbortController for timeout
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+        const requestBody = {
+            model: 'gpt-5',
+            messages,
+            max_completion_tokens: maxTokens
+        };
+        
+        console.log(`   Request body: ${JSON.stringify(requestBody, null, 2).substring(0, 500)}...`);
+
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+                'Authorization': `Bearer ${process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.substring(0, 10) + '...' : 'MISSING'}`
             },
-            body: JSON.stringify({
-                model: 'gpt-5',
-                messages,
-                max_completion_tokens: maxTokens
-            }),
+            body: JSON.stringify(requestBody),
             signal: controller.signal
         });
 
         clearTimeout(timeoutId);
+        
+        console.log(`\n📥 [${requestId}] GPT-5 API Response:`);
+        console.log(`   Status: ${response.status} ${response.statusText}`);
+        console.log(`   Headers:`, Object.fromEntries(response.headers.entries()));
 
         if (!response.ok) {
             const errorBody = await response.text();
             let errorDetails = '';
             let errorJson = null;
 
+            console.error(`   ❌ [${requestId}] API Error Response Body:`, errorBody.substring(0, 1000));
+
             try {
                 errorJson = JSON.parse(errorBody);
                 errorDetails = JSON.stringify(errorJson, null, 2);
+                console.error(`   ❌ [${requestId}] Parsed Error:`, errorDetails);
             } catch {
                 errorDetails = errorBody;
+                console.error(`   ❌ [${requestId}] Raw Error Body:`, errorBody.substring(0, 500));
             }
 
             // Handle rate limit errors with automatic retry
@@ -88,22 +112,94 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
             throw new Error(`GPT API error: ${response.status} - ${errorDetails}`);
         }
 
-        const data = await response.json();
-        return data.choices[0].message.content.trim();
+        const responseText = await response.text();
+        console.log(`   Response body length: ${responseText.length} chars`);
+        console.log(`   Response body preview: ${responseText.substring(0, 500)}...`);
+        
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (parseError) {
+            console.error(`   ❌ [${requestId}] Failed to parse response as JSON:`, parseError.message);
+            console.error(`   Raw response:`, responseText.substring(0, 1000));
+            throw new Error(`GPT API returned invalid JSON: ${parseError.message}`);
+        }
+        
+        console.log(`   Response structure:`, {
+            hasChoices: !!data.choices,
+            choicesLength: data.choices ? data.choices.length : 0,
+            hasUsage: !!data.usage,
+            model: data.model || 'not provided',
+            id: data.id || 'not provided'
+        });
+        
+        // Log full response structure for debugging
+        console.log(`   Full response:`, JSON.stringify(data, null, 2).substring(0, 2000));
+        
+        // Log response for debugging if empty or invalid
+        if (!data.choices || !data.choices[0]) {
+            console.error(`   ❌ [${requestId}] GPT API returned invalid response structure:`, JSON.stringify(data, null, 2).substring(0, 1000));
+            throw new Error(`GPT API returned invalid response: missing choices[0]`);
+        }
+        
+        if (!data.choices[0].message) {
+            console.error(`   ❌ [${requestId}] GPT API returned invalid response structure:`, JSON.stringify(data, null, 2).substring(0, 1000));
+            throw new Error(`GPT API returned invalid response: missing choices[0].message`);
+        }
+        
+        const message = data.choices[0].message;
+        console.log(`   Message structure:`, {
+            role: message.role,
+            hasContent: !!message.content,
+            contentLength: message.content ? message.content.length : 0,
+            hasToolCalls: !!message.tool_calls,
+            finishReason: data.choices[0].finish_reason
+        });
+        
+        if (!message.content) {
+            console.error(`   ❌ [${requestId}] GPT API returned empty content. Full response:`, JSON.stringify(data, null, 2).substring(0, 2000));
+            console.error(`   Model used: gpt-5`);
+            console.error(`   Usage:`, data.usage ? JSON.stringify(data.usage) : 'not provided');
+            console.error(`   Finish reason:`, data.choices[0].finish_reason);
+            throw new Error(`GPT API returned empty content - model may not exist or may have issues`);
+        }
+        
+        const content = message.content.trim();
+        console.log(`   ✅ [${requestId}] Success! Content length: ${content.length} chars`);
+        console.log(`   Content preview: ${content.substring(0, 200)}...`);
+        
+        if (content.length === 0) {
+            console.warn(`   ⚠️  [${requestId}] GPT API returned empty trimmed content. Raw content length: ${message.content.length}`);
+            console.warn(`   Raw content:`, message.content);
+        }
+        
+        if (data.usage) {
+            console.log(`   Token usage:`, JSON.stringify(data.usage));
+        }
+        
+        return content;
 
     } catch (error) {
+        console.error(`\n❌ [${requestId}] GPT-5 API Call Error:`);
+        console.error(`   Error name: ${error.name}`);
+        console.error(`   Error message: ${error.message}`);
+        console.error(`   Error stack:`, error.stack);
+        
         // Handle timeout/abort errors
         if (error.name === 'AbortError') {
+            console.error(`   ⚠️  Request timed out after ${timeoutMs}ms`);
             throw new Error('GPT API request timed out after 60 seconds');
         }
 
         // If it's a network error and we haven't exceeded retries, retry with exponential backoff
         if (retryCount < maxRetries && (error.message.includes('fetch') || error.message.includes('timeout'))) {
             const waitTime = Math.min(1000 * Math.pow(2, retryCount), 10000); // Cap at 10s
-            console.log(`⏳ Network error. Waiting ${(waitTime/1000).toFixed(1)}s before retry ${retryCount + 1}/${maxRetries}...`);
+            console.log(`   ⏳ [${requestId}] Network error. Waiting ${(waitTime/1000).toFixed(1)}s before retry ${retryCount + 1}/${maxRetries}...`);
             await sleep(waitTime);
             return await callGPT(messages, maxTokens, retryCount + 1);
         }
+        
+        console.error(`   ❌ [${requestId}] Not retrying - max retries exceeded or non-retryable error`);
         throw error;
     }
 }

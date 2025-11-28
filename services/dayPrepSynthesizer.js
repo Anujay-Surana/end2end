@@ -217,12 +217,13 @@ Generate a comprehensive system prompt structure for Shadow's day prep mode.`;
                     'Authorization': `Bearer ${openaiApiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'gpt-5',
+                    model: 'gpt-4o',
+                    temperature: 0.7,
                     messages: [
                         { role: 'system', content: systemPromptForGPT },
                         { role: 'user', content: userPromptForGPT }
                     ],
-                    max_completion_tokens: 1500
+                    max_tokens: 1500
                 })
             });
 
@@ -405,7 +406,8 @@ IMPORTANT: Use the conflicts, themes, key people, and dependencies to create a C
             }
         ], {
             model: 'gpt-4o',
-            max_completion_tokens: 3500 // Increased from 2000 to 3000-4000 range
+            temperature: 0.7,
+            max_tokens: 3500 // Increased from 2000 to 3000-4000 range
         });
 
         const narrative = response.content || response.text || '';

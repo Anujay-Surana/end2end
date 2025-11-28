@@ -252,11 +252,12 @@ class VoiceConversationManager {
                     'Authorization': `Bearer ${this.openaiApiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'gpt-5',
+                    model: 'gpt-4o',
                     messages: messages,
                     tools: tools,
                     tool_choice: 'auto',
-                    max_completion_tokens: 300 // Keep responses concise for voice
+                    temperature: 0.7,
+                    max_tokens: 300 // Keep responses concise for voice
                 }),
                 signal: this.abortController.signal
             });

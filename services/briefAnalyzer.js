@@ -688,7 +688,7 @@ Return ONLY the JSON array, no other text.`,
     /**
      * Helper: Call GPT API
      */
-    async callGPT({ systemPrompt, userPrompt, maxTokens = 2000, responseFormat = 'text' }) {
+    async callGPT({ systemPrompt, userPrompt, maxTokens = 2000, temperature = 0.7, responseFormat = 'text' }) {
         try {
             const messages = [
                 { role: 'system', content: systemPrompt },
@@ -696,9 +696,10 @@ Return ONLY the JSON array, no other text.`,
             ];
 
             const requestBody = {
-                model: 'gpt-5',
+                model: 'gpt-4o',
                 messages,
-                max_completion_tokens: maxTokens
+                temperature,
+                max_tokens: maxTokens
             };
 
             // Add response format if JSON requested
