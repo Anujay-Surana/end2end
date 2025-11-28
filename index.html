@@ -4181,7 +4181,6 @@
                             role: 'user',
                             content: context
                         }],
-                        temperature: 0.7,
                         max_completion_tokens: 200
                     })
                 });
@@ -4364,7 +4363,6 @@ Content: ${email.body || email.snippet}
                             role: 'user',
                             content: `Analyze these email threads:\n\n${emailContext}`
                         }],
-                        temperature: 0.7,
                         max_completion_tokens: 2000
                     })
                 });
@@ -4402,7 +4400,6 @@ Content: ${file.content.substring(0, 15000)}
                             role: 'user',
                             content: `Analyze these documents:\n\n${docContext}`
                         }],
-                        temperature: 0.7,
                         max_completion_tokens: 2500
                     })
                 });
@@ -4441,7 +4438,6 @@ ${wr.results?.map(r => `- ${(r.excerpts?.join(' ') || 'No content').substring(0,
                             role: 'user',
                             content: `Attendees:\n${attendeeList}\n\nWeb Research:\n${webInsights}\n\nEmail history: ${emails.length} emails available\n\nAnalyze the dynamics.`
                         }],
-                        temperature: 0.7,
                         max_completion_tokens: 2000
                     })
                 });
@@ -4471,7 +4467,6 @@ ${wr.results?.map(r => `- ${(r.excerpts?.join(' ') || 'No content').substring(0,
                             role: 'user',
                             content: `Meeting: ${meeting.summary}\n\nBased on all available context (emails, documents, web research), provide strategic recommendations for this meeting.`
                         }],
-                        temperature: 0.7,
                         max_completion_tokens: 2000
                     })
                 });
@@ -4511,7 +4506,6 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                             role: 'user',
                             content: `Attendee Research:\n${attendeeIntel}\n\nCompany Research:\n${companyIntel}\n\nMeeting Context: ${meetingContext.results?.length || 0} results\n\nSynthesize this intelligence.`
                         }],
-                        temperature: 0.7,
                         max_completion_tokens: 3000
                     })
                 });

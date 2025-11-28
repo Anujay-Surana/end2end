@@ -256,7 +256,6 @@ class VoiceConversationManager {
                     messages: messages,
                     tools: tools,
                     tool_choice: 'auto',
-                    temperature: 0.7,
                     max_completion_tokens: 300 // Keep responses concise for voice
                 }),
                 signal: this.abortController.signal
@@ -307,7 +306,6 @@ class VoiceConversationManager {
                         body: JSON.stringify({
                             model: 'gpt-5',
                             messages: finalMessages,
-                            temperature: 0.7,
                             max_completion_tokens: 300
                         }),
                         signal: this.abortController.signal

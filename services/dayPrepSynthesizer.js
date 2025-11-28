@@ -222,7 +222,6 @@ Generate a comprehensive system prompt structure for Shadow's day prep mode.`;
                         { role: 'system', content: systemPromptForGPT },
                         { role: 'user', content: userPromptForGPT }
                     ],
-                    temperature: 0.7,
                     max_completion_tokens: 1500
                 })
             });
@@ -406,7 +405,6 @@ IMPORTANT: Use the conflicts, themes, key people, and dependencies to create a C
             }
         ], {
             model: 'gpt-4o',
-            temperature: 0.7,
             max_completion_tokens: 3500 // Increased from 2000 to 3000-4000 range
         });
 

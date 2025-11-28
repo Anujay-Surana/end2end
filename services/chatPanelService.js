@@ -41,7 +41,6 @@ class ChatPanelService {
                     model: 'gpt-5',
                     messages: messages,
                     max_completion_tokens: 500,
-                    temperature: 0.7
                 })
             });
 
@@ -124,7 +123,6 @@ class ChatPanelService {
                         }
                     ],
                     max_completion_tokens: 200,
-                    temperature: 0.7
                 })
             });
 

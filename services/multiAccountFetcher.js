@@ -49,11 +49,12 @@ async function fetchEmailsFromAllAccounts(accounts, attendees, meeting) {
     meetingCutoff.setHours(23, 59, 59, 999);
     const beforeDate = meetingCutoff.toISOString().split('T')[0].replace(/-/g, '/');
     
-    // CRITICAL: 2-YEAR lookback (not 6 months) - working relationships span years
-    const twoYearsAgo = new Date();
+    // CRITICAL: 2-YEAR lookback FROM MEETING DATE (not from today) - working relationships span years
+    // This ensures that for meetings 2 years ago, we fetch data from 2 years before that meeting
+    const twoYearsAgo = new Date(meetingDate);
     twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
     const afterDate = twoYearsAgo.toISOString().split('T')[0].replace(/-/g, '/');
-    console.log(`   📅 Searching emails from past 2 years (since ${afterDate}) BEFORE meeting date (${beforeDate})`);
+    console.log(`   📅 Searching emails from 2 years before meeting (since ${afterDate}) BEFORE meeting date (${beforeDate})`);
 
     const results = await Promise.allSettled(
         accounts.map(async (account) => {
@@ -217,11 +218,12 @@ async function fetchFilesFromAllAccounts(accounts, attendees, meeting) {
     const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
     const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
     
-    // 2-year lookback for files too, with upper bound at meeting date
-    const twoYearsAgo = new Date();
+    // 2-year lookback FROM MEETING DATE for files too, with upper bound at meeting date
+    // This ensures that for meetings 2 years ago, we fetch files from 2 years before that meeting
+    const twoYearsAgo = new Date(meetingDate);
     twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
     const timeFilter = `and modifiedTime > '${twoYearsAgo.toISOString()}' and modifiedTime < '${meetingDate.toISOString()}'`;
-    console.log(`   📅 Searching files modified between ${twoYearsAgo.toISOString().split('T')[0]} and ${meetingDate.toISOString().split('T')[0]} (before meeting)`);
+    console.log(`   📅 Searching files modified between ${twoYearsAgo.toISOString().split('T')[0]} and ${meetingDate.toISOString().split('T')[0]} (2 years before meeting)`);
 
     const results = await Promise.allSettled(
         accounts.map(async (account) => {
@@ -526,12 +528,13 @@ async function fetchCalendarFromAllAccounts(accounts, attendees, meeting) {
     const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
     const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
     
-    // Search for past meetings with these attendees (last 6 months, but before meeting date)
-    const sixMonthsAgo = new Date();
+    // Search for past meetings with these attendees (6 months FROM MEETING DATE, but before meeting date)
+    // This ensures that for meetings 2 years ago, we fetch calendar events from 6 months before that meeting
+    const sixMonthsAgo = new Date(meetingDate);
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const timeMin = sixMonthsAgo.toISOString();
     const timeMax = meetingDate.toISOString(); // Use meeting date instead of current time
-    console.log(`   📅 Searching calendar events from ${sixMonthsAgo.toISOString().split('T')[0]} to ${meetingDate.toISOString().split('T')[0]} (before meeting)`);
+    console.log(`   📅 Searching calendar events from ${sixMonthsAgo.toISOString().split('T')[0]} to ${meetingDate.toISOString().split('T')[0]} (6 months before meeting)`);
 
     const results = await Promise.allSettled(
         accounts.map(async (account) => {

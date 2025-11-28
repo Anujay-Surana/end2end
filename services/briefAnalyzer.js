@@ -257,7 +257,6 @@ ${attendeeContext.documentContext}
 
 Extract 3-5 key facts as a JSON array of strings.`,
                             maxTokens: 500, // Restored from 300 to 500 tokens for higher quality
-                            temperature: 0.7,
                             responseFormat: 'json_array'
                         });
 
@@ -458,8 +457,8 @@ Email History: ${emails?.length || 0} emails
 Calendar History: ${calendarEvents?.length || 0} past meetings
 
 Analyze the relationship dynamics.`,
-                maxTokens: 1000, // Reduced from 2000 to 1000 tokens
-                temperature: 0.7            });
+                maxTokens: 1000 // Reduced from 2000 to 1000 tokens
+            });
 
             console.log(`   ✅ Relationship analysis complete`);
             return analysis;
@@ -545,8 +544,7 @@ Context Analysis:
 - Relationship Analysis: ${(analyses.relationshipAnalysis || '').substring(0, 300)} // Reduced from 500
 
 Generate a powerful 2-3 sentence executive summary.`,
-                maxTokens: 200, // Reduced from 300 to 200 tokens
-                temperature: 0.7
+                maxTokens: 200 // Reduced from 300 to 200 tokens
             });
 
             console.log(`   ✅ Summary generated`);
@@ -690,7 +688,7 @@ Return ONLY the JSON array, no other text.`,
     /**
      * Helper: Call GPT API
      */
-    async callGPT({ systemPrompt, userPrompt, maxTokens = 2000, temperature = 0.7, responseFormat = 'text' }) {
+    async callGPT({ systemPrompt, userPrompt, maxTokens = 2000, responseFormat = 'text' }) {
         try {
             const messages = [
                 { role: 'system', content: systemPrompt },
@@ -700,7 +698,6 @@ Return ONLY the JSON array, no other text.`,
             const requestBody = {
                 model: 'gpt-5',
                 messages,
-                temperature,
                 max_completion_tokens: maxTokens
             };
 
@@ -1066,7 +1063,6 @@ Return a well-structured summary (2-3 sentences per company) that provides actio
                 systemPrompt: 'Generate EXACTLY 3 highly specific web search queries that will find the most relevant and recent information. Return ONLY a JSON array of query strings, nothing else. Format: {"queries": ["query1", "query2", "query3"]}',
                 userPrompt: context,
                 maxTokens: 200,
-                temperature: 0.7,
                 responseFormat: 'json_array'
             });
 
@@ -1101,8 +1097,7 @@ Rules:
 5. Focus on recent activities, achievements, roles, and specific expertise
 6. Return information that would be genuinely useful in a business meeting context`,
                 userPrompt: `${prompt}\n\nData:\n${typeof data === 'string' ? data.substring(0, 12000) : JSON.stringify(data).substring(0, 12000)}`,
-                maxTokens,
-                temperature: 0.7
+                maxTokens
             });
 
             return result;

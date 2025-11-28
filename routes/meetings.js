@@ -335,8 +335,9 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                 const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
                 const beforeDate = meetingDate.toISOString().split('T')[0].replace(/-/g, '/');
 
-                // Fetch from 2 years back, but before meeting date
-                const twoYearsAgo = new Date();
+                // Fetch from 2 years back FROM MEETING DATE (not from today), but before meeting date
+                // This ensures that for meetings 2 years ago, we fetch data from 2 years before that meeting
+                const twoYearsAgo = new Date(meetingDate);
                 twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
                 const afterDate = twoYearsAgo.toISOString().split('T')[0].replace(/-/g, '/');
 
