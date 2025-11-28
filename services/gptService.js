@@ -1,7 +1,7 @@
 /**
  * GPT Service
  *
- * Centralized OpenAI GPT-5 API client with retry logic and helper functions
+ * Centralized OpenAI GPT-4.1-mini API client with retry logic and helper functions
  */
 
 const fetch = require('node-fetch');
@@ -14,13 +14,13 @@ function sleep(ms) {
 }
 
 /**
- * Call OpenAI GPT-5 for analysis with automatic retry on rate limits
+ * Call OpenAI GPT-4.1-mini for analysis with automatic retry on rate limits
  * @param {Array} messages - Array of message objects with role and content
- * @param {number} maxTokens - Maximum tokens to generate (default: 4000 - GPT-5 can use up to 2000 tokens just in reasoning)
+ * @param {number} maxTokens - Maximum tokens to generate (default: 4000)
  * @param {number} retryCount - Current retry attempt (internal use)
  * @returns {Promise<string>} - GPT response content
  */
-async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
+async function callGPT(messages, maxTokens = 2000, retryCount = 0) {
     const maxRetries = 3;
     const timeoutMs = 60000; // 60 second timeout
 
@@ -29,8 +29,8 @@ async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
     const messageCount = Array.isArray(messages) ? messages.length : 0;
     const firstMessagePreview = messages && messages[0] ? (messages[0].content || '').substring(0, 100) : 'N/A';
     
-    console.log(`\n📤 [${requestId}] GPT-5 API Request:`);
-    console.log(`   Model: gpt-5`);
+    console.log(`\n📤 [${requestId}] GPT-4.1-mini API Request:`);
+    console.log(`   Model: gpt-4.1-mini`);
     console.log(`   Max completion tokens: ${maxTokens}`);
     console.log(`   Messages: ${messageCount}`);
     console.log(`   First message preview: ${firstMessagePreview}...`);
@@ -42,9 +42,9 @@ async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
         const requestBody = {
-            model: 'gpt-5',
+            model: 'gpt-4.1-mini',
             messages,
-            max_completion_tokens: maxTokens
+            max_tokens: maxTokens
         };
         
         const apiKey = process.env.OPENAI_API_KEY;
@@ -70,7 +70,7 @@ async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
 
         clearTimeout(timeoutId);
         
-        console.log(`\n📥 [${requestId}] GPT-5 API Response:`);
+        console.log(`\n📥 [${requestId}] GPT-4.1-mini API Response:`);
         console.log(`   Status: ${response.status} ${response.statusText}`);
         console.log(`   Headers:`, Object.fromEntries(response.headers.entries()));
 
@@ -159,7 +159,7 @@ async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
         const message = data.choices[0].message;
         const finishReason = data.choices[0].finish_reason;
         
-        // Check for refusal field (GPT-5 may use this)
+        // Check for refusal field
         const refusal = message.refusal || null;
         
         console.log(`   Message structure:`, {
@@ -178,7 +178,7 @@ async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
             if (finishReason === 'content_filter') {
                 console.warn(`   ⚠️  Content was filtered by OpenAI's safety system - response may be incomplete`);
             } else if (finishReason === 'length') {
-                console.warn(`   ⚠️  Response was truncated due to max_completion_tokens limit (${maxTokens} tokens)`);
+                console.warn(`   ⚠️  Response was truncated due to max_tokens limit (${maxTokens} tokens)`);
             } else if (finishReason === 'tool_calls') {
                 console.log(`   ℹ️  Response contains tool calls (function calling)`);
             }
@@ -186,37 +186,36 @@ async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
         
         // Handle refusal case
         if (refusal) {
-            console.error(`   ❌ [${requestId}] GPT-5 refused to generate content. Refusal:`, JSON.stringify(refusal, null, 2));
-            console.error(`   Model used: gpt-5`);
+            console.error(`   ❌ [${requestId}] GPT-4.1-mini refused to generate content. Refusal:`, JSON.stringify(refusal, null, 2));
+            console.error(`   Model used: gpt-4.1-mini`);
             console.error(`   Usage:`, data.usage ? JSON.stringify(data.usage) : 'not provided');
             console.error(`   Finish reason: ${finishReason}`);
-            throw new Error(`GPT-5 refused to generate content: ${JSON.stringify(refusal)}`);
+            throw new Error(`GPT-4.1-mini refused to generate content: ${JSON.stringify(refusal)}`);
         }
         
         // Handle empty content (even if refusal is null)
         if (!message.content || (typeof message.content === 'string' && message.content.trim().length === 0)) {
             // Special handling for "length" finish_reason with empty content
-            // GPT-5 may return empty content when hitting token limit if response would be too long
+            // GPT-4.1-mini may return empty content when hitting token limit if response would be too long
             if (finishReason === 'length' && data.usage?.completion_tokens >= maxTokens * 0.95) {
-                console.error(`   ❌ [${requestId}] GPT-5 hit token limit (${data.usage.completion_tokens}/${maxTokens}) and returned empty content`);
-                console.error(`   This suggests the response would exceed the limit. Consider increasing max_completion_tokens.`);
-                console.error(`   Model used: gpt-5`);
+                console.error(`   ❌ [${requestId}] GPT-4.1-mini hit token limit (${data.usage.completion_tokens}/${maxTokens}) and returned empty content`);
+                console.error(`   This suggests the response would exceed the limit. Consider increasing max_tokens.`);
+                console.error(`   Model used: gpt-4.1-mini`);
                 console.error(`   Usage:`, JSON.stringify(data.usage));
                 console.error(`   Finish reason: ${finishReason}`);
                 
                 // Retry with higher token limit if we haven't exceeded retries
-                // GPT-5 can use up to 2000 tokens just in reasoning, so we need higher limits
                 if (retryCount < maxRetries && maxTokens < 8000) {
                     const newMaxTokens = Math.min(maxTokens * 2, 8000);
                     console.log(`   🔄 [${requestId}] Retrying with increased token limit: ${maxTokens} → ${newMaxTokens}`);
                     return await callGPT(messages, newMaxTokens, retryCount + 1);
                 }
                 
-                throw new Error(`GPT-5 returned empty content due to token limit (${data.usage.completion_tokens}/${maxTokens}). GPT-5 can use up to 2000 tokens just in reasoning - try increasing max_completion_tokens.`);
+                throw new Error(`GPT-4.1-mini returned empty content due to token limit (${data.usage.completion_tokens}/${maxTokens}). Try increasing max_tokens.`);
             }
             
-            console.error(`   ❌ [${requestId}] GPT-5 returned empty content. Full response:`, JSON.stringify(data, null, 2).substring(0, 2000));
-            console.error(`   Model used: gpt-5`);
+            console.error(`   ❌ [${requestId}] GPT-4.1-mini returned empty content. Full response:`, JSON.stringify(data, null, 2).substring(0, 2000));
+            console.error(`   Model used: gpt-4.1-mini`);
             console.error(`   Usage:`, data.usage ? JSON.stringify(data.usage) : 'not provided');
             console.error(`   Finish reason: ${finishReason}`);
             console.error(`   Refusal:`, refusal || 'null');
@@ -227,7 +226,7 @@ async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
                 console.error(`   Annotations details:`, JSON.stringify(message.annotations, null, 2));
             }
             
-            throw new Error(`GPT-5 returned empty content - check finish_reason (${finishReason}), refusal, and annotations for details`);
+            throw new Error(`GPT-4.1-mini returned empty content - check finish_reason (${finishReason}), refusal, and annotations for details`);
         }
         
         const content = message.content.trim();
@@ -259,7 +258,7 @@ async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
         return content;
 
     } catch (error) {
-        console.error(`\n❌ [${requestId}] GPT-5 API Call Error:`);
+        console.error(`\n❌ [${requestId}] GPT-4.1-mini API Call Error:`);
         console.error(`   Error name: ${error.name}`);
         console.error(`   Error message: ${error.message}`);
         console.error(`   Error stack:`, error.stack);
@@ -287,10 +286,10 @@ async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
  * Synthesize results with strict fact-checking
  * @param {string} prompt - The synthesis prompt
  * @param {Object} data - Data to synthesize
- * @param {number} maxTokens - Maximum tokens (default: 4000 - GPT-5 can use up to 2000 tokens just in reasoning)
+ * @param {number} maxTokens - Maximum tokens (default: 4000)
  * @returns {Promise<string|null>} - Synthesized result or null on error
  */
-async function synthesizeResults(prompt, data, maxTokens = 4000) {
+async function synthesizeResults(prompt, data, maxTokens = 2000) {
     try {
         const result = await callGPT([{
             role: 'system',

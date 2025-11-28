@@ -443,13 +443,13 @@ Generate a comprehensive system prompt structure that Shadow can use to deliver 
                 'Authorization': `Bearer ${this.openaiApiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-5',
+                model: 'gpt-4.1-mini',
                 temperature: 0.7,
                 messages: [
                     { role: 'system', content: systemPromptForGPT },
                     { role: 'user', content: userPrompt }
                 ],
-                max_completion_tokens: 4000
+                max_tokens: 2000
             })
         });
 
@@ -1052,13 +1052,13 @@ Generate a comprehensive system prompt structure for Shadow's day prep mode that
                 'Authorization': `Bearer ${this.openaiApiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-5',
+                model: 'gpt-4.1-mini',
                 temperature: 0.7,
                 messages: [
                     { role: 'system', content: systemPromptForGPT },
                     { role: 'user', content: userPrompt }
                 ],
-                max_completion_tokens: 4000
+                max_tokens: 2000
             })
         });
 

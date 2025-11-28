@@ -4173,7 +4173,7 @@
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-5',
+                        model: 'gpt-4.1-mini',
                         messages: [{
                             role: 'system',
                             content: 'You are a search query optimization expert. Generate EXACTLY 3 highly specific, effective web search queries that will find the most relevant and recent information. Return ONLY a JSON array of 3 query strings, no other text. Example: ["query 1", "query 2", "query 3"]'
@@ -4181,7 +4181,7 @@
                             role: 'user',
                             content: context
                         }],
-                        max_completion_tokens: 200
+                        max_tokens: 200
                     })
                 });
 
@@ -4355,7 +4355,7 @@ Content: ${email.body || email.snippet}
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-5',
+                        model: 'gpt-4.1-mini',
                         messages: [{
                             role: 'system',
                             content: 'Analyze email threads and extract: key themes, pending issues, relationship dynamics, important quotes, and sentiment patterns. Be specific and cite emails.'
@@ -4363,7 +4363,7 @@ Content: ${email.body || email.snippet}
                             role: 'user',
                             content: `Analyze these email threads:\n\n${emailContext}`
                         }],
-                        max_completion_tokens: 4000
+                        max_tokens: 1000
                     })
                 });
 
@@ -4392,7 +4392,7 @@ Content: ${file.content.substring(0, 15000)}
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-5',
+                        model: 'gpt-4.1-mini',
                         messages: [{
                             role: 'system',
                             content: 'Deeply analyze documents and extract: key insights, decisions made, action items, data points, concerns raised, and proposals. Be specific and quote relevant sections.'
@@ -4400,7 +4400,7 @@ Content: ${file.content.substring(0, 15000)}
                             role: 'user',
                             content: `Analyze these documents:\n\n${docContext}`
                         }],
-                        max_completion_tokens: 2500
+                        max_tokens: 1250
                     })
                 });
 
@@ -4430,7 +4430,7 @@ ${wr.results?.map(r => `- ${(r.excerpts?.join(' ') || 'No content').substring(0,
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-5',
+                        model: 'gpt-4.1-mini',
                         messages: [{
                             role: 'system',
                             content: 'Analyze attendee relationships, power dynamics, likely positions, and strategic insights. Identify decision makers, influencers, and potential allies/concerns.'
@@ -4438,7 +4438,7 @@ ${wr.results?.map(r => `- ${(r.excerpts?.join(' ') || 'No content').substring(0,
                             role: 'user',
                             content: `Attendees:\n${attendeeList}\n\nWeb Research:\n${webInsights}\n\nEmail history: ${emails.length} emails available\n\nAnalyze the dynamics.`
                         }],
-                        max_completion_tokens: 2000
+                        max_tokens: 1000
                     })
                 });
 
@@ -4459,7 +4459,7 @@ ${wr.results?.map(r => `- ${(r.excerpts?.join(' ') || 'No content').substring(0,
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-5',
+                        model: 'gpt-4.1-mini',
                         messages: [{
                             role: 'system',
                             content: 'Generate strategic recommendations including: key talking points, questions to ask, positions to take, risks to mitigate, and opportunities to seize. Be specific and actionable.'
@@ -4467,7 +4467,7 @@ ${wr.results?.map(r => `- ${(r.excerpts?.join(' ') || 'No content').substring(0,
                             role: 'user',
                             content: `Meeting: ${meeting.summary}\n\nBased on all available context (emails, documents, web research), provide strategic recommendations for this meeting.`
                         }],
-                        max_completion_tokens: 2000
+                        max_tokens: 1000
                     })
                 });
 
@@ -4498,7 +4498,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-5',
+                        model: 'gpt-4.1-mini',
                         messages: [{
                             role: 'system',
                             content: 'Synthesize web research into actionable intelligence: attendee backgrounds, company news, industry context, and strategic implications. Include source citations.'
@@ -4506,7 +4506,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                             role: 'user',
                             content: `Attendee Research:\n${attendeeIntel}\n\nCompany Research:\n${companyIntel}\n\nMeeting Context: ${meetingContext.results?.length || 0} results\n\nSynthesize this intelligence.`
                         }],
-                        max_completion_tokens: 3000
+                        max_tokens: 1500
                     })
                 });
 

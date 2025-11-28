@@ -688,7 +688,7 @@ Return ONLY the JSON array, no other text.`,
     /**
      * Helper: Call GPT API
      */
-    async callGPT({ systemPrompt, userPrompt, maxTokens = 4000, temperature = 0.7, responseFormat = 'text' }) {
+    async callGPT({ systemPrompt, userPrompt, maxTokens = 2000, temperature = 0.7, responseFormat = 'text' }) {
         try {
             const messages = [
                 { role: 'system', content: systemPrompt },
@@ -696,10 +696,10 @@ Return ONLY the JSON array, no other text.`,
             ];
 
             const requestBody = {
-                model: 'gpt-5',
+                model: 'gpt-4.1-mini',
                 messages,
                 temperature,
-                max_completion_tokens: maxTokens
+                max_tokens: maxTokens
             };
 
             // Add response format if JSON requested
@@ -1085,7 +1085,7 @@ Return a well-structured summary (2-3 sentences per company) that provides actio
     /**
      * ORIGINAL HELPER: Synthesize results with strict fact-checking
      */
-    async synthesizeResults(prompt, data, maxTokens = 4000) {
+    async synthesizeResults(prompt, data, maxTokens = 2000) {
         try {
             const result = await this.callGPT({
                 systemPrompt: `You are an executive briefing expert. Extract meaningful, verified information from the provided data.

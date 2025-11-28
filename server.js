@@ -2103,7 +2103,7 @@ async function analyzeTranscript(buffer, context, ws, recentSuggestionHashes) {
                 'Authorization': `Bearer ${OPENAI_API_KEY}`
             },
             body: JSON.stringify({
-                model: 'gpt-5',
+                model: 'gpt-4.1-mini',
                 temperature: 0.7,
                 messages: [{
                     role: 'system',
@@ -2157,7 +2157,7 @@ DEFAULT: Return {"suggestions": []} unless you have CRITICAL information.`
                     role: 'user',
                     content: `Recent conversation:\n${recentText}\n\nUser statements to analyze: ${userStatements || 'None yet'}`
                 }],
-                max_tokens: 400,
+                max_tokens: 250,
                 stream: false
             })
         });
@@ -2340,12 +2340,12 @@ Guidelines:
                 'Authorization': `Bearer ${OPENAI_API_KEY}`
             },
             body: JSON.stringify({
-                model: 'gpt-5',
+                model: 'gpt-4.1-mini',
                 temperature: 0.7,
                 messages: messages,
                 tools: tools,
                 tool_choice: 'auto',
-                max_tokens: 500
+                max_tokens: 300
             })
         });
 
@@ -2391,7 +2391,7 @@ Guidelines:
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-5',
+                        model: 'gpt-4.1-mini',
                 temperature: 0.7,
                         messages: [
                             ...messages,
@@ -2402,7 +2402,7 @@ Guidelines:
                                 content: searchSummary
                             }
                         ],
-                        max_tokens: 500
+                        max_tokens: 300
                     })
                 });
 

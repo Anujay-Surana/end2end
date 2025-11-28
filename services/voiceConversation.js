@@ -252,7 +252,7 @@ class VoiceConversationManager {
                     'Authorization': `Bearer ${this.openaiApiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'gpt-5',
+                    model: 'gpt-4.1-mini',
                     messages: messages,
                     tools: tools,
                     tool_choice: 'auto',
@@ -305,9 +305,9 @@ class VoiceConversationManager {
                             'Authorization': `Bearer ${this.openaiApiKey}`
                         },
                         body: JSON.stringify({
-                            model: 'gpt-5',
+                            model: 'gpt-4.1-mini',
                             messages: finalMessages,
-                            max_completion_tokens: 300
+                            max_tokens: 300
                         }),
                         signal: this.abortController.signal
                     });

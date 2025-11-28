@@ -17,7 +17,7 @@ const { callGPT, safeParseJSON } = require('./gptService');
  */
 async function chainOfThoughtAnalysis(task, data, options = {}) {
     const {
-        model = 'gpt-5',
+        model = 'gpt-4.1-mini',
         temperature = 0.7,
         requireConfidence = true,
         allowSelfCritique = true
