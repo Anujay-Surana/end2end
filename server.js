@@ -2343,7 +2343,6 @@ Guidelines:
                 messages: messages,
                 tools: tools,
                 tool_choice: 'auto',
-,
                 max_completion_tokens: 500
             })
         });
@@ -2400,7 +2399,6 @@ Guidelines:
                                 content: searchSummary
                             }
                         ],
-,
                         max_completion_tokens: 500
                     })
                 });
