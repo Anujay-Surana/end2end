@@ -2157,7 +2157,7 @@ DEFAULT: Return {"suggestions": []} unless you have CRITICAL information.`
                     content: `Recent conversation:\n${recentText}\n\nUser statements to analyze: ${userStatements || 'None yet'}`
                 }],
                 temperature: 0.3,
-                max_tokens: 400,
+                max_completion_tokens: 400,
                 stream: false
             })
         });
@@ -2345,7 +2345,7 @@ Guidelines:
                 tools: tools,
                 tool_choice: 'auto',
                 temperature: 0.7,
-                max_tokens: 500
+                max_completion_tokens: 500
             })
         });
 
@@ -2402,7 +2402,7 @@ Guidelines:
                             }
                         ],
                         temperature: 0.7,
-                        max_tokens: 500
+                        max_completion_tokens: 500
                     })
                 });
 

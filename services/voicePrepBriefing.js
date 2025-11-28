@@ -449,7 +449,7 @@ Generate a comprehensive system prompt structure that Shadow can use to deliver 
                     { role: 'user', content: userPrompt }
                 ],
                 temperature: 0.7,
-                max_tokens: 1500
+                max_completion_tokens: 1500
             })
         });
 
@@ -1058,7 +1058,7 @@ Generate a comprehensive system prompt structure for Shadow's day prep mode that
                     { role: 'user', content: userPrompt }
                 ],
                 temperature: 0.7,
-                max_tokens: 1500
+                max_completion_tokens: 1500
             })
         });
 

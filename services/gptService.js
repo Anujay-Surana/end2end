@@ -39,7 +39,7 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
                 model: 'gpt-5',
                 messages,
                 temperature: 0.7,
-                max_tokens: maxTokens
+                max_completion_tokens: maxTokens
             }),
             signal: controller.signal
         });

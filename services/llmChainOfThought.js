@@ -47,7 +47,7 @@ REASONING FOR CONFIDENCE: [Why are you confident/uncertain?]`
         content: typeof data === 'string' ? data : JSON.stringify(data, null, 2)
     }];
     
-    const initialAnalysis = await callGPT(reasoningPrompt, { model, temperature, max_tokens: 2000 });
+    const initialAnalysis = await callGPT(reasoningPrompt, 2000);
     
     // Extract sections
     const reasoning = extractSection(initialAnalysis, 'REASONING:', 'ANALYSIS:');
@@ -84,7 +84,7 @@ Format as JSON:
 }`
         }];
         
-        const critiqueResponse = await callGPT(critiquePrompt, { model, temperature: 0.3, max_tokens: 1000 });
+        const critiqueResponse = await callGPT(critiquePrompt, 1000);
         
         try {
             critique = safeParseJSON(critiqueResponse);

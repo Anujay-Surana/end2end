@@ -701,7 +701,7 @@ Return ONLY the JSON array, no other text.`,
                 model: 'gpt-5',
                 messages,
                 temperature,
-                max_tokens: maxTokens
+                max_completion_tokens: maxTokens
             };
 
             // Add response format if JSON requested

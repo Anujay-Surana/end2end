@@ -40,7 +40,7 @@ class ChatPanelService {
                 body: JSON.stringify({
                     model: 'gpt-5',
                     messages: messages,
-                    max_tokens: 500,
+                    max_completion_tokens: 500,
                     temperature: 0.7
                 })
             });
@@ -123,7 +123,7 @@ class ChatPanelService {
                             content: `Generate a quick update about today's meetings:\n\n${meetingList}`
                         }
                     ],
-                    max_tokens: 200,
+                    max_completion_tokens: 200,
                     temperature: 0.7
                 })
             });
