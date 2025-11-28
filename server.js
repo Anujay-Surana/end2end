@@ -2103,7 +2103,7 @@ async function analyzeTranscript(buffer, context, ws, recentSuggestionHashes) {
                 'Authorization': `Bearer ${OPENAI_API_KEY}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: 'gpt-5',
                 messages: [{
                     role: 'system',
                     content: `You are a real-time meeting assistant. Your job is to provide CRITICAL, HIGH-VALUE suggestions ONLY when absolutely necessary.
@@ -2340,7 +2340,7 @@ Guidelines:
                 'Authorization': `Bearer ${OPENAI_API_KEY}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: 'gpt-5',
                 messages: messages,
                 tools: tools,
                 tool_choice: 'auto',
@@ -2391,7 +2391,7 @@ Guidelines:
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',
+                        model: 'gpt-5',
                         messages: [
                             ...messages,
                             assistantMessage,

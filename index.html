@@ -4173,7 +4173,7 @@
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',
+                        model: 'gpt-5',
                         messages: [{
                             role: 'system',
                             content: 'You are a search query optimization expert. Generate EXACTLY 3 highly specific, effective web search queries that will find the most relevant and recent information. Return ONLY a JSON array of 3 query strings, no other text. Example: ["query 1", "query 2", "query 3"]'
@@ -4356,7 +4356,7 @@ Content: ${email.body || email.snippet}
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',
+                        model: 'gpt-5',
                         messages: [{
                             role: 'system',
                             content: 'Analyze email threads and extract: key themes, pending issues, relationship dynamics, important quotes, and sentiment patterns. Be specific and cite emails.'
@@ -4394,7 +4394,7 @@ Content: ${file.content.substring(0, 15000)}
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',
+                        model: 'gpt-5',
                         messages: [{
                             role: 'system',
                             content: 'Deeply analyze documents and extract: key insights, decisions made, action items, data points, concerns raised, and proposals. Be specific and quote relevant sections.'
@@ -4433,7 +4433,7 @@ ${wr.results?.map(r => `- ${(r.excerpts?.join(' ') || 'No content').substring(0,
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',
+                        model: 'gpt-5',
                         messages: [{
                             role: 'system',
                             content: 'Analyze attendee relationships, power dynamics, likely positions, and strategic insights. Identify decision makers, influencers, and potential allies/concerns.'
@@ -4463,7 +4463,7 @@ ${wr.results?.map(r => `- ${(r.excerpts?.join(' ') || 'No content').substring(0,
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',
+                        model: 'gpt-5',
                         messages: [{
                             role: 'system',
                             content: 'Generate strategic recommendations including: key talking points, questions to ask, positions to take, risks to mitigate, and opportunities to seize. Be specific and actionable.'
@@ -4503,7 +4503,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',
+                        model: 'gpt-5',
                         messages: [{
                             role: 'system',
                             content: 'Synthesize web research into actionable intelligence: attendee backgrounds, company news, industry context, and strategic implications. Include source citations.'

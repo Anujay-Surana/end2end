@@ -1,7 +1,7 @@
 /**
  * GPT Service
  *
- * Centralized OpenAI GPT-4o API client with retry logic and helper functions
+ * Centralized OpenAI GPT-5 API client with retry logic and helper functions
  */
 
 const fetch = require('node-fetch');
@@ -14,7 +14,7 @@ function sleep(ms) {
 }
 
 /**
- * Call OpenAI GPT-4o for analysis with automatic retry on rate limits
+ * Call OpenAI GPT-5 for analysis with automatic retry on rate limits
  * @param {Array} messages - Array of message objects with role and content
  * @param {number} maxTokens - Maximum tokens to generate (default: 1000)
  * @param {number} retryCount - Current retry attempt (internal use)
@@ -36,7 +36,7 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
                 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: 'gpt-5',
                 messages,
                 temperature: 0.7,
                 max_tokens: maxTokens
