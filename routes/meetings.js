@@ -31,9 +31,9 @@ async function understandMeetingContext(meeting, attendees, userContext) {
     const meetingTitle = meeting.summary || meeting.title || 'Untitled Meeting';
     const meetingDescription = meeting.description || '';
     
-    // Extract attendee names and emails
+    // Extract attendee names and emails (prioritize displayName from Calendar API)
     const attendeeInfo = (attendees || []).map(a => ({
-        name: a.name || a.displayName || a.email || a.emailAddress || 'Unknown',
+        name: a.displayName || a.name || a.email?.split('@')[0] || a.emailAddress?.split('@')[0] || 'Unknown',
         email: a.email || a.emailAddress || null
     }));
     
@@ -417,7 +417,26 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                 }
 
                 const domain = attendeeEmail.split('@')[1];
-                const company = domain.split('.')[0];
+                
+                // Check if domain is educational or generic (don't infer company from these)
+                const isEducationalDomain = domain && (
+                    domain.endsWith('.edu') || 
+                    domain.endsWith('.ac.uk') || 
+                    domain.endsWith('.edu.au') ||
+                    domain.endsWith('.ac.za') ||
+                    domain.includes('.edu.')
+                );
+                const isGenericDomain = domain && (
+                    domain === 'gmail.com' || 
+                    domain === 'yahoo.com' || 
+                    domain === 'outlook.com' ||
+                    domain === 'hotmail.com' ||
+                    domain === 'icloud.com' ||
+                    domain === 'protonmail.com'
+                );
+                
+                // Only infer company from corporate domains
+                const company = (!isEducationalDomain && !isGenericDomain) ? domain.split('.')[0] : null;
 
                 // Skip resource calendars
                 if (attendeeEmail.includes('@resource.calendar.google.com')) {
@@ -425,11 +444,19 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                     return null;
                 }
 
-                let name = att.displayName || attendeeEmail.split('@')[0];
+                // Prioritize displayName from Calendar API, then name, then email prefix
+                let name = att.displayName || att.name || attendeeEmail.split('@')[0];
+                if (att.displayName) {
+                    console.log(`  📛 Using Calendar display name: "${att.displayName}"`);
+                } else if (att.name) {
+                    console.log(`  📛 Using Calendar name: "${att.name}"`);
+                } else {
+                    console.log(`  ⚠️  No display name found, using email prefix: "${name}"`);
+                }
                 console.log(`  🔍 Researching: ${name} (${attendeeEmail})`);
 
                 let keyFacts = [];
-                let title = company;
+                let title = company || (isEducationalDomain ? 'Student' : null) || 'Unknown';
                 let source = 'local';
 
                 // Extract full name from email headers if needed
@@ -479,9 +506,25 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                     // Fallback: Extract basic info from emails even if synthesis fails
                     const fallbackFacts = [];
                     if (emailDataForSynthesis.length > 0) {
-                        // Extract company from email domain
+                        // Extract company from email domain (only for corporate domains, not educational/generic)
                         const emailDomain = attendeeEmail.split('@')[1];
-                        if (emailDomain && emailDomain !== 'gmail.com' && emailDomain !== 'yahoo.com' && emailDomain !== 'outlook.com') {
+                        const isEduDomain = emailDomain && (
+                            emailDomain.endsWith('.edu') || 
+                            emailDomain.endsWith('.ac.uk') || 
+                            emailDomain.endsWith('.edu.au') ||
+                            emailDomain.endsWith('.ac.za') ||
+                            emailDomain.includes('.edu.')
+                        );
+                        const isGenDomain = emailDomain && (
+                            emailDomain === 'gmail.com' || 
+                            emailDomain === 'yahoo.com' || 
+                            emailDomain === 'outlook.com' ||
+                            emailDomain === 'hotmail.com' ||
+                            emailDomain === 'icloud.com' ||
+                            emailDomain === 'protonmail.com'
+                        );
+                        
+                        if (emailDomain && !isEduDomain && !isGenDomain) {
                             const companyName = emailDomain.split('.')[0];
                             fallbackFacts.push(`Works at ${companyName.charAt(0).toUpperCase() + companyName.slice(1)}`);
                         }
@@ -615,12 +658,12 @@ If emails are very limited, extract at least: their role/company, frequency of c
                     try {
                         const queries = [
                             `"${name}" site:linkedin.com ${domain}`,
-                            `"${name}" ${company} site:linkedin.com`,
+                            ...(company ? [`"${name}" ${company} site:linkedin.com`] : []),
                             `"${name}" "${attendeeEmail}"`
                         ];
 
                         const searchResult = await req.parallelClient.beta.search({
-                            objective: `Find LinkedIn profile and professional info for ${name} who works at ${company} (${attendeeEmail})`,
+                            objective: `Find LinkedIn profile and professional info for ${name}${company ? ` who works at ${company}` : ''} (${attendeeEmail})`,
                             search_queries: queries,
                             mode: 'one-shot',
                             max_results: 8,
@@ -630,8 +673,8 @@ If emails are very limited, extract at least: their role/company, frequency of c
                         if (searchResult.results && searchResult.results.length > 0) {
                             // Filter and validate results
                             // 1. Check if name matches (person validation)
-                            // 2. Check company/email matches
-                            const companyNameOnly = company.toLowerCase();
+                            // 2. Check company/email matches (if company available)
+                            const companyNameOnly = company ? company.toLowerCase() : null;
                             const nameLower = name.toLowerCase();
                             const nameWords = name.split(' ').filter(w => w.length > 2); // Filter out short words
                             
@@ -643,8 +686,8 @@ If emails are very limited, extract at least: their role/company, frequency of c
                                     textToSearch.includes(word.toLowerCase())
                                 );
                                 
-                                // Company/email match
-                                const companyMatch = textToSearch.includes(companyNameOnly);
+                                // Company/email match (only if company is available)
+                                const companyMatch = companyNameOnly ? textToSearch.includes(companyNameOnly) : false;
                                 const emailMatch = textToSearch.includes(attendeeEmail.toLowerCase());
                                 
                                 // Require name match OR (company/email match)
@@ -753,10 +796,21 @@ Return JSON array of 3-6 facts (15-80 words each).`,
                 
                 // Fallback: If no keyFacts found, add basic information
                 if (finalKeyFacts.length === 0) {
-                    finalKeyFacts = [
-                        `Works at ${company} (${domain})`,
-                        `Email: ${attendeeEmail}`
-                    ];
+                    if (company) {
+                        finalKeyFacts = [
+                            `Works at ${company} (${domain})`,
+                            `Email: ${attendeeEmail}`
+                        ];
+                    } else if (isEducationalDomain) {
+                        finalKeyFacts = [
+                            `Student at ${domain}`,
+                            `Email: ${attendeeEmail}`
+                        ];
+                    } else {
+                        finalKeyFacts = [
+                            `Email: ${attendeeEmail}`
+                        ];
+                    }
                     source = 'basic';
                 }
                 
@@ -764,7 +818,7 @@ Return JSON array of 3-6 facts (15-80 words each).`,
                     name: name,
                     email: attendeeEmail,
                     company: company,
-                    title: title || `${company} team member`,
+                    title: title || (company ? `${company} team member` : (isEducationalDomain ? 'Student' : 'Unknown')),
                     keyFacts: finalKeyFacts,
                     dataSource: source,
                     // Store full extraction data for UI

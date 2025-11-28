@@ -422,6 +422,130 @@
             box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.1);
         }
 
+        /* Calendar Widget */
+        .calendar-widget {
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .calendar-nav-button {
+            background: #f5f5f5;
+            border: none;
+            border-radius: 8px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 18px;
+            color: #333;
+            transition: all 0.2s;
+        }
+
+        .calendar-nav-button:hover {
+            background: #e0e0e0;
+            transform: scale(1.05);
+        }
+
+        .calendar-nav-button:active {
+            transform: scale(0.95);
+        }
+
+        .calendar-month-year {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            flex: 1;
+            text-align: center;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+
+        .calendar-month-year:hover {
+            background: #f5f5f5;
+        }
+
+        .calendar-weekdays {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .calendar-weekday {
+            text-align: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            padding: 8px 0;
+        }
+
+        .calendar-days {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+        }
+
+        .calendar-day {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+            transition: all 0.2s;
+            background: transparent;
+            border: 2px solid transparent;
+        }
+
+        .calendar-day:hover {
+            background: #f0f0f0;
+            transform: scale(1.1);
+        }
+
+        .calendar-day.other-month {
+            color: #ccc;
+            opacity: 0.5;
+        }
+
+        .calendar-day.today {
+            background: #e3f2fd;
+            color: #1976d2;
+            font-weight: 600;
+        }
+
+        .calendar-day.selected {
+            background: var(--color-primary);
+            color: white;
+            font-weight: 600;
+            border-color: var(--color-primary);
+        }
+
+        .calendar-day.selected:hover {
+            background: #1a1a1a;
+        }
+
+        .calendar-day:active {
+            transform: scale(0.95);
+        }
+
         /* Action Buttons */
         .action-buttons {
             display: flex;
@@ -2373,9 +2497,10 @@
         <div id="prepViewContainer" class="prep-view-container">
             <div class="date-picker-card">
                 <h2>Select Date</h2>
-                <div class="date-input-group">
-                    <input type="date" id="chatModeDatePicker" class="date-input" />
+                <div id="calendarWidget" class="calendar-widget">
+                    <!-- Calendar will be rendered here -->
                 </div>
+                <input type="hidden" id="chatModeDatePicker" />
             </div>
             <div class="action-buttons">
                 <div class="action-card primary" onclick="startDayPrep()">
@@ -7240,6 +7365,126 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         window.startVoicePrep = startVoicePrep;
         window.closeVoicePrep = closeVoicePrep;
 
+        // ==================== Calendar Widget Functions ====================
+        let calendarCurrentDate = new Date();
+        let calendarSelectedDate = new Date();
+
+        function renderCalendar() {
+            const calendarWidget = document.getElementById('calendarWidget');
+            if (!calendarWidget) return;
+
+            const year = calendarCurrentDate.getFullYear();
+            const month = calendarCurrentDate.getMonth();
+
+            // Get first day of month and number of days
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const daysInMonth = lastDay.getDate();
+            const startingDayOfWeek = firstDay.getDay();
+
+            // Month names
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'];
+
+            // Weekday names
+            const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+            // Build calendar HTML
+            let html = `
+                <div class="calendar-header">
+                    <button class="calendar-nav-button" onclick="navigateCalendarYear(-1)" title="Previous year">«</button>
+                    <button class="calendar-nav-button" onclick="navigateCalendarMonth(-1)" title="Previous month">‹</button>
+                    <div class="calendar-month-year" onclick="showYearSelector()" title="Click to select year">${monthNames[month]} ${year}</div>
+                    <button class="calendar-nav-button" onclick="navigateCalendarMonth(1)" title="Next month">›</button>
+                    <button class="calendar-nav-button" onclick="navigateCalendarYear(1)" title="Next year">»</button>
+                </div>
+                <div class="calendar-weekdays">
+                    ${weekdayNames.map(day => `<div class="calendar-weekday">${day}</div>`).join('')}
+                </div>
+                <div class="calendar-days">
+            `;
+
+            // Add empty cells for days before the first day of the month
+            for (let i = 0; i < startingDayOfWeek; i++) {
+                const prevMonth = month === 0 ? 11 : month - 1;
+                const prevYear = month === 0 ? year - 1 : year;
+                const daysInPrevMonth = new Date(prevYear, prevMonth + 1, 0).getDate();
+                const day = daysInPrevMonth - startingDayOfWeek + i + 1;
+                html += `<div class="calendar-day other-month" onclick="selectCalendarDate(${prevYear}, ${prevMonth}, ${day})">${day}</div>`;
+            }
+
+            // Add days of current month
+            const today = new Date();
+            for (let day = 1; day <= daysInMonth; day++) {
+                const date = new Date(year, month, day);
+                const isToday = date.toDateString() === today.toDateString();
+                const isSelected = date.toDateString() === calendarSelectedDate.toDateString();
+                const classes = ['calendar-day'];
+                if (isToday) classes.push('today');
+                if (isSelected) classes.push('selected');
+                
+                html += `<div class="${classes.join(' ')}" onclick="selectCalendarDate(${year}, ${month}, ${day})">${day}</div>`;
+            }
+
+            // Add empty cells for days after the last day of the month
+            const totalCells = startingDayOfWeek + daysInMonth;
+            const remainingCells = 42 - totalCells; // 6 rows * 7 days = 42
+            for (let day = 1; day <= remainingCells && day <= 14; day++) {
+                const nextMonth = month === 11 ? 0 : month + 1;
+                const nextYear = month === 11 ? year + 1 : year;
+                html += `<div class="calendar-day other-month" onclick="selectCalendarDate(${nextYear}, ${nextMonth}, ${day})">${day}</div>`;
+            }
+
+            html += '</div>';
+            calendarWidget.innerHTML = html;
+        }
+
+        function navigateCalendarMonth(direction) {
+            calendarCurrentDate.setMonth(calendarCurrentDate.getMonth() + direction);
+            renderCalendar();
+        }
+
+        function navigateCalendarYear(direction) {
+            calendarCurrentDate.setFullYear(calendarCurrentDate.getFullYear() + direction);
+            renderCalendar();
+        }
+
+        function showYearSelector() {
+            const currentYear = calendarCurrentDate.getFullYear();
+            const yearInput = prompt('Enter year:', currentYear);
+            if (yearInput) {
+                const year = parseInt(yearInput);
+                if (!isNaN(year) && year >= 1900 && year <= 2100) {
+                    calendarCurrentDate.setFullYear(year);
+                    renderCalendar();
+                } else {
+                    alert('Please enter a valid year between 1900 and 2100');
+                }
+            }
+        }
+
+        // Export calendar functions
+        window.navigateCalendarMonth = navigateCalendarMonth;
+        window.navigateCalendarYear = navigateCalendarYear;
+        window.selectCalendarDate = selectCalendarDate;
+        window.showYearSelector = showYearSelector;
+        window.renderCalendar = renderCalendar;
+
+        function selectCalendarDate(year, month, day) {
+            const selectedDate = new Date(year, month, day);
+            calendarSelectedDate = selectedDate;
+            
+            // Update hidden input
+            const datePicker = document.getElementById('chatModeDatePicker');
+            const dateString = selectedDate.toISOString().split('T')[0];
+            datePicker.value = dateString;
+            
+            // Re-render calendar to show selection
+            renderCalendar();
+            
+            console.log('Date selected:', dateString);
+        }
+
         // ==================== Prep View Functions ====================
         let prepViewActive = false;
 
@@ -7257,9 +7502,16 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 toggleButton.textContent = 'Calendar View';
                 
                 // Always set default date to today when opening prep view
-                const today = new Date().toISOString().split('T')[0];
-                datePicker.value = today;
-                console.log('Prep view opened - date picker set to:', today);
+                const today = new Date();
+                calendarCurrentDate = new Date(today);
+                calendarSelectedDate = new Date(today);
+                const todayString = today.toISOString().split('T')[0];
+                datePicker.value = todayString;
+                
+                // Render calendar
+                renderCalendar();
+                
+                console.log('Prep view opened - date picker set to:', todayString);
             } else {
                 prepViewContainer.classList.remove('active');
                 eventsContainer.classList.add('visible');
@@ -7752,9 +8004,21 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         window.testReminder = testReminder;
         window.populateTestMeetings = populateTestMeetings;
         
-        // Initialize test panel on load
+        // Initialize test panel and calendar on load
         document.addEventListener('DOMContentLoaded', () => {
             populateTestMeetings();
+            // Initialize calendar with today's date
+            const today = new Date();
+            calendarCurrentDate = new Date(today);
+            calendarSelectedDate = new Date(today);
+            const datePicker = document.getElementById('chatModeDatePicker');
+            if (datePicker) {
+                datePicker.value = today.toISOString().split('T')[0];
+            }
+            // Render calendar if prep view is active
+            if (document.getElementById('prepViewContainer')?.classList.contains('active')) {
+                renderCalendar();
+            }
         });
 
         async function startDayPrep() {
