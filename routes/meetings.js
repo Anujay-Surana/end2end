@@ -342,11 +342,14 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                     new Map(allAttendeeEmails.map(e => [e.id, e])).values()
                 );
                 
+                // Initialize emailDataForSynthesis outside the if block so it's always defined
+                let emailDataForSynthesis = [];
+                
                 if (uniqueAttendeeEmails.length > 0) {
                     console.log(`    📧 Found ${attendeeEmails.length} emails from ${name}, ${emailsToAttendee.length} emails to ${name} (${uniqueAttendeeEmails.length} total unique)`);
                     
                     // Prepare email data for synthesis (ensure proper structure)
-                    const emailDataForSynthesis = uniqueAttendeeEmails.slice(0, 20).map(e => ({
+                    emailDataForSynthesis = uniqueAttendeeEmails.slice(0, 20).map(e => ({
                         subject: e.subject || '',
                         from: e.from || '',
                         to: e.to || '',
@@ -648,7 +651,7 @@ Return JSON array of 3-6 facts (15-80 words each).`,
                     _extractionData: {
                         emailsFrom: attendeeEmails.length,
                         emailsTo: emailsToAttendee.length,
-                        emailData: emailDataForSynthesis.slice(0, 10), // Store sample emails
+                        emailData: (emailDataForSynthesis || []).slice(0, 10), // Store sample emails
                         webSearchResults: resultsToUse || [],
                         emailFacts: keyFacts.filter((f, idx) => idx < keyFacts.length - (resultsToUse ? resultsToUse.length : 0)),
                         webFacts: resultsToUse ? keyFacts.slice(-(resultsToUse.length)) : []
