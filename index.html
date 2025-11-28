@@ -2579,9 +2579,7 @@
 
         <div id="eventsContainer" class="events-container visible">
             <div class="date-navigation">
-                <button class="nav-button" id="prevDay">�</button>
-                <div class="current-date" id="currentDate"></div>
-                <button class="nav-button" id="nextDay">�</button>
+                <div id="calendarViewWidget" class="calendar-widget"></div>
             </div>
 
             <div id="eventsList"></div>
@@ -3092,7 +3090,17 @@
             const eventsList = document.getElementById('eventsList');
             const currentDateEl = document.getElementById('currentDate');
 
-            currentDateEl.textContent = formatDate(currentDate);
+            // Update calendar view selected date to match currentDate
+            calendarViewSelectedDate = new Date(currentDate);
+            calendarViewCurrentDate = new Date(currentDate);
+            
+            // Render calendar view if it exists
+            renderCalendarView();
+            
+            // Note: currentDateEl may not exist if calendar widget replaced it
+            if (currentDateEl) {
+                currentDateEl.textContent = formatDate(currentDate);
+            }
             // Show skeleton loaders
             eventsList.innerHTML = `
                 <div class="skeleton-card"></div>
@@ -3566,6 +3574,9 @@
             document.getElementById('eventsContainer').classList.add('visible');
             document.getElementById('meetingDetailContainer').classList.remove('visible');
             currentMeeting = null;
+            
+            // Render calendar view when showing calendar
+            renderCalendarView();
         }
 
         // Tab Switching
@@ -7368,13 +7379,34 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         // ==================== Calendar Widget Functions ====================
         let calendarCurrentDate = new Date();
         let calendarSelectedDate = new Date();
+        
+        // Separate calendar state for calendar view
+        let calendarViewCurrentDate = new Date();
+        let calendarViewSelectedDate = new Date();
 
         function renderCalendar() {
             const calendarWidget = document.getElementById('calendarWidget');
             if (!calendarWidget) return;
+            
+            renderCalendarForWidget(calendarWidget, calendarCurrentDate, calendarSelectedDate, (year, month, day) => {
+                selectCalendarDate(year, month, day);
+            });
+        }
+        
+        function renderCalendarView() {
+            const calendarWidget = document.getElementById('calendarViewWidget');
+            if (!calendarWidget) return;
+            
+            renderCalendarForWidget(calendarWidget, calendarViewCurrentDate, calendarViewSelectedDate, (year, month, day) => {
+                selectCalendarViewDate(year, month, day);
+            });
+        }
+        
+        function renderCalendarForWidget(widget, currentDate, selectedDate, onDateSelect) {
+            if (!widget) return;
 
-            const year = calendarCurrentDate.getFullYear();
-            const month = calendarCurrentDate.getMonth();
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
 
             // Get first day of month and number of days
             const firstDay = new Date(year, month, 1);
@@ -7389,14 +7421,20 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             // Weekday names
             const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+            // Determine which navigation functions to use based on widget ID
+            const isCalendarView = widget.id === 'calendarViewWidget';
+            const navYearFunc = isCalendarView ? 'navigateCalendarViewYear' : 'navigateCalendarYear';
+            const navMonthFunc = isCalendarView ? 'navigateCalendarViewMonth' : 'navigateCalendarMonth';
+            const yearSelectorFunc = isCalendarView ? 'showCalendarViewYearSelector' : 'showYearSelector';
+
             // Build calendar HTML
             let html = `
                 <div class="calendar-header">
-                    <button class="calendar-nav-button" onclick="navigateCalendarYear(-1)" title="Previous year">«</button>
-                    <button class="calendar-nav-button" onclick="navigateCalendarMonth(-1)" title="Previous month">‹</button>
-                    <div class="calendar-month-year" onclick="showYearSelector()" title="Click to select year">${monthNames[month]} ${year}</div>
-                    <button class="calendar-nav-button" onclick="navigateCalendarMonth(1)" title="Next month">›</button>
-                    <button class="calendar-nav-button" onclick="navigateCalendarYear(1)" title="Next year">»</button>
+                    <button class="calendar-nav-button" onclick="${navYearFunc}(-1)" title="Previous year">«</button>
+                    <button class="calendar-nav-button" onclick="${navMonthFunc}(-1)" title="Previous month">‹</button>
+                    <div class="calendar-month-year" onclick="${yearSelectorFunc}()" title="Click to select year">${monthNames[month]} ${year}</div>
+                    <button class="calendar-nav-button" onclick="${navMonthFunc}(1)" title="Next month">›</button>
+                    <button class="calendar-nav-button" onclick="${navYearFunc}(1)" title="Next year">»</button>
                 </div>
                 <div class="calendar-weekdays">
                     ${weekdayNames.map(day => `<div class="calendar-weekday">${day}</div>`).join('')}
@@ -7410,7 +7448,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 const prevYear = month === 0 ? year - 1 : year;
                 const daysInPrevMonth = new Date(prevYear, prevMonth + 1, 0).getDate();
                 const day = daysInPrevMonth - startingDayOfWeek + i + 1;
-                html += `<div class="calendar-day other-month" onclick="selectCalendarDate(${prevYear}, ${prevMonth}, ${day})">${day}</div>`;
+                html += `<div class="calendar-day other-month" onclick="onDateSelect(${prevYear}, ${prevMonth}, ${day})">${day}</div>`;
             }
 
             // Add days of current month
@@ -7418,12 +7456,12 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             for (let day = 1; day <= daysInMonth; day++) {
                 const date = new Date(year, month, day);
                 const isToday = date.toDateString() === today.toDateString();
-                const isSelected = date.toDateString() === calendarSelectedDate.toDateString();
+                const isSelected = date.toDateString() === selectedDate.toDateString();
                 const classes = ['calendar-day'];
                 if (isToday) classes.push('today');
                 if (isSelected) classes.push('selected');
                 
-                html += `<div class="${classes.join(' ')}" onclick="selectCalendarDate(${year}, ${month}, ${day})">${day}</div>`;
+                html += `<div class="${classes.join(' ')}" onclick="onDateSelect(${year}, ${month}, ${day})">${day}</div>`;
             }
 
             // Add empty cells for days after the last day of the month
@@ -7432,11 +7470,11 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             for (let day = 1; day <= remainingCells && day <= 14; day++) {
                 const nextMonth = month === 11 ? 0 : month + 1;
                 const nextYear = month === 11 ? year + 1 : year;
-                html += `<div class="calendar-day other-month" onclick="selectCalendarDate(${nextYear}, ${nextMonth}, ${day})">${day}</div>`;
+                html += `<div class="calendar-day other-month" onclick="onDateSelect(${nextYear}, ${nextMonth}, ${day})">${day}</div>`;
             }
 
             html += '</div>';
-            calendarWidget.innerHTML = html;
+            widget.innerHTML = html;
         }
 
         function navigateCalendarMonth(direction) {
@@ -7484,6 +7522,52 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             
             console.log('Date selected:', dateString);
         }
+
+        function selectCalendarViewDate(year, month, day) {
+            const selectedDate = new Date(year, month, day);
+            calendarViewSelectedDate = selectedDate;
+            calendarViewCurrentDate = selectedDate; // Also update current date to show selected month
+            
+            // Update global currentDate and load events
+            currentDate = selectedDate;
+            loadEvents();
+            
+            // Re-render calendar to show selection
+            renderCalendarView();
+            
+            console.log('Calendar view date selected:', selectedDate.toISOString().split('T')[0]);
+        }
+
+        function navigateCalendarViewMonth(direction) {
+            calendarViewCurrentDate.setMonth(calendarViewCurrentDate.getMonth() + direction);
+            renderCalendarView();
+        }
+
+        function navigateCalendarViewYear(direction) {
+            calendarViewCurrentDate.setFullYear(calendarViewCurrentDate.getFullYear() + direction);
+            renderCalendarView();
+        }
+
+        function showCalendarViewYearSelector() {
+            const currentYear = calendarViewCurrentDate.getFullYear();
+            const yearInput = prompt('Enter year:', currentYear);
+            if (yearInput) {
+                const year = parseInt(yearInput);
+                if (!isNaN(year) && year >= 1900 && year <= 2100) {
+                    calendarViewCurrentDate.setFullYear(year);
+                    renderCalendarView();
+                } else {
+                    alert('Please enter a valid year between 1900 and 2100');
+                }
+            }
+        }
+
+        // Export calendar view functions
+        window.navigateCalendarViewMonth = navigateCalendarViewMonth;
+        window.navigateCalendarViewYear = navigateCalendarViewYear;
+        window.selectCalendarViewDate = selectCalendarViewDate;
+        window.showCalendarViewYearSelector = showCalendarViewYearSelector;
+        window.renderCalendarView = renderCalendarView;
 
         // ==================== Prep View Functions ====================
         let prepViewActive = false;
@@ -8011,14 +8095,19 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             const today = new Date();
             calendarCurrentDate = new Date(today);
             calendarSelectedDate = new Date(today);
+            calendarViewCurrentDate = new Date(today);
+            calendarViewSelectedDate = new Date(today);
             const datePicker = document.getElementById('chatModeDatePicker');
             if (datePicker) {
                 datePicker.value = today.toISOString().split('T')[0];
             }
             // Render calendar if prep view is active
+            if (active)
             if (document.getElementById('prepViewContainer')?.classList.contains('active')) {
                 renderCalendar();
             }
+            // Render calendar view widget
+            renderCalendarView();
         });
 
         async function startDayPrep() {
