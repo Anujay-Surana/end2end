@@ -490,6 +490,8 @@ If emails are very limited, extract at least: their role/company, frequency of c
                 }
 
                 // Web search via Parallel API
+                let resultsToUse = []; // Initialize outside the if block
+                
                 if (req.parallelClient) {
                     console.log(`    🌐 Performing web search...`);
                     try {
@@ -539,7 +541,7 @@ If emails are very limited, extract at least: their role/company, frequency of c
                                 });
                             
                             // Fallback to all results if still empty
-                            const resultsToUse = relevantResults.length > 0 ? relevantResults : searchResult.results.slice(0, 3);
+                            resultsToUse = relevantResults.length > 0 ? relevantResults : searchResult.results.slice(0, 3);
 
                             if (resultsToUse.length > 0) {
                                 console.log(`    ✓ Found ${resultsToUse.length} relevant web results`);
@@ -690,11 +692,10 @@ Return JSON array of 3-6 facts (15-80 words each).`,
             console.log(`\n  📧 Analyzing email threads for meeting context...`);
             let emailAnalysis = '';
             let relevantEmails = [];
+            let allRelevantIndices = []; // Initialize outside if block to prevent scope issues
 
             if (emails && emails.length > 0) {
                 console.log(`  🔍 Filtering ${emails.length} emails for meeting relevance (processing in batches of 50)...`);
-
-                let allRelevantIndices = [];
 
                 // PASS 1: Relevance filtering in PARALLEL batches of 25
                 const batchSize = 25;
@@ -818,7 +819,7 @@ Return JSON with email indices to INCLUDE (relative to this batch) AND reasoning
                     // Store relevant content for UI with reasoning
                     if (!brief._extractionData.relevantContent) brief._extractionData.relevantContent = {};
                     brief._extractionData.relevantContent.emails = relevantEmails.map((e, idx) => {
-                        const originalIdx = allRelevantIndices[idx];
+                        const originalIdx = (allRelevantIndices || [])[idx];
                         return {
                             subject: e.subject,
                             from: e.from,
@@ -1526,6 +1527,9 @@ Synthesize the broader narrative from ${userContext ? userContext.formattedName 
             // ===== STEP 7: TIMELINE BUILDING =====
             console.log(`\n  📅 Building intelligent interaction timeline...`);
             
+            // Initialize timeline variables to prevent scope issues
+            let limitedTimeline = [];
+            
             // Step 1: Collect all potential timeline events
             const allTimelineEvents = [];
             
@@ -1717,7 +1721,7 @@ ${e.type === 'meeting' ? `Meeting: ${e.name}\nAttendees: ${e.participants.join('
             prioritizedTimeline.sort((a, b) => b.timestamp - a.timestamp);
             
             // Limit to top 100 most relevant events
-            const limitedTimeline = prioritizedTimeline.slice(0, 100);
+            limitedTimeline = prioritizedTimeline.slice(0, 100);
             
             // Analyze trend/velocity in timeline
             const trendAnalysis = analyzeTrend(limitedTimeline);
@@ -1880,7 +1884,7 @@ Broader Narrative:
 ${broaderNarrative ? (broaderNarrative.length > 2000 ? broaderNarrative.substring(0, 2000) + '\n[...truncated...]' : broaderNarrative) : 'No broader narrative'}
 
 Key Timeline Events (from broader narrative analysis):
-${brief._timelineTrend ? `TREND: ${brief._timelineTrend.description}\n` : ''}${limitedTimeline && limitedTimeline.length > 0 ? limitedTimeline.slice(0, 15).map(e => `- ${e.type}: ${e.name || e.subject} (${e.date ? new Date(e.date).toLocaleDateString() : 'unknown date'})`).join('\n') : 'Timeline events will be analyzed'}
+${brief._timelineTrend ? `TREND: ${brief._timelineTrend.description}\n` : ''}${(limitedTimeline || []).length > 0 ? (limitedTimeline || []).slice(0, 15).map(e => `- ${e.type}: ${e.name || e.subject} (${e.date ? new Date(e.date).toLocaleDateString() : 'unknown date'})`).join('\n') : 'Timeline events will be analyzed'}
 
 Analyze deeply: What is this meeting REALLY about? Use ALL the collated information to understand the complete picture. Consider the timeline trend when analyzing momentum and urgency.`
             }], 2500);
@@ -1960,7 +1964,7 @@ Write as if briefing ${userContext ? userContext.formattedName : 'an executive'}
                     emailAnalysis: emailAnalysis || 'No email context',
                     documentAnalysis: documentAnalysis || 'No document analysis',
                     relationshipAnalysis: relationshipAnalysis || 'No relationship analysis',
-                    timeline: limitedTimeline.slice(0, 15).map(e => ({ 
+                    timeline: (limitedTimeline || []).slice(0, 15).map(e => ({ 
                         type: e.type, 
                         date: e.date, 
                         name: e.name || e.subject,
@@ -1988,7 +1992,7 @@ Write as if briefing ${userContext ? userContext.formattedName : 'an executive'}
                         brief._extractionData.userContext = await buildUserProfile(
                             userContext,
                             userSentEmails,
-                            filesWithContent.filter(f => f.ownerEmail?.toLowerCase().includes(userContext.email.toLowerCase())),
+                            (filesWithContent || []).filter(f => f.ownerEmail?.toLowerCase().includes(userContext.email.toLowerCase())),
                             calendarEvents
                         );
                         console.log(`  ✓ User context built: ${brief._extractionData.userContext.communicationStyle ? 'communication style' : ''} ${brief._extractionData.userContext.expertise ? 'expertise' : ''}`);
@@ -2016,24 +2020,24 @@ Write as if briefing ${userContext ? userContext.formattedName : 'an executive'}
             brief.relationshipAnalysis = relationshipAnalysis;
             brief.contributionAnalysis = contributionAnalysis;
             brief.broaderNarrative = broaderNarrative;
-            brief.timeline = limitedTimeline;
+            brief.timeline = limitedTimeline || [];
             brief.recommendations = parsedRecommendations;
             brief.actionItems = parsedActionItems;
             
             // Store relevant content with reasoning for UI (already stored above, but ensure it's in brief.relevantContent too)
             brief.relevantContent = brief._extractionData?.relevantContent || {
-                emails: relevantEmails.map((email, idx) => ({
+                emails: (relevantEmails || []).map((email, idx) => ({
                     subject: email.subject,
                     from: email.from,
                     to: email.to,
                     date: email.date,
                     snippet: (email.body || email.snippet || '').substring(0, 300),
-                    relevanceReasoning: brief._extractionData?.emailRelevanceReasoning?.[allRelevantIndices[idx]] || email._relevanceReasoning || 'Relevant to meeting context',
+                    relevanceReasoning: brief._extractionData?.emailRelevanceReasoning?.[(allRelevantIndices || [])[idx]] || email._relevanceReasoning || 'Relevant to meeting context',
                     temporalScore: email._temporalScore,
                     daysOld: email._daysOld,
                     body: (email.body || email.snippet || '').substring(0, 1000)
                 })),
-                documents: filesWithContent.map(file => {
+                documents: (filesWithContent || []).map(file => {
                     const stalenessResult = brief._extractionData?.documentStaleness?.[file.name];
                     return {
                         name: file.name,
@@ -2050,9 +2054,9 @@ Write as if briefing ${userContext ? userContext.formattedName : 'an executive'}
             // Add stats
             brief.stats = {
                 emailCount: emails.length,
-                relevantEmailCount: relevantEmails.length,
+                relevantEmailCount: (relevantEmails || []).length,
                 fileCount: files.length,
-                filesWithContentCount: filesWithContent.length,
+                filesWithContentCount: (filesWithContent || []).length,
                 calendarEventCount: calendarEvents.length,
                 attendeeCount: brief.attendees.length,
                 multiAccount: !!req.userId,
@@ -2060,7 +2064,7 @@ Write as if briefing ${userContext ? userContext.formattedName : 'an executive'}
                 multiAccountStats: brief._multiAccountStats
             };
 
-            console.log(`\n✅ Original inline analysis complete! ${brief.attendees.length} attendees, ${relevantEmails.length} relevant emails, ${filesWithContent.length} analyzed docs, ${limitedTimeline.length} timeline events`);
+            console.log(`\n✅ Original inline analysis complete! ${brief.attendees.length} attendees, ${(relevantEmails || []).length} relevant emails, ${(filesWithContent || []).length} analyzed docs, ${(limitedTimeline || []).length} timeline events`);
 
             // Return comprehensive brief
             res.json(brief);
