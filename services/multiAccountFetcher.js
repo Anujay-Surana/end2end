@@ -41,11 +41,19 @@ async function fetchEmailsFromAllAccounts(accounts, attendees, meeting) {
     const keywords = extractKeywords(meetingTitle, meeting.description || '');
     console.log(`   🔑 Extracted keywords: ${keywords.join(', ')}`);
 
+    // Extract meeting date for temporal filtering (only use data BEFORE meeting)
+    const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
+    const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
+    // Use end of meeting day as cutoff (23:59:59) to include emails from the same day
+    const meetingCutoff = new Date(meetingDate);
+    meetingCutoff.setHours(23, 59, 59, 999);
+    const beforeDate = meetingCutoff.toISOString().split('T')[0].replace(/-/g, '/');
+    
     // CRITICAL: 2-YEAR lookback (not 6 months) - working relationships span years
     const twoYearsAgo = new Date();
     twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
     const afterDate = twoYearsAgo.toISOString().split('T')[0].replace(/-/g, '/');
-    console.log(`   📅 Searching emails from past 2 years (since ${afterDate})`);
+    console.log(`   📅 Searching emails from past 2 years (since ${afterDate}) BEFORE meeting date (${beforeDate})`);
 
     const results = await Promise.allSettled(
         accounts.map(async (account) => {
@@ -69,8 +77,18 @@ async function fetchEmailsFromAllAccounts(accounts, attendees, meeting) {
                         };
                     }
                     const keywordParts = keywords.slice(0, 3).map(k => `subject:"${k}" OR "${k}"`).join(' OR ');
-                    const query = `(${keywordParts}) after:${afterDate}`;
-                    const emails = await fetchGmailMessages(account, query, 100);
+                    const query = `(${keywordParts}) after:${afterDate} before:${beforeDate}`;
+                    let emails = await fetchGmailMessages(account, query, 100);
+                    
+                    // Post-fetch filtering: Remove any emails after meeting date (safety net)
+                    const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
+                    const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
+                    emails = emails.filter(email => {
+                        if (!email.date) return true; // Keep if no date
+                        const emailDate = new Date(email.date);
+                        return emailDate <= meetingDate;
+                    });
+                    
                     return {
                         accountEmail: account.account_email,
                         emails: emails,
@@ -107,12 +125,21 @@ async function fetchEmailsFromAllAccounts(accounts, attendees, meeting) {
                     };
                 }
 
-                const query = `${queryParts.join(' OR ')} after:${afterDate}`;
+                const query = `${queryParts.join(' OR ')} after:${afterDate} before:${beforeDate}`;
 
                 // REMOVED CAP: Fetch up to 100 emails (will process ALL in batches later)
-                const emails = await fetchGmailMessages(account, query, 100);
+                let emails = await fetchGmailMessages(account, query, 100);
+                
+                // Post-fetch filtering: Remove any emails after meeting date (safety net)
+                const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
+                const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
+                emails = emails.filter(email => {
+                    if (!email.date) return true; // Keep if no date
+                    const emailDate = new Date(email.date);
+                    return emailDate <= meetingDate;
+                });
 
-                console.log(`   ✅ Fetched ${emails.length} emails from ${account.account_email}`);
+                console.log(`   ✅ Fetched ${emails.length} emails from ${account.account_email} (filtered to before meeting)`);
 
                 return {
                     accountEmail: account.account_email,
@@ -186,10 +213,15 @@ async function fetchFilesFromAllAccounts(accounts, attendees, meeting) {
     const meetingTitle = meeting.summary || meeting.title || '';
     const keywords = extractKeywords(meetingTitle, meeting.description || '');
 
-    // 2-year lookback for files too
+    // Extract meeting date for temporal filtering (only use data BEFORE meeting)
+    const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
+    const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
+    
+    // 2-year lookback for files too, with upper bound at meeting date
     const twoYearsAgo = new Date();
     twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
-    const timeFilter = `and modifiedTime > '${twoYearsAgo.toISOString()}'`;
+    const timeFilter = `and modifiedTime > '${twoYearsAgo.toISOString()}' and modifiedTime < '${meetingDate.toISOString()}'`;
+    console.log(`   📅 Searching files modified between ${twoYearsAgo.toISOString().split('T')[0]} and ${meetingDate.toISOString().split('T')[0]} (before meeting)`);
 
     const results = await Promise.allSettled(
         accounts.map(async (account) => {
@@ -255,7 +287,14 @@ async function fetchFilesFromAllAccounts(accounts, attendees, meeting) {
                 console.log(`        - ${nameFiles.length} from keyword matching`);
 
                 // Fetch file contents for ALL files (REMOVED 5-FILE CAP)
-                const filesWithContent = await fetchDriveFileContents(account, uniqueFiles);
+                let filesWithContent = await fetchDriveFileContents(account, uniqueFiles);
+                
+                // Post-fetch filtering: Remove any files modified after meeting date (safety net)
+                filesWithContent = filesWithContent.filter(file => {
+                    if (!file.modifiedTime) return true; // Keep if no modified time
+                    const fileDate = new Date(file.modifiedTime);
+                    return fileDate <= meetingDate;
+                });
 
                 return {
                     accountEmail: account.account_email,
@@ -391,6 +430,10 @@ async function fetchAllAccountContext(accounts, attendees, meeting) {
     console.log(`   Accounts: ${accounts.map(a => a.account_email).join(', ')}`);
 
     const startTime = Date.now();
+    
+    // Extract meeting date for final post-fetch filtering (safety net)
+    const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
+    const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
 
     // Fetch emails and files in parallel from ALL accounts
     const [emailResults, fileResults] = await Promise.all([
@@ -403,8 +446,29 @@ async function fetchAllAccountContext(accounts, attendees, meeting) {
     const fileResultsArray = Array.isArray(fileResults) ? fileResults : (fileResults.results || []);
 
     // Merge and deduplicate results
-    const emails = mergeAndDeduplicateEmails(emailResultsArray);
-    const files = mergeAndDeduplicateFiles(fileResultsArray);
+    let emails = mergeAndDeduplicateEmails(emailResultsArray);
+    let files = mergeAndDeduplicateFiles(fileResultsArray);
+    
+    // Final post-fetch filtering: Remove any items after meeting date (safety net)
+    const emailsBefore = emails.length;
+    emails = emails.filter(email => {
+        if (!email.date) return true; // Keep if no date
+        const emailDate = new Date(email.date);
+        return emailDate <= meetingDate;
+    });
+    if (emails.length < emailsBefore) {
+        console.log(`   🔍 Post-fetch filtered ${emailsBefore - emails.length} emails after meeting date`);
+    }
+    
+    const filesBefore = files.length;
+    files = files.filter(file => {
+        if (!file.modifiedTime) return true; // Keep if no modified time
+        const fileDate = new Date(file.modifiedTime);
+        return fileDate <= meetingDate;
+    });
+    if (files.length < filesBefore) {
+        console.log(`   🔍 Post-fetch filtered ${filesBefore - files.length} files after meeting date`);
+    }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
@@ -458,19 +522,24 @@ async function fetchAllAccountContext(accounts, attendees, meeting) {
 async function fetchCalendarFromAllAccounts(accounts, attendees, meeting) {
     console.log(`\n📅 Fetching calendar events from ${accounts.length} account(s) in parallel...`);
 
-    // Search for past meetings with these attendees (last 6 months)
+    // Extract meeting date for temporal filtering (only use data BEFORE meeting)
+    const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
+    const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
+    
+    // Search for past meetings with these attendees (last 6 months, but before meeting date)
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const timeMin = sixMonthsAgo.toISOString();
-    const timeMax = new Date().toISOString();
+    const timeMax = meetingDate.toISOString(); // Use meeting date instead of current time
+    console.log(`   📅 Searching calendar events from ${sixMonthsAgo.toISOString().split('T')[0]} to ${meetingDate.toISOString().split('T')[0]} (before meeting)`);
 
     const results = await Promise.allSettled(
         accounts.map(async (account) => {
             try {
                 console.log(`\n   Account: ${account.account_email}`);
 
-                // Fetch all calendar events in the time range
-                const events = await fetchCalendarEvents(account, timeMin, timeMax, 200);
+                // Fetch all calendar events in the time range (already filtered by timeMax = meetingDate)
+                let events = await fetchCalendarEvents(account, timeMin, timeMax, 200);
 
                 // Filter events that include any of the meeting attendees
                 // Exclude the current meeting itself (if it has an ID)
@@ -481,12 +550,10 @@ async function fetchCalendarFromAllAccounts(accounts, attendees, meeting) {
                     if (currentMeetingId && event.id === currentMeetingId) {
                         return false;
                     }
-                    // Only include past events (before current meeting or before now)
+                    // Post-fetch filtering: Only include events before meeting date (safety net)
                     const eventStart = event.start?.dateTime || event.start?.date;
                     if (eventStart) {
                         const eventDate = new Date(eventStart);
-                        const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
-                        const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
                         // Only include events that happened before the current meeting
                         if (eventDate >= meetingDate) {
                             return false;

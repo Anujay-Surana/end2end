@@ -292,6 +292,20 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                 const calendarResults = results[1];
                 const calendarResultsArray = Array.isArray(calendarResults) ? calendarResults : (calendarResults.results || []);
                 calendarEvents = mergeAndDeduplicateCalendarEvents(calendarResultsArray);
+                
+                // Post-fetch filtering: Remove any calendar events after meeting date (safety net)
+                const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
+                const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
+                const eventsBefore = calendarEvents.length;
+                calendarEvents = calendarEvents.filter(event => {
+                    const eventStart = event.start?.dateTime || event.start?.date || event.start;
+                    if (!eventStart) return true; // Keep if no start time
+                    const eventDate = new Date(eventStart);
+                    return eventDate <= meetingDate;
+                });
+                if (calendarEvents.length < eventsBefore) {
+                    console.log(`   🔍 Post-fetch filtered ${eventsBefore - calendarEvents.length} calendar events after meeting date`);
+                }
             }
 
             console.log(`✅ Multi-account context gathered: ${emails.length} emails, ${files.length} files, ${calendarEvents.length} calendar events`);
@@ -316,30 +330,50 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                 const attendeeEmails = attendees.map(a => a.email || a.emailAddress).filter(Boolean);
                 const domains = [...new Set(attendeeEmails.map(e => e.split('@')[1]))];
 
-                // Fetch from 2 years back
+                // Extract meeting date for temporal filtering (only use data BEFORE meeting)
+                const meetingStart = meeting.start?.dateTime || meeting.start?.date || meeting.start;
+                const meetingDate = meetingStart ? new Date(meetingStart) : new Date();
+                const beforeDate = meetingDate.toISOString().split('T')[0].replace(/-/g, '/');
+
+                // Fetch from 2 years back, but before meeting date
                 const twoYearsAgo = new Date();
                 twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
                 const afterDate = twoYearsAgo.toISOString().split('T')[0].replace(/-/g, '/');
 
-                // Build Gmail query
+                // Build Gmail query with before filter
                 const attendeeQueries = attendeeEmails.map(email => `from:${email} OR to:${email}`).join(' OR ');
                 const domainQueries = domains.map(d => `from:*@${d}`).join(' OR ');
-                const gmailQuery = `(${attendeeQueries} OR ${domainQueries}) after:${afterDate}`;
+                const gmailQuery = `(${attendeeQueries} OR ${domainQueries}) after:${afterDate} before:${beforeDate}`;
 
-                console.log(`📧 Fetching emails...`);
+                console.log(`📧 Fetching emails (before meeting date: ${beforeDate})...`);
                 emails = await fetchGmailMessages(accessToken, gmailQuery, 100);
-                console.log(`✓ Fetched ${emails.length} emails`);
+                
+                // Post-fetch filtering: Remove any emails after meeting date (safety net)
+                emails = emails.filter(email => {
+                    if (!email.date) return true; // Keep if no date
+                    const emailDate = new Date(email.date);
+                    return emailDate <= meetingDate;
+                });
+                
+                console.log(`✓ Fetched ${emails.length} emails (filtered to before meeting)`);
 
-                // Build Drive query
+                // Build Drive query with upper bound
                 const permQueries = attendeeEmails.map(email => `'${email}' in readers or '${email}' in writers`).join(' or ');
-                const permQuery = `(${permQueries}) and modifiedTime > '${twoYearsAgo.toISOString()}'`;
+                const permQuery = `(${permQueries}) and modifiedTime > '${twoYearsAgo.toISOString()}' and modifiedTime < '${meetingDate.toISOString()}'`;
 
-                console.log(`📁 Fetching Drive files...`);
+                console.log(`📁 Fetching Drive files (before meeting date)...`);
                 const driveFiles = await fetchDriveFiles(accessToken, permQuery, 200);
                 console.log(`✓ Found ${driveFiles.length} Drive files`);
 
                 if (driveFiles.length > 0) {
                     files = await fetchDriveFileContents(accessToken, driveFiles);
+                    
+                    // Post-fetch filtering: Remove any files modified after meeting date (safety net)
+                    files = files.filter(file => {
+                        if (!file.modifiedTime) return true; // Keep if no modified time
+                        const fileDate = new Date(file.modifiedTime);
+                        return fileDate <= meetingDate;
+                    });
                 }
             }
 
@@ -1926,8 +1960,21 @@ Return ONLY a JSON array. If insufficient context, return fewer but high-quality
             let parsedRecommendations = [];
             try {
                 const parsed = safeParseJSON(recommendations);
-                parsedRecommendations = Array.isArray(parsed) ? parsed.slice(0, 5) : [];
+                if (Array.isArray(parsed)) {
+                    // Ensure all recommendations are strings
+                    parsedRecommendations = parsed.slice(0, 5).map(rec => {
+                        if (typeof rec === 'string') {
+                            return rec;
+                        } else if (typeof rec === 'object' && rec !== null) {
+                            // Handle object recommendations - extract text field or stringify
+                            return rec.text || rec.description || rec.recommendation || rec.content || JSON.stringify(rec);
+                        } else {
+                            return String(rec);
+                        }
+                    }).filter(rec => rec && rec.length > 0);
+                }
             } catch (e) {
+                logger.error({ requestId, error: e.message }, 'Failed to parse recommendations');
                 parsedRecommendations = [];
             }
 

@@ -4794,12 +4794,18 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                             <h3>💡 Strategic Recommendations</h3>
                             ${brief.recommendations && brief.recommendations.length > 0 ? `
                                 <ul class="recommendations-list">
-                                    ${brief.recommendations.map((rec, idx) => `
+                                    ${brief.recommendations.map((rec, idx) => {
+                                        // Handle both string and object recommendations
+                                        const recText = typeof rec === 'string' 
+                                            ? rec 
+                                            : (rec?.text || rec?.description || rec?.recommendation || rec?.content || JSON.stringify(rec));
+                                        return `
                                         <li class="recommendation-item">
                                             <span class="rec-number">${idx + 1}</span>
-                                            <span class="rec-text">${rec}</span>
+                                            <span class="rec-text">${recText}</span>
                                         </li>
-                                    `).join('')}
+                                    `;
+                                    }).join('')}
                                 </ul>
                             ` : '<p style="color: #888;">No recommendations generated.</p>'}
                         </div>
@@ -6018,7 +6024,13 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     <div style="margin-bottom: 20px;">
                         <h4 style="margin: 0 0 12px 0; color: #1f2937; font-size: 14px;">💡 Recommendations</h4>
                         <ul style="margin: 0; padding-left: 18px; color: #4b5563; line-height: 1.6;">
-                            ${brief.recommendations.map(rec => `<li style="margin-bottom: 8px;">${rec}</li>`).join('')}
+                            ${brief.recommendations.map(rec => {
+                                // Handle both string and object recommendations
+                                const recText = typeof rec === 'string' 
+                                    ? rec 
+                                    : (rec?.text || rec?.description || rec?.recommendation || rec?.content || JSON.stringify(rec));
+                                return `<li style="margin-bottom: 8px;">${recText}</li>`;
+                            }).join('')}
                         </ul>
                     </div>
                 `;
