@@ -75,7 +75,7 @@ Attendees: ${attendeeInfo.map(a => `${a.name}${a.email ? ` (${a.email})` : ''}`)
 ${userContext ? `User: ${userContext.formattedName} (${userContext.formattedEmail})` : ''}
 
 Analyze this meeting and extract its context.`
-        }], 1000);
+        }], 4000);
         
         const context = safeParseJSON(analysis);
         
@@ -1050,7 +1050,7 @@ Return JSON with email indices to INCLUDE (relative to this batch) AND reasoning
                             const attendeeCount = allEmailsInMessage.filter(email => attendeeEmails.some(attEmail => email.includes(attEmail))).length;
                             return `[${i}] Subject: ${e.subject}\nFrom: ${e.from}\nTo: ${e.to || 'N/A'}\nDate: ${e.date} (${daysAgo} days ago)\nAttendee Count: ${attendeeCount} meeting attendees\nSnippet: ${snippet}\nBody Preview: ${bodyPreview}${bodyPreview.length >= 2000 ? '...[truncated]' : ''}`;
                         }).join('\n\n')}`
-                    }], 1000);
+                    }], 4000);
 
                     let batchIndices = [];
                     let batchReasoning = {};
@@ -1257,7 +1257,7 @@ Each point should be 15-80 words with concrete details. Structure everything fro
                                     : '';
                                 return `Subject: ${e.subject}\nFrom: ${e.from}\nDate: ${e.date}${threadInfo}${attachmentInfo}\nBody: ${bodyPreview}`;
                             }).join('\n\n---\n\n')}`
-                        }], 1500);
+                        }], 4000);
 
                         try {
                             const batchData = safeParseJSON(topicsExtraction);
@@ -1364,7 +1364,7 @@ Guidelines:
                     }, {
                         role: 'user',
                         content: `Meeting: ${meetingTitle}${meetingDateContext}\n\nCreate comprehensive email analysis paragraph.`
-                    }], 800);
+                    }], 4000);
 
                     emailAnalysis = emailSummary?.trim() || 'Limited email context available.';
                     console.log(`  ✓ Email analysis: ${emailAnalysis.length} chars from ${relevantEmails.length} relevant emails`);
@@ -1502,7 +1502,7 @@ Return JSON with file indices to INCLUDE (relative to this batch) AND reasoning:
                                 const ownerIsAttendee = attendeeEmails.some(attEmail => ownerEmail.toLowerCase().includes(attEmail));
                                 return `[${i}] Name: ${f.name}\nOwner: ${ownerEmail}${ownerIsAttendee ? ' (MEETING ATTENDEE)' : ''}\nModified: ${modifiedDate} (${daysAgo} days ago)\nType: ${f.mimeType || 'unknown'}`;
                             }).join('\n\n')}`
-                        }], 1000);
+                        }], 4000);
                         
                         let batchIndices = [];
                         let batchReasoning = {};
@@ -1608,7 +1608,7 @@ Focus on: decisions, data, action items, proposals, problems, solutions, timelin
                                     }, {
                                         role: 'user',
                                         content: `Document: "${file.name}"\n\nContent:\n${file.content.substring(0, 7500)}${file.content.length > 7500 ? '\n\n[Document truncated - showing first 7.5k chars]' : ''}`
-                                    }], 1200);
+                                    }], 4000);
 
                                     const parsed = safeParseJSON(insight);
                                     return { fileName: file.name, insights: Array.isArray(parsed) ? parsed : [] };
@@ -1690,7 +1690,7 @@ Guidelines:
                         }, {
                             role: 'user',
                             content: `Create comprehensive document analysis for meeting: ${meetingTitle}`
-                        }], 1000);
+                        }], 4000);
 
                         documentAnalysis = docNarrative?.trim() || 'Document analysis in progress.';
                         console.log(`  ✓ Document analysis: ${documentAnalysis.length} chars from ${allInsights.length} docs`);
@@ -1891,7 +1891,7 @@ Calendar Data:
 ${JSON.stringify(contributionData.calendarEvents, null, 2)}
 
 Analyze contributions deeply.`
-                }], 2000);
+                }], 4000);
 
                 try {
                     const parsed = safeParseJSON(contributionAnalysisRaw);
@@ -1904,7 +1904,7 @@ Analyze contributions deeply.`
                         }, {
                             role: 'user',
                             content: `Contribution Analysis:\n${JSON.stringify(parsed, null, 2)}\n\nCreate narrative explaining contributions and roles from ${userContext ? userContext.formattedName + "'s" : "the user's"} perspective.`
-                        }], 1000);
+                        }], 4000);
                     } else {
                         contributionAnalysis = contributionAnalysisRaw;
                     }
@@ -1965,7 +1965,7 @@ Timeline Summary (key events - will be refined after timeline analysis):
 ${relevantEmails.length > 0 ? relevantEmails.slice(0, 10).map(e => `- email: ${e.subject} (${e.date ? new Date(e.date).toLocaleDateString() : 'unknown'})`).join('\n') : 'No timeline events yet'}
 
 Synthesize the broader narrative from ${userContext ? userContext.formattedName + "'s" : "the user's"} perspective.`
-                }], 2000);
+                }], 4000);
 
                 broaderNarrative = broaderNarrative?.trim() || 'Narrative synthesis in progress.';
                 console.log(`  ✓ Broader narrative: ${broaderNarrative.length} chars`);
@@ -2120,7 +2120,7 @@ ${e.type === 'document' ? `Document: ${e.name}\nOwner: ${e.participants.join(', 
 ${e.type === 'meeting' ? `Meeting: ${e.name}\nAttendees: ${e.participants.join(', ')}\nDescription: ${e.description || 'No description'}` : ''}
 ---`;
 }).join('\n\n')}`
-                    }], 2000);
+                    }], 4000);
                     
                     try {
                         const parsed = safeParseJSON(timelineAnalysis);
@@ -2349,7 +2349,7 @@ Key Timeline Events (from broader narrative analysis):
 ${brief._timelineTrend ? `TREND: ${brief._timelineTrend.description}\n` : ''}${(limitedTimeline || []).length > 0 ? (limitedTimeline || []).slice(0, 15).map(e => `- ${e.type}: ${e.name || e.subject} (${e.date ? new Date(e.date).toLocaleDateString() : 'unknown date'})`).join('\n') : 'Timeline events will be analyzed'}
 
 Analyze deeply: What is this meeting REALLY about? Use ALL the collated information to understand the complete picture. Consider the timeline trend when analyzing momentum and urgency.`
-            }], 2500);
+            }], 4000);
 
             let purposeData = {};
             try {

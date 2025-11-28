@@ -16,11 +16,11 @@ function sleep(ms) {
 /**
  * Call OpenAI GPT-5 for analysis with automatic retry on rate limits
  * @param {Array} messages - Array of message objects with role and content
- * @param {number} maxTokens - Maximum tokens to generate (default: 1000)
+ * @param {number} maxTokens - Maximum tokens to generate (default: 4000 - GPT-5 can use up to 2000 tokens just in reasoning)
  * @param {number} retryCount - Current retry attempt (internal use)
  * @returns {Promise<string>} - GPT response content
  */
-async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
+async function callGPT(messages, maxTokens = 4000, retryCount = 0) {
     const maxRetries = 3;
     const timeoutMs = 60000; // 60 second timeout
 
@@ -195,6 +195,26 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
         
         // Handle empty content (even if refusal is null)
         if (!message.content || (typeof message.content === 'string' && message.content.trim().length === 0)) {
+            // Special handling for "length" finish_reason with empty content
+            // GPT-5 may return empty content when hitting token limit if response would be too long
+            if (finishReason === 'length' && data.usage?.completion_tokens >= maxTokens * 0.95) {
+                console.error(`   ❌ [${requestId}] GPT-5 hit token limit (${data.usage.completion_tokens}/${maxTokens}) and returned empty content`);
+                console.error(`   This suggests the response would exceed the limit. Consider increasing max_completion_tokens.`);
+                console.error(`   Model used: gpt-5`);
+                console.error(`   Usage:`, JSON.stringify(data.usage));
+                console.error(`   Finish reason: ${finishReason}`);
+                
+                // Retry with higher token limit if we haven't exceeded retries
+                // GPT-5 can use up to 2000 tokens just in reasoning, so we need higher limits
+                if (retryCount < maxRetries && maxTokens < 8000) {
+                    const newMaxTokens = Math.min(maxTokens * 2, 8000);
+                    console.log(`   🔄 [${requestId}] Retrying with increased token limit: ${maxTokens} → ${newMaxTokens}`);
+                    return await callGPT(messages, newMaxTokens, retryCount + 1);
+                }
+                
+                throw new Error(`GPT-5 returned empty content due to token limit (${data.usage.completion_tokens}/${maxTokens}). GPT-5 can use up to 2000 tokens just in reasoning - try increasing max_completion_tokens.`);
+            }
+            
             console.error(`   ❌ [${requestId}] GPT-5 returned empty content. Full response:`, JSON.stringify(data, null, 2).substring(0, 2000));
             console.error(`   Model used: gpt-5`);
             console.error(`   Usage:`, data.usage ? JSON.stringify(data.usage) : 'not provided');
@@ -267,10 +287,10 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
  * Synthesize results with strict fact-checking
  * @param {string} prompt - The synthesis prompt
  * @param {Object} data - Data to synthesize
- * @param {number} maxTokens - Maximum tokens (default: 500)
+ * @param {number} maxTokens - Maximum tokens (default: 4000 - GPT-5 can use up to 2000 tokens just in reasoning)
  * @returns {Promise<string|null>} - Synthesized result or null on error
  */
-async function synthesizeResults(prompt, data, maxTokens = 500) {
+async function synthesizeResults(prompt, data, maxTokens = 4000) {
     try {
         const result = await callGPT([{
             role: 'system',
