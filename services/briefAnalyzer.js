@@ -696,7 +696,7 @@ Return ONLY the JSON array, no other text.`,
             ];
 
             const requestBody = {
-                model: 'gpt-4o',
+                model: 'gpt-5',
                 messages,
                 temperature,
                 max_tokens: maxTokens

@@ -443,7 +443,7 @@ Generate a comprehensive system prompt structure that Shadow can use to deliver 
                 'Authorization': `Bearer ${this.openaiApiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: 'gpt-5',
                 temperature: 0.7,
                 messages: [
                     { role: 'system', content: systemPromptForGPT },
@@ -1052,7 +1052,7 @@ Generate a comprehensive system prompt structure for Shadow's day prep mode that
                 'Authorization': `Bearer ${this.openaiApiKey}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: 'gpt-5',
                 temperature: 0.7,
                 messages: [
                     { role: 'system', content: systemPromptForGPT },

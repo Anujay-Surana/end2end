@@ -157,19 +157,33 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
         }
         
         const message = data.choices[0].message;
+        const finishReason = data.choices[0].finish_reason;
+        
         console.log(`   Message structure:`, {
             role: message.role,
             hasContent: !!message.content,
             contentLength: message.content ? message.content.length : 0,
             hasToolCalls: !!message.tool_calls,
-            finishReason: data.choices[0].finish_reason
+            finishReason: finishReason
         });
+        
+        // Analyze finish_reason for potential issues
+        if (finishReason !== 'stop') {
+            console.warn(`   ⚠️  [${requestId}] Unusual finish reason: ${finishReason}`);
+            if (finishReason === 'content_filter') {
+                console.warn(`   ⚠️  Content was filtered by OpenAI's safety system - response may be incomplete`);
+            } else if (finishReason === 'length') {
+                console.warn(`   ⚠️  Response was truncated due to max_completion_tokens limit (${maxTokens} tokens)`);
+            } else if (finishReason === 'tool_calls') {
+                console.log(`   ℹ️  Response contains tool calls (function calling)`);
+            }
+        }
         
         if (!message.content) {
             console.error(`   ❌ [${requestId}] GPT API returned empty content. Full response:`, JSON.stringify(data, null, 2).substring(0, 2000));
             console.error(`   Model used: gpt-5`);
             console.error(`   Usage:`, data.usage ? JSON.stringify(data.usage) : 'not provided');
-            console.error(`   Finish reason:`, data.choices[0].finish_reason);
+            console.error(`   Finish reason: ${finishReason}`);
             throw new Error(`GPT API returned empty content - model may not exist or may have issues`);
         }
         
@@ -177,9 +191,22 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
         console.log(`   ✅ [${requestId}] Success! Content length: ${content.length} chars`);
         console.log(`   Content preview: ${content.substring(0, 200)}...`);
         
+        // Validate content length relative to token usage
+        if (content.length > 0 && data.usage?.completion_tokens) {
+            const avgCharsPerToken = content.length / data.usage.completion_tokens;
+            console.log(`   Content efficiency: ${avgCharsPerToken.toFixed(2)} chars/token`);
+            if (avgCharsPerToken < 2) {
+                console.warn(`   ⚠️  [${requestId}] Very low chars/token ratio: ${avgCharsPerToken.toFixed(2)} (might indicate encoding issues or unusual content)`);
+            }
+            if (data.usage.completion_tokens >= maxTokens * 0.95) {
+                console.warn(`   ⚠️  [${requestId}] Used ${data.usage.completion_tokens}/${maxTokens} tokens (95%+) - response may be truncated`);
+            }
+        }
+        
         if (content.length === 0) {
             console.warn(`   ⚠️  [${requestId}] GPT API returned empty trimmed content. Raw content length: ${message.content.length}`);
             console.warn(`   Raw content:`, message.content);
+            console.warn(`   Finish reason: ${finishReason}`);
         }
         
         if (data.usage) {

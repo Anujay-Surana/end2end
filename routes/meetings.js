@@ -454,6 +454,26 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                 } else {
                     console.log(`  ⚠️  No display name found, using email prefix: "${name}"`);
                 }
+
+                // Check past calendar events for display name if not found
+                if (!att.displayName && !att.name && calendarEvents && calendarEvents.length > 0) {
+                    const pastEventWithAttendee = calendarEvents.find(event => 
+                        event.attendees?.some(a => 
+                            (a.email || a.emailAddress)?.toLowerCase() === attendeeEmail.toLowerCase() && 
+                            (a.displayName || a.name)
+                        )
+                    );
+                    if (pastEventWithAttendee) {
+                        const pastAttendee = pastEventWithAttendee.attendees.find(a => 
+                            (a.email || a.emailAddress)?.toLowerCase() === attendeeEmail.toLowerCase()
+                        );
+                        if (pastAttendee?.displayName || pastAttendee?.name) {
+                            name = pastAttendee.displayName || pastAttendee.name;
+                            console.log(`    📛 Found display name from past calendar event: "${name}"`);
+                        }
+                    }
+                }
+
                 console.log(`  🔍 Researching: ${name} (${attendeeEmail})`);
 
                 let keyFacts = [];
@@ -465,13 +485,13 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                     e.from?.toLowerCase().includes(attendeeEmail.toLowerCase())
                 ) : [];
 
-                if (attendeeEmails.length > 0 && (!att.displayName || !att.displayName.includes(' '))) {
+                if (attendeeEmails.length > 0 && (!name.includes(' ') || name === attendeeEmail.split('@')[0])) {
                     const fromHeader = attendeeEmails[0].from;
                     const nameMatch = fromHeader?.match(/^([^<]+)(?=\s*<)/);
                     if (nameMatch && nameMatch[1].trim()) {
                         const extractedName = nameMatch[1].trim().replace(/"/g, '');
                         if (extractedName.includes(' ') || extractedName.length > name.length) {
-                            console.log(`    📛 Extracted full name from email: "${extractedName}"`);
+                            console.log(`    📛 Extracted full name from "From" header: "${extractedName}"`);
                             name = extractedName;
                         }
                     }
@@ -481,6 +501,31 @@ router.post('/prep-meeting', meetingPrepLimiter, optionalAuth, validateMeetingPr
                 const emailsToAttendee = emails ? emails.filter(e =>
                     e.to?.toLowerCase().includes(attendeeEmail.toLowerCase())
                 ) : [];
+
+                // Also extract name from "To" header if we still don't have a full name
+                if (emailsToAttendee.length > 0 && (!name.includes(' ') || name === attendeeEmail.split('@')[0])) {
+                    for (const email of emailsToAttendee) {
+                        const toHeader = email.to;
+                        if (!toHeader) continue;
+                        
+                        // Handle multiple recipients: "Name1 <email1>, Name2 <email2>"
+                        const recipients = toHeader.split(',').map(r => r.trim());
+                        for (const recipient of recipients) {
+                            if (recipient.toLowerCase().includes(attendeeEmail.toLowerCase())) {
+                                const nameMatch = recipient.match(/^([^<]+)(?=\s*<)/);
+                                if (nameMatch && nameMatch[1].trim()) {
+                                    const extractedName = nameMatch[1].trim().replace(/"/g, '');
+                                    if (extractedName.includes(' ') || extractedName.length > name.length) {
+                                        console.log(`    📛 Extracted name from "To" header: "${extractedName}"`);
+                                        name = extractedName;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (name.includes(' ')) break; // Found a good name, stop searching
+                    }
+                }
                 
                 // Combine emails FROM and TO attendee, deduplicate by ID
                 const allAttendeeEmails = [...attendeeEmails, ...emailsToAttendee];

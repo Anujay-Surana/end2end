@@ -217,7 +217,7 @@ Generate a comprehensive system prompt structure for Shadow's day prep mode.`;
                     'Authorization': `Bearer ${openaiApiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'gpt-4o',
+                    model: 'gpt-5',
                     temperature: 0.7,
                     messages: [
                         { role: 'system', content: systemPromptForGPT },

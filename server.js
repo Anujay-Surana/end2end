@@ -2103,7 +2103,7 @@ async function analyzeTranscript(buffer, context, ws, recentSuggestionHashes) {
                 'Authorization': `Bearer ${OPENAI_API_KEY}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: 'gpt-5',
                 temperature: 0.7,
                 messages: [{
                     role: 'system',
@@ -2340,7 +2340,7 @@ Guidelines:
                 'Authorization': `Bearer ${OPENAI_API_KEY}`
             },
             body: JSON.stringify({
-                model: 'gpt-4o',
+                model: 'gpt-5',
                 temperature: 0.7,
                 messages: messages,
                 tools: tools,
@@ -2391,7 +2391,7 @@ Guidelines:
                         'Authorization': `Bearer ${OPENAI_API_KEY}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o',
+                        model: 'gpt-5',
                 temperature: 0.7,
                         messages: [
                             ...messages,

@@ -38,7 +38,7 @@ class ChatPanelService {
                     'Authorization': `Bearer ${this.openaiApiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'gpt-4o',
+                    model: 'gpt-5',
                     messages: messages,
                     max_tokens: 500,
                     temperature: 0.7
