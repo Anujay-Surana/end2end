@@ -5103,6 +5103,47 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     <h4>User Profile: ${userContext.name || 'Unknown'}</h4>
                     <p><strong>Email:</strong> ${userContext.email || 'N/A'}</p>
                     
+                    ${userContext.biographicalInfo ? `
+                        <div style="margin-top: 20px;">
+                            <h5>Biographical Information</h5>
+                            ${userContext.biographicalInfo.jobTitle ? `
+                                <p><strong>Job Title:</strong> ${userContext.biographicalInfo.jobTitle}</p>
+                            ` : ''}
+                            ${userContext.biographicalInfo.company ? `
+                                <p><strong>Company:</strong> ${userContext.biographicalInfo.company}</p>
+                            ` : ''}
+                            ${userContext.biographicalInfo.location ? `
+                                <div style="margin-top: 8px;">
+                                    <p><strong>Location:</strong></p>
+                                    ${userContext.biographicalInfo.location.city ? `<p style="margin-left: 20px;">City: ${userContext.biographicalInfo.location.city}</p>` : ''}
+                                    ${userContext.biographicalInfo.location.state ? `<p style="margin-left: 20px;">State: ${userContext.biographicalInfo.location.state}</p>` : ''}
+                                    ${userContext.biographicalInfo.location.country ? `<p style="margin-left: 20px;">Country: ${userContext.biographicalInfo.location.country}</p>` : ''}
+                                    ${userContext.biographicalInfo.location.timezone ? `<p style="margin-left: 20px;">Timezone: ${userContext.biographicalInfo.location.timezone}</p>` : ''}
+                                </div>
+                            ` : ''}
+                            ${userContext.biographicalInfo.phone ? `
+                                <p><strong>Phone:</strong> ${userContext.biographicalInfo.phone}</p>
+                            ` : ''}
+                            ${userContext.biographicalInfo.travelPatterns ? `
+                                <div style="margin-top: 8px;">
+                                    <p><strong>Travel Patterns:</strong></p>
+                                    ${userContext.biographicalInfo.travelPatterns.primaryLocation ? `
+                                        <p style="margin-left: 20px;">Primary Location: ${userContext.biographicalInfo.travelPatterns.primaryLocation}</p>
+                                    ` : ''}
+                                    ${userContext.biographicalInfo.travelPatterns.frequentLocations && userContext.biographicalInfo.travelPatterns.frequentLocations.length > 0 ? `
+                                        <p style="margin-left: 20px;">Frequent Locations: ${userContext.biographicalInfo.travelPatterns.frequentLocations.join(', ')}</p>
+                                    ` : ''}
+                                    ${userContext.biographicalInfo.travelPatterns.travelFrequency ? `
+                                        <p style="margin-left: 20px;">Travel Frequency: ${userContext.biographicalInfo.travelPatterns.travelFrequency}</p>
+                                    ` : ''}
+                                </div>
+                            ` : ''}
+                            ${userContext.biographicalInfo.confidence ? `
+                                <p style="margin-top: 8px; color: #666; font-size: 0.9em;"><strong>Confidence:</strong> ${userContext.biographicalInfo.confidence}</p>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+                    
                     ${userContext.communicationStyle ? `
                         <div style="margin-top: 20px;">
                             <h5>Communication Style</h5>

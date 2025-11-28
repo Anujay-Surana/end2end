@@ -1988,14 +1988,15 @@ Write as if briefing ${userContext ? userContext.formattedName : 'an executive'}
                         return from.includes(userContext.email.toLowerCase());
                     });
                     
+                    // Pass all emails (not just sent) so buildUserProfile can extract both sent and received
                     if (userSentEmails.length >= 5) {
                         brief._extractionData.userContext = await buildUserProfile(
                             userContext,
-                            userSentEmails,
+                            emails, // Pass all emails so function can extract both sent and received
                             (filesWithContent || []).filter(f => f.ownerEmail?.toLowerCase().includes(userContext.email.toLowerCase())),
                             calendarEvents
                         );
-                        console.log(`  ✓ User context built: ${brief._extractionData.userContext.communicationStyle ? 'communication style' : ''} ${brief._extractionData.userContext.expertise ? 'expertise' : ''}`);
+                        console.log(`  ✓ User context built: ${brief._extractionData.userContext.communicationStyle ? 'communication style' : ''} ${brief._extractionData.userContext.expertise ? 'expertise' : ''} ${brief._extractionData.userContext.biographicalInfo ? 'biographical info' : ''}`);
                     } else {
                         brief._extractionData.userContext = {
                             name: userContext.name,

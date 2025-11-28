@@ -234,6 +234,302 @@ function analyzeRelationshipStrength(userEmail, otherEmail, allEmails) {
 }
 
 /**
+ * Extract company name from email domain
+ * 
+ * @param {string} email - User's email address
+ * @returns {Object} - Company information
+ */
+function inferCompanyFromEmail(email) {
+    if (!email || !email.includes('@')) {
+        return { company: null, domain: null };
+    }
+    
+    const domain = email.split('@')[1];
+    if (!domain) {
+        return { company: null, domain: null };
+    }
+    
+    // Extract company name from domain (e.g., "kordn8.ai" -> "Kordn8")
+    const domainParts = domain.split('.');
+    const companyPart = domainParts[0];
+    
+    // Capitalize first letter
+    const company = companyPart.charAt(0).toUpperCase() + companyPart.slice(1);
+    
+    return {
+        company: company,
+        domain: domain,
+        source: 'email_domain'
+    };
+}
+
+/**
+ * Extract location and travel patterns from calendar events
+ * 
+ * @param {Array} calendarEvents - User's calendar events
+ * @returns {Object} - Location and travel data
+ */
+function extractLocationAndTravelPatterns(calendarEvents) {
+    if (!calendarEvents || calendarEvents.length === 0) {
+        return {
+            location: null,
+            travelPatterns: null
+        };
+    }
+    
+    const locations = [];
+    const timezones = new Set();
+    
+    // Extract locations from events
+    calendarEvents.forEach(event => {
+        if (event.location) {
+            locations.push(event.location);
+        }
+        
+        // Try to infer timezone from event times
+        if (event.start?.dateTime) {
+            const startDate = new Date(event.start.dateTime);
+            // Compare UTC vs local time to infer timezone
+            const utcOffset = startDate.getTimezoneOffset();
+            timezones.add(utcOffset);
+        }
+    });
+    
+    // Extract cities from locations
+    const cityCounts = {};
+    locations.forEach(loc => {
+        // Simple extraction: look for city patterns
+        // Common patterns: "City, State", "City, Country", "City"
+        const cityMatch = loc.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
+        if (cityMatch) {
+            const city = cityMatch[1];
+            cityCounts[city] = (cityCounts[city] || 0) + 1;
+        }
+    });
+    
+    // Find primary location (most frequent city)
+    const sortedCities = Object.entries(cityCounts)
+        .sort((a, b) => b[1] - a[1]);
+    const primaryLocation = sortedCities.length > 0 ? sortedCities[0][0] : null;
+    const frequentLocations = sortedCities.slice(0, 5).map(([city]) => city);
+    
+    // Determine travel frequency
+    const uniqueCities = Object.keys(cityCounts).length;
+    let travelFrequency = 'rare';
+    if (uniqueCities >= 5) {
+        travelFrequency = 'frequent';
+    } else if (uniqueCities >= 2) {
+        travelFrequency = 'occasional';
+    }
+    
+    // Infer timezone from most common UTC offset
+    const timezoneOffsets = Array.from(timezones);
+    const mostCommonOffset = timezoneOffsets.length > 0 
+        ? timezoneOffsets.sort((a, b) => {
+            const countA = timezoneOffsets.filter(o => o === a).length;
+            const countB = timezoneOffsets.filter(o => o === b).length;
+            return countB - countA;
+        })[0]
+        : null;
+    
+    // Convert UTC offset to timezone (approximate)
+    let timezone = null;
+    if (mostCommonOffset !== null) {
+        // Common timezone mappings (approximate)
+        if (mostCommonOffset === -480) timezone = 'America/Los_Angeles'; // PST
+        else if (mostCommonOffset === -420) timezone = 'America/Denver'; // MST
+        else if (mostCommonOffset === -300) timezone = 'America/New_York'; // EST
+        else if (mostCommonOffset === 0) timezone = 'Europe/London'; // GMT
+        else if (mostCommonOffset === 330) timezone = 'Asia/Kolkata'; // IST
+    }
+    
+    return {
+        location: primaryLocation ? {
+            city: primaryLocation,
+            timezone: timezone
+        } : null,
+        travelPatterns: {
+            primaryLocation: primaryLocation || null,
+            frequentLocations: frequentLocations,
+            travelFrequency: travelFrequency,
+            uniqueCities: uniqueCities
+        }
+    };
+}
+
+/**
+ * Extract biographical information from email signatures and content
+ * Uses both sent and received emails for comprehensive context
+ * 
+ * @param {Array} userSentEmails - Emails sent by the user
+ * @param {Array} userReceivedEmails - Emails received by the user
+ * @returns {Promise<Object>} - Biographical data
+ */
+async function extractBiographicalInfo(userSentEmails = [], userReceivedEmails = []) {
+    // Combine both email sets, prioritizing sent emails
+    const allEmailsForAnalysis = [
+        ...userSentEmails.slice(0, 15).map(e => ({ ...e, source: 'sent' })),
+        ...userReceivedEmails.slice(0, 10).map(e => ({ ...e, source: 'received' }))
+    ];
+    
+    if (allEmailsForAnalysis.length === 0) {
+        return {
+            jobTitle: null,
+            company: null,
+            location: null,
+            phone: null
+        };
+    }
+    
+    // Extract email signatures and relevant content
+    const emailSamples = allEmailsForAnalysis.map(e => {
+        const body = (e.body || e.snippet || '').trim();
+        // Extract last 15 lines (likely signature area)
+        const lines = body.split('\n');
+        const signatureLines = lines.slice(-15).join('\n');
+        
+        return {
+            source: e.source,
+            subject: e.subject,
+            from: e.from,
+            to: e.to,
+            body: body.substring(0, 2000), // Full body for context
+            signature: signatureLines, // Last 15 lines (signature area)
+            date: e.date
+        };
+    });
+    
+    try {
+        const analysis = await callGPT([{
+            role: 'system',
+            content: `Extract biographical information from email signatures and content. Analyze BOTH sent emails (user's own signatures) and received emails (how others address the user).
+
+Return JSON:
+{
+  "jobTitle": "CEO" | "Founder" | "Senior Engineer" | null,
+  "company": "Company Name" | null,
+  "location": {
+    "city": "City Name" | null,
+    "state": "State/Province" | null,
+    "country": "Country" | null
+  },
+  "phone": "+1-xxx-xxx-xxxx" | null,
+  "confidence": "high" | "medium" | "low"
+}
+
+Look for:
+- Job titles in signatures (e.g., "CEO", "Founder", "Senior Engineer")
+- Company names in signatures or email domains
+- Location information (city, state, country)
+- Phone numbers in signatures
+- How others address the user in received emails (may indicate role/company)
+
+Prioritize information from sent emails (user's own signatures) but also use received emails for context.`
+        }, {
+            role: 'user',
+            content: `Email samples (sent=${userSentEmails.length}, received=${userReceivedEmails.length}):\n${JSON.stringify(emailSamples, null, 2)}`
+        }], 1200);
+        
+        const biographicalData = safeParseJSON(analysis);
+        return {
+            jobTitle: biographicalData.jobTitle || null,
+            company: biographicalData.company || null,
+            location: biographicalData.location || null,
+            phone: biographicalData.phone || null,
+            confidence: biographicalData.confidence || 'low'
+        };
+    } catch (e) {
+        console.log(`  ⚠️  Biographical info extraction failed: ${e.message}`);
+        return {
+            jobTitle: null,
+            company: null,
+            location: null,
+            phone: null,
+            confidence: 'low'
+        };
+    }
+}
+
+/**
+ * Extract role and company information from email content
+ * Analyzes both sent and received emails for comprehensive context
+ * 
+ * @param {Array} userSentEmails - Emails sent by the user
+ * @param {Array} userReceivedEmails - Emails received by the user
+ * @returns {Promise<Object>} - Role and company information
+ */
+async function extractRoleFromEmailContent(userSentEmails = [], userReceivedEmails = []) {
+    // Combine both email sets
+    const allEmailsForAnalysis = [
+        ...userSentEmails.slice(0, 20).map(e => ({ ...e, source: 'sent' })),
+        ...userReceivedEmails.slice(0, 15).map(e => ({ ...e, source: 'received' }))
+    ];
+    
+    if (allEmailsForAnalysis.length === 0) {
+        return {
+            jobTitle: null,
+            company: null,
+            confidence: 'low'
+        };
+    }
+    
+    // Extract relevant content from emails
+    const emailContent = allEmailsForAnalysis.map(e => {
+        const body = (e.body || e.snippet || '').trim();
+        return {
+            source: e.source,
+            subject: e.subject,
+            from: e.from,
+            to: e.to,
+            content: body.substring(0, 1500), // First 1500 chars (intro + signature area)
+            date: e.date
+        };
+    });
+    
+    try {
+        const analysis = await callGPT([{
+            role: 'system',
+            content: `Extract job title and company information from email content. Analyze BOTH sent emails (user's self-descriptions) and received emails (how others address/refer to the user).
+
+Return JSON:
+{
+  "jobTitle": "CEO" | "Founder" | "Senior Engineer" | null,
+  "company": "Company Name" | null,
+  "confidence": "high" | "medium" | "low",
+  "evidence": ["evidence 1", "evidence 2"]
+}
+
+Look for:
+- From sent emails: Direct self-descriptions ("I'm the CEO", "as a Senior Engineer", "at Kordn8")
+- From received emails: How others address the user ("Hi Anujay, CEO of...", "thanks for leading...")
+- Role descriptions in email signatures or introductions
+- Company mentions in both directions
+
+Prioritize sent emails but use received emails for additional context.`
+        }, {
+            role: 'user',
+            content: `Email content (sent=${userSentEmails.length}, received=${userReceivedEmails.length}):\n${JSON.stringify(emailContent, null, 2)}`
+        }], 1200);
+        
+        const roleData = safeParseJSON(analysis);
+        return {
+            jobTitle: roleData.jobTitle || null,
+            company: roleData.company || null,
+            confidence: roleData.confidence || 'low',
+            evidence: roleData.evidence || []
+        };
+    } catch (e) {
+        console.log(`  ⚠️  Role extraction failed: ${e.message}`);
+        return {
+            jobTitle: null,
+            company: null,
+            confidence: 'low',
+            evidence: []
+        };
+    }
+}
+
+/**
  * Build comprehensive user profile from available data
  * 
  * @param {Object} user - User object with basic info
@@ -250,19 +546,32 @@ async function buildUserProfile(user, allEmails = [], allDocuments = [], calenda
         communicationStyle: null,
         expertise: null,
         workingPatterns: null,
+        biographicalInfo: null,
         relationships: []
     };
     
-    // Extract user's sent emails
+    const userEmailLower = user.email.toLowerCase();
+    
+    // Extract user's sent emails (FROM user)
     const userSentEmails = allEmails.filter(e => {
         const from = (e.from || '').toLowerCase();
-        return from.includes(user.email.toLowerCase());
+        return from.includes(userEmailLower);
+    });
+    
+    // Extract user's received emails (TO user or user in recipients)
+    const userReceivedEmails = allEmails.filter(e => {
+        const to = (e.to || '').toLowerCase();
+        const cc = (e.cc || '').toLowerCase();
+        const bcc = (e.bcc || '').toLowerCase();
+        return to.includes(userEmailLower) || 
+               cc.includes(userEmailLower) || 
+               bcc.includes(userEmailLower);
     });
     
     // Extract user's documents
     const userDocuments = allDocuments.filter(d => {
         const owner = (d.ownerEmail || d.owner || '').toLowerCase();
-        return owner.includes(user.email.toLowerCase());
+        return owner.includes(userEmailLower);
     });
     
     // Analyze communication style if enough data
@@ -281,6 +590,57 @@ async function buildUserProfile(user, allEmails = [], allDocuments = [], calenda
     if (calendarEvents && calendarEvents.length >= 10) {
         profile.workingPatterns = analyzeWorkingPatterns(calendarEvents, user.email);
     }
+    
+    // Extract biographical information
+    console.log(`  📋 Extracting biographical info (sent: ${userSentEmails.length}, received: ${userReceivedEmails.length})...`);
+    
+    // Extract from email signatures and content
+    const biographicalFromEmails = await extractBiographicalInfo(userSentEmails, userReceivedEmails);
+    
+    // Extract role/company from email content
+    const roleFromContent = await extractRoleFromEmailContent(userSentEmails, userReceivedEmails);
+    
+    // Extract company from email domain
+    const companyFromDomain = inferCompanyFromEmail(user.email);
+    
+    // Extract location/travel from calendar
+    const locationAndTravel = extractLocationAndTravelPatterns(calendarEvents);
+    
+    // Merge location data (combine email and calendar sources)
+    let mergedLocation = null;
+    if (biographicalFromEmails.location || locationAndTravel.location) {
+        mergedLocation = {
+            city: biographicalFromEmails.location?.city || locationAndTravel.location?.city || null,
+            state: biographicalFromEmails.location?.state || null,
+            country: biographicalFromEmails.location?.country || null,
+            timezone: biographicalFromEmails.location?.timezone || locationAndTravel.location?.timezone || null
+        };
+        // Remove null values
+        Object.keys(mergedLocation).forEach(key => {
+            if (mergedLocation[key] === null) {
+                delete mergedLocation[key];
+            }
+        });
+        if (Object.keys(mergedLocation).length === 0) {
+            mergedLocation = null;
+        }
+    }
+    
+    // Merge biographical information (prioritize email signatures, then content, then domain)
+    profile.biographicalInfo = {
+        jobTitle: biographicalFromEmails.jobTitle || roleFromContent.jobTitle || null,
+        company: biographicalFromEmails.company || roleFromContent.company || companyFromDomain.company || null,
+        location: mergedLocation,
+        phone: biographicalFromEmails.phone || null,
+        travelPatterns: locationAndTravel.travelPatterns,
+        confidence: biographicalFromEmails.confidence || roleFromContent.confidence || 'low',
+        sources: {
+            emailDomain: companyFromDomain.company ? 'email_domain' : null,
+            emailSignatures: biographicalFromEmails.jobTitle || biographicalFromEmails.company ? 'email_signatures' : null,
+            emailContent: roleFromContent.jobTitle || roleFromContent.company ? 'email_content' : null,
+            calendar: locationAndTravel.location ? 'calendar' : null
+        }
+    };
     
     return profile;
 }
@@ -337,6 +697,10 @@ module.exports = {
     inferExpertise,
     analyzeRelationshipStrength,
     buildUserProfile,
-    analyzeWorkingPatterns
+    analyzeWorkingPatterns,
+    extractBiographicalInfo,
+    extractLocationAndTravelPatterns,
+    inferCompanyFromEmail,
+    extractRoleFromEmailContent
 };
 
