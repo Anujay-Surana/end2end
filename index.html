@@ -2932,8 +2932,8 @@
             });
 
             document.getElementById('signOutButton').addEventListener('click', signOut);
-            document.getElementById('prevDay').addEventListener('click', () => changeDay(-1));
-            document.getElementById('nextDay').addEventListener('click', () => changeDay(1));
+            // Note: prevDay and nextDay buttons were replaced with calendar widget
+            // Calendar widget handles date selection directly
 
             // Account management modal
             document.getElementById('manageAccountsButton').addEventListener('click', openAccountModal);
@@ -7426,6 +7426,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             const navYearFunc = isCalendarView ? 'navigateCalendarViewYear' : 'navigateCalendarYear';
             const navMonthFunc = isCalendarView ? 'navigateCalendarViewMonth' : 'navigateCalendarMonth';
             const yearSelectorFunc = isCalendarView ? 'showCalendarViewYearSelector' : 'showYearSelector';
+            const dateSelectFunc = isCalendarView ? 'selectCalendarViewDate' : 'selectCalendarDate';
 
             // Build calendar HTML
             let html = `
@@ -7448,7 +7449,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 const prevYear = month === 0 ? year - 1 : year;
                 const daysInPrevMonth = new Date(prevYear, prevMonth + 1, 0).getDate();
                 const day = daysInPrevMonth - startingDayOfWeek + i + 1;
-                html += `<div class="calendar-day other-month" onclick="onDateSelect(${prevYear}, ${prevMonth}, ${day})">${day}</div>`;
+                html += `<div class="calendar-day other-month" onclick="${dateSelectFunc}(${prevYear}, ${prevMonth}, ${day})">${day}</div>`;
             }
 
             // Add days of current month
@@ -7461,7 +7462,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 if (isToday) classes.push('today');
                 if (isSelected) classes.push('selected');
                 
-                html += `<div class="${classes.join(' ')}" onclick="onDateSelect(${year}, ${month}, ${day})">${day}</div>`;
+                html += `<div class="${classes.join(' ')}" onclick="${dateSelectFunc}(${year}, ${month}, ${day})">${day}</div>`;
             }
 
             // Add empty cells for days after the last day of the month
@@ -7470,7 +7471,7 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             for (let day = 1; day <= remainingCells && day <= 14; day++) {
                 const nextMonth = month === 11 ? 0 : month + 1;
                 const nextYear = month === 11 ? year + 1 : year;
-                html += `<div class="calendar-day other-month" onclick="onDateSelect(${nextYear}, ${nextMonth}, ${day})">${day}</div>`;
+                html += `<div class="calendar-day other-month" onclick="${dateSelectFunc}(${nextYear}, ${nextMonth}, ${day})">${day}</div>`;
             }
 
             html += '</div>';
@@ -8102,7 +8103,6 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                 datePicker.value = today.toISOString().split('T')[0];
             }
             // Render calendar if prep view is active
-            if (active)
             if (document.getElementById('prepViewContainer')?.classList.contains('active')) {
                 renderCalendar();
             }
