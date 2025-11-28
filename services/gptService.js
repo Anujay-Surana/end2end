@@ -47,13 +47,22 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
             max_completion_tokens: maxTokens
         };
         
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+            console.error(`   ❌ [${requestId}] OPENAI_API_KEY environment variable is not set!`);
+            throw new Error('OPENAI_API_KEY environment variable is not set');
+        }
+        
+        // Log API key info (masked for security)
+        const apiKeyPreview = apiKey.substring(0, 10) + '...' + apiKey.substring(apiKey.length - 4);
+        console.log(`   API Key: ${apiKeyPreview} (length: ${apiKey.length})`);
         console.log(`   Request body: ${JSON.stringify(requestBody, null, 2).substring(0, 500)}...`);
 
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.substring(0, 10) + '...' : 'MISSING'}`
+                'Authorization': `Bearer ${apiKey}` // Use full API key here!
             },
             body: JSON.stringify(requestBody),
             signal: controller.signal
