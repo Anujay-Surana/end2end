@@ -1367,8 +1367,164 @@ Guidelines:
                 
                 filesWithContent = textBasedFiles;
 
+                // ===== FILE RELEVANCE FILTERING (METADATA-ONLY) =====
+                const originalFileCount = filesWithContent.length;
+                if (filesWithContent.length > 0 && meetingContext) {
+                    console.log(`  🔍 Filtering ${filesWithContent.length} files for meeting relevance (metadata-only, processing in batches of 50)...`);
+                    
+                    const fileBatchSize = 50;
+                    const fileBatches = [];
+                    for (let batchStart = 0; batchStart < filesWithContent.length; batchStart += fileBatchSize) {
+                        fileBatches.push({
+                            start: batchStart,
+                            end: Math.min(batchStart + fileBatchSize, filesWithContent.length),
+                            files: filesWithContent.slice(batchStart, Math.min(batchStart + fileBatchSize, filesWithContent.length))
+                        });
+                    }
+                    
+                    console.log(`  🚀 Processing ${fileBatches.length} file batches in PARALLEL...`);
+                    
+                    const fileRelevancePromises = fileBatches.map(async (batch, batchIndex) => {
+                        console.log(`     File relevance check batch ${batchIndex + 1}/${fileBatches.length} (${batch.files.length} files)...`);
+                        
+                        const userContextPrefix = userContext ? `You are preparing a brief for ${userContext.formattedName} (${userContext.formattedEmail}). ` : '';
+                        
+                        const meetingContextSection = meetingContext ? `
+MEETING CONTEXT:
+- Understood Purpose: ${meetingContext.understoodPurpose}
+- Key Entities: ${meetingContext.keyEntities.length > 0 ? meetingContext.keyEntities.join(', ') : 'none identified'}
+- Key Topics: ${meetingContext.keyTopics.length > 0 ? meetingContext.keyTopics.join(', ') : 'none identified'}
+- Is Specific Meeting: ${meetingContext.isSpecificMeeting ? 'yes' : 'no'}
+- Confidence: ${meetingContext.confidence}
+- Reasoning: ${meetingContext.reasoning}` : '';
+                        
+                        const filteringStrictness = meetingContext?.confidence === 'low' 
+                            ? `
+FILTERING STRICTNESS (LOW CONFIDENCE - BE VERY SELECTIVE):
+- Only include files with STRONG evidence of relevance to extracted entities/topics
+- Require clear, specific connection to meeting entities (${meetingContext?.keyEntities?.join(', ') || 'none'})
+- Don't default to general context
+- Err on the side of EXCLUSION when uncertain
+- Target: 20-40% inclusion rate (be conservative)`
+                            : meetingContext?.confidence === 'medium'
+                            ? `
+FILTERING STRICTNESS (MEDIUM CONFIDENCE):
+- Include files with clear connection to meeting
+- Prioritize files related to extracted entities/topics
+- Target: 40-60% inclusion rate`
+                            : `
+FILTERING STRICTNESS (HIGH CONFIDENCE):
+- Include files that relate to understood purpose/entities
+- Can be more comprehensive
+- Target: 50-70% inclusion rate`;
+                        
+                        const fileRelevanceCheck = await callGPT([{
+                            role: 'system',
+                            content: `${userContextPrefix}You are filtering files for meeting prep. Meeting: "${meetingTitle}"${meetingDateContext}
+${meetingContextSection}
+
+${userContext ? `IMPORTANT: ${userContext.formattedName} is the user you are preparing this brief for. Filter files that are relevant to ${userContext.formattedName}'s understanding of this meeting.` : ''}
+
+✅ INCLUDE IF:
+1. File name/content type suggests relevance to understood meeting purpose
+2. File relates to meeting-specific entities/topics
+3. File owner is a meeting attendee AND file relates to meeting context
+4. File provides context about the understood meeting purpose
+5. File involves extracted key entities (${meetingContext?.keyEntities?.length > 0 ? meetingContext.keyEntities.join(', ') : 'none'})
+
+❌ EXCLUDE IF:
+1. File is about different entities/topics than meeting
+2. File is general/unrelated to understood purpose
+3. File doesn't relate to meeting attendees or extracted entities
+4. File is clearly unrelated to meeting context
+
+DATE CONSIDERATION: Consider file modification date, but don't exclude solely based on age - older files can be highly relevant.
+
+ATTENDEE PRIORITIZATION: Prioritize files where the owner is a meeting attendee.
+
+${filteringStrictness}
+
+Return JSON with file indices to INCLUDE (relative to this batch) AND reasoning:
+{"relevant_indices": [0, 3, 7, ...], "reasoning": {"0": "why file 0 is relevant", "3": "why file 3 is relevant", ...}}`,
+                        }, {
+                            role: 'user',
+                            content: `Files to filter (metadata only):\n${batch.files.map((f, i) => {
+                                const modifiedDate = f.modifiedTime ? new Date(f.modifiedTime).toLocaleDateString() : 'unknown';
+                                const daysAgo = f.modifiedTime ? Math.floor((new Date() - new Date(f.modifiedTime)) / (1000 * 60 * 60 * 24)) : 'unknown';
+                                const ownerEmail = f.ownerEmail || f.owner || 'unknown';
+                                const attendeeEmails = attendees.map(a => (a.email || a.emailAddress)?.toLowerCase()).filter(Boolean);
+                                const ownerIsAttendee = attendeeEmails.some(attEmail => ownerEmail.toLowerCase().includes(attEmail));
+                                return `[${i}] Name: ${f.name}\nOwner: ${ownerEmail}${ownerIsAttendee ? ' (MEETING ATTENDEE)' : ''}\nModified: ${modifiedDate} (${daysAgo} days ago)\nType: ${f.mimeType || 'unknown'}`;
+                            }).join('\n\n')}`
+                        }], 1000);
+                        
+                        let batchIndices = [];
+                        let batchReasoning = {};
+                        try {
+                            const parsed = safeParseJSON(fileRelevanceCheck);
+                            batchIndices = (parsed.relevant_indices || []).map(idx => batch.start + idx);
+                            if (parsed.reasoning) {
+                                Object.keys(parsed.reasoning).forEach(relativeIdx => {
+                                    const absoluteIdx = batch.start + parseInt(relativeIdx);
+                                    batchReasoning[absoluteIdx] = parsed.reasoning[relativeIdx];
+                                });
+                            }
+                        } catch (e) {
+                            logger.error({
+                                requestId: req.requestId,
+                                error: e.message,
+                                batchStart: batch.start,
+                                batchSize: batch.files.length,
+                                meetingTitle: meetingTitle
+                            }, 'Failed to parse file relevance check - excluding batch from analysis');
+                            console.log(`  ⚠️  Failed to parse relevance check for batch ${batchIndex + 1}, excluding from analysis`);
+                            batchIndices = [];
+                        }
+                        
+                        console.log(`     ✓ Found ${batchIndices.length}/${batch.files.length} relevant files in batch ${batchIndex + 1}`);
+                        return { indices: batchIndices, reasoning: batchReasoning };
+                    });
+                    
+                    const fileRelevanceResults = await Promise.all(fileRelevancePromises);
+                    const allFileRelevantIndices = [];
+                    const allFileRelevanceReasoning = {};
+                    fileRelevanceResults.forEach(result => {
+                        allFileRelevantIndices.push(...result.indices);
+                        Object.assign(allFileRelevanceReasoning, result.reasoning);
+                    });
+                    
+                    console.log(`  ✓ Total relevant files: ${allFileRelevantIndices.length}/${originalFileCount}`);
+                    
+                    // Store file relevance reasoning
+                    if (!brief._extractionData) brief._extractionData = {};
+                    brief._extractionData.fileRelevanceReasoning = allFileRelevanceReasoning;
+                    
+                    // Limit to top 15-20 most relevant files
+                    const maxFilesToAnalyze = 20;
+                    if (allFileRelevantIndices.length > 0) {
+                        const relevantFiles = allFileRelevantIndices
+                            .map(idx => ({ idx, file: filesWithContent[idx] }))
+                            .filter(item => item.file) // Ensure file exists
+                            .sort((a, b) => {
+                                // Sort by recency first, then by index (original order)
+                                const dateA = a.file.modifiedTime ? new Date(a.file.modifiedTime).getTime() : 0;
+                                const dateB = b.file.modifiedTime ? new Date(b.file.modifiedTime).getTime() : 0;
+                                return dateB - dateA; // Most recent first
+                            })
+                            .slice(0, maxFilesToAnalyze);
+                        
+                        filesWithContent = relevantFiles.map(item => item.file);
+                        console.log(`  ✓ Limiting deep analysis to top ${filesWithContent.length} most relevant files`);
+                    } else {
+                        filesWithContent = [];
+                        console.log(`  ⚠️  No relevant files found after filtering`);
+                    }
+                } else if (filesWithContent.length > 0 && !meetingContext) {
+                    console.log(`  ⚠️  Skipping file relevance filtering (no meeting context available), analyzing all ${filesWithContent.length} files`);
+                }
+
                 if (filesWithContent.length > 0) {
-                    console.log(`  📊 Deep analysis of ${filesWithContent.length} prioritized documents (processing in PARALLEL batches of 5)...`);
+                    console.log(`  📊 Deep analysis of ${filesWithContent.length} relevant documents (processing in PARALLEL batches of 5)...`);
 
                     // Create batches for progress logging
                     const docBatchSize = 5;
@@ -1405,7 +1561,7 @@ Each insight should:
 Focus on: decisions, data, action items, proposals, problems, solutions, timelines, strategic context.`,
                                     }, {
                                         role: 'user',
-                                        content: `Document: "${file.name}"\n\nContent:\n${file.content.substring(0, 30000)}${file.content.length > 30000 ? '\n\n[Document truncated - showing first 30k chars]' : ''}`
+                                        content: `Document: "${file.name}"\n\nContent:\n${file.content.substring(0, 7500)}${file.content.length > 7500 ? '\n\n[Document truncated - showing first 7.5k chars]' : ''}`
                                     }], 1200);
 
                                     const parsed = safeParseJSON(insight);
