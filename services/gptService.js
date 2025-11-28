@@ -159,12 +159,17 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
         const message = data.choices[0].message;
         const finishReason = data.choices[0].finish_reason;
         
+        // Check for refusal field (GPT-5 may use this)
+        const refusal = message.refusal || null;
+        
         console.log(`   Message structure:`, {
             role: message.role,
             hasContent: !!message.content,
             contentLength: message.content ? message.content.length : 0,
             hasToolCalls: !!message.tool_calls,
-            finishReason: finishReason
+            finishReason: finishReason,
+            hasRefusal: !!refusal,
+            refusal: refusal
         });
         
         // Analyze finish_reason for potential issues
@@ -179,12 +184,30 @@ async function callGPT(messages, maxTokens = 1000, retryCount = 0) {
             }
         }
         
-        if (!message.content) {
-            console.error(`   ❌ [${requestId}] GPT API returned empty content. Full response:`, JSON.stringify(data, null, 2).substring(0, 2000));
+        // Handle refusal case
+        if (refusal) {
+            console.error(`   ❌ [${requestId}] GPT-5 refused to generate content. Refusal:`, JSON.stringify(refusal, null, 2));
             console.error(`   Model used: gpt-5`);
             console.error(`   Usage:`, data.usage ? JSON.stringify(data.usage) : 'not provided');
             console.error(`   Finish reason: ${finishReason}`);
-            throw new Error(`GPT API returned empty content - model may not exist or may have issues`);
+            throw new Error(`GPT-5 refused to generate content: ${JSON.stringify(refusal)}`);
+        }
+        
+        // Handle empty content (even if refusal is null)
+        if (!message.content || (typeof message.content === 'string' && message.content.trim().length === 0)) {
+            console.error(`   ❌ [${requestId}] GPT-5 returned empty content. Full response:`, JSON.stringify(data, null, 2).substring(0, 2000));
+            console.error(`   Model used: gpt-5`);
+            console.error(`   Usage:`, data.usage ? JSON.stringify(data.usage) : 'not provided');
+            console.error(`   Finish reason: ${finishReason}`);
+            console.error(`   Refusal:`, refusal || 'null');
+            console.error(`   Annotations:`, message.annotations || 'none');
+            
+            // Check if there are annotations that might explain the empty content
+            if (message.annotations && Array.isArray(message.annotations) && message.annotations.length > 0) {
+                console.error(`   Annotations details:`, JSON.stringify(message.annotations, null, 2));
+            }
+            
+            throw new Error(`GPT-5 returned empty content - check finish_reason (${finishReason}), refusal, and annotations for details`);
         }
         
         const content = message.content.trim();
