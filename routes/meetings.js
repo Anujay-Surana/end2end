@@ -17,6 +17,91 @@ const { callGPT, synthesizeResults, safeParseJSON, sleep } = require('../service
 const { getUserContext, filterUserFromAttendees, getPromptPrefix } = require('../services/userContext');
 const { calculateRecencyScore, detectStaleness, analyzeTrend, scoreAndRankEmails } = require('../services/temporalScoring');
 const { filterByAdaptiveThreshold, determineOptimalDocumentCount, calculateSignalQuality } = require('../services/dynamicThresholds');
+const logger = require('../services/logger');
+
+/**
+ * Understand meeting context dynamically from available information
+ * Don't make static assumptions - extract entities and topics from actual context
+ * 
+ * @param {Object} meeting - Meeting object
+ * @param {Array} attendees - Meeting attendees
+ * @param {Object} userContext - User context object
+ * @returns {Promise<Object>} Meeting context understanding
+ */
+async function understandMeetingContext(meeting, attendees, userContext) {
+    const meetingTitle = meeting.summary || meeting.title || 'Untitled Meeting';
+    const meetingDescription = meeting.description || '';
+    
+    // Extract attendee names and emails
+    const attendeeInfo = (attendees || []).map(a => ({
+        name: a.name || a.displayName || a.email || a.emailAddress || 'Unknown',
+        email: a.email || a.emailAddress || null
+    }));
+    
+    const userContextPrefix = userContext ? `You are preparing a brief for ${userContext.formattedName} (${userContext.formattedEmail}). ` : '';
+    
+    try {
+        const analysis = await callGPT([{
+            role: 'system',
+            content: `${userContextPrefix}You are analyzing a meeting to understand its context and purpose. Your goal is to extract key information that will help filter relevant emails.
+
+CRITICAL: Don't make assumptions. Only extract information that is clearly present in the available context.
+
+Analyze:
+- Meeting title: What does it tell us?
+- Meeting description: What additional context is provided?
+- Attendees: Who are the key people involved?
+- Extract entities: Person names, project names, topics mentioned
+
+Return JSON:
+{
+  "understoodPurpose": "What this meeting is actually about based on available context (be specific, don't guess)",
+  "keyEntities": ["extracted entities like person names, projects, topics"],
+  "keyTopics": ["extracted topics/themes"],
+  "isSpecificMeeting": true/false, // Is this about specific entities vs general?
+  "confidence": "high" | "medium" | "low", // How confident are we?
+  "reasoning": "Why we think this based on available context"
+}
+
+Guidelines:
+- If context is insufficient, mark confidence as "low" and be conservative
+- Don't assume meeting types (e.g., "<>" doesn't mean anything specific)
+- Extract entities from actual context, not patterns
+- If you can't determine purpose clearly, say so`
+        }, {
+            role: 'user',
+            content: `Meeting Title: "${meetingTitle}"
+${meetingDescription ? `Meeting Description: "${meetingDescription}"` : 'No description provided'}
+Attendees: ${attendeeInfo.map(a => `${a.name}${a.email ? ` (${a.email})` : ''}`).join(', ') || 'No attendees listed'}
+${userContext ? `User: ${userContext.formattedName} (${userContext.formattedEmail})` : ''}
+
+Analyze this meeting and extract its context.`
+        }], 1000);
+        
+        const context = safeParseJSON(analysis);
+        
+        // Ensure all fields are present
+        return {
+            understoodPurpose: context.understoodPurpose || 'Meeting purpose unclear from available context',
+            keyEntities: Array.isArray(context.keyEntities) ? context.keyEntities : [],
+            keyTopics: Array.isArray(context.keyTopics) ? context.keyTopics : [],
+            isSpecificMeeting: context.isSpecificMeeting === true,
+            confidence: context.confidence || 'low',
+            reasoning: context.reasoning || 'Context analysis completed'
+        };
+    } catch (e) {
+        logger.error({ error: e.message }, 'Failed to understand meeting context');
+        // Return conservative default
+        return {
+            understoodPurpose: 'Meeting purpose unclear from available context',
+            keyEntities: [],
+            keyTopics: [],
+            isSpecificMeeting: false,
+            confidence: 'low',
+            reasoning: 'Failed to analyze meeting context'
+        };
+    }
+}
 
 /**
  * POST /api/prep-meeting
@@ -688,6 +773,29 @@ Return JSON array of 3-6 facts (15-80 words each).`,
             
             console.log(`  ✓ Processed ${brief.attendees.length} attendees`);
 
+            // ===== STEP 1.5: UNDERSTAND MEETING CONTEXT BEFORE FILTERING =====
+            console.log(`\n  🧠 Understanding meeting context...`);
+            let meetingContext = null;
+            
+            try {
+                meetingContext = await understandMeetingContext(meeting, attendees, userContext);
+                console.log(`  ✓ Meeting context understood: ${meetingContext.confidence} confidence`);
+                console.log(`     Purpose: ${meetingContext.understoodPurpose?.substring(0, 100)}...`);
+                console.log(`     Key Entities: ${meetingContext.keyEntities?.join(', ') || 'none'}`);
+            } catch (e) {
+                logger.error({ requestId, error: e.message }, 'Failed to understand meeting context, proceeding with conservative filtering');
+                console.log(`  ⚠️  Failed to understand meeting context: ${e.message}`);
+                // Use conservative default context
+                meetingContext = {
+                    understoodPurpose: 'Meeting purpose unclear from available context',
+                    keyEntities: [],
+                    keyTopics: [],
+                    isSpecificMeeting: false,
+                    confidence: 'low',
+                    reasoning: 'Failed to analyze meeting context'
+                };
+            }
+
             // ===== STEP 2: EMAIL RELEVANCE FILTERING + BATCH EXTRACTION =====
             console.log(`\n  📧 Analyzing email threads for meeting context...`);
             let emailAnalysis = '';
@@ -714,33 +822,84 @@ Return JSON array of 3-6 facts (15-80 words each).`,
                     console.log(`     Relevance check batch ${batchIndex + 1}/${batches.length} (${batch.emails.length} emails)...`);
 
                     const userContextPrefix = userContext ? `You are preparing a brief for ${userContext.formattedName} (${userContext.formattedEmail}). ` : '';
+                    
+                    // Extract company name from user context for noise filtering
+                    // Try to get from biographicalInfo if available, otherwise infer from email domain
+                    let userCompany = null;
+                    if (userContext) {
+                        // Check if biographicalInfo exists (might be built later, so check brief)
+                        // For now, infer from email domain as fallback
+                        const emailDomain = userContext.email?.split('@')[1];
+                        if (emailDomain && !emailDomain.includes('gmail.com') && !emailDomain.includes('yahoo.com') && !emailDomain.includes('outlook.com')) {
+                            // Extract company name from domain (e.g., "anujay@kordn8.ai" -> "Kordn8")
+                            const domainParts = emailDomain.split('.');
+                            const companyPart = domainParts[0];
+                            userCompany = companyPart.charAt(0).toUpperCase() + companyPart.slice(1);
+                        }
+                    }
+                    
+                    const companyFilterNote = userCompany 
+                        ? `\n\nUSER CONTEXT - COMPANY NAME FILTERING:
+- User's Company: "${userCompany}"
+- IMPORTANT: Company name appears frequently in emails - don't use it alone as a relevance signal
+- If email only mentions company name (${userCompany}) without other meeting context (entities, topics, attendees), it's likely noise - exclude unless there's clear connection to meeting purpose/entities`
+                        : '';
+                    
+                    // Build meeting context section
+                    const meetingContextSection = meetingContext ? `
+MEETING CONTEXT:
+- Understood Purpose: ${meetingContext.understoodPurpose}
+- Key Entities: ${meetingContext.keyEntities.length > 0 ? meetingContext.keyEntities.join(', ') : 'none identified'}
+- Key Topics: ${meetingContext.keyTopics.length > 0 ? meetingContext.keyTopics.join(', ') : 'none identified'}
+- Is Specific Meeting: ${meetingContext.isSpecificMeeting ? 'yes' : 'no'}
+- Confidence: ${meetingContext.confidence}
+- Reasoning: ${meetingContext.reasoning}` : '';
+                    
+                    // Determine filtering strictness based on confidence
+                    const filteringStrictness = meetingContext?.confidence === 'low' 
+                        ? `
+FILTERING STRICTNESS (LOW CONFIDENCE - BE VERY SELECTIVE):
+- Only include emails with STRONG evidence of relevance to extracted entities/topics
+- Require clear, specific connection to meeting entities (${meetingContext?.keyEntities?.join(', ') || 'none'})
+- Don't default to general company context
+- Err on the side of EXCLUSION when uncertain
+- Target: 30-50% inclusion rate (be conservative)`
+                        : meetingContext?.confidence === 'medium'
+                        ? `
+FILTERING STRICTNESS (MEDIUM CONFIDENCE):
+- Include emails with clear connection to meeting
+- Prioritize emails involving extracted entities/topics
+- Target: 50-70% inclusion rate`
+                        : `
+FILTERING STRICTNESS (HIGH CONFIDENCE):
+- Include emails that relate to understood purpose/entities
+- Can be more comprehensive
+- Target: 60-80% inclusion rate`;
+                    
                     const relevanceCheck = await callGPT([{
                         role: 'system',
                         content: `${userContextPrefix}You are filtering emails for meeting prep. Meeting: "${meetingTitle}"${meetingDateContext}
+${meetingContextSection}${companyFilterNote}
 
 ${userContext ? `IMPORTANT: ${userContext.formattedName} is the user you are preparing this brief for. Filter emails that are relevant to ${userContext.formattedName}'s understanding of this meeting.` : ''}
 
-COMPREHENSIVE FILTERING - Include ALL emails with relevance to understanding the full context.
-
 ✅ INCLUDE IF:
-1. **Direct meeting relevance**: Email discusses this meeting's topic, agenda, or objectives
-2. **Attendee correspondence**: Direct exchanges with meeting attendees about relevant work topics${userContext ? ` (including ${userContext.formattedName}'s own emails if they provide context)` : ''}
-3. **Shared materials**: Documents, slides, or resources related to meeting topics
-4. **Project context**: Updates about projects/initiatives related to this meeting
-5. **Historical decisions**: Past decisions that provide context
-6. **Working relationships**: Emails showing collaboration patterns between attendees${userContext ? ` (including ${userContext.formattedName}'s relationships with others)` : ''}
-7. **Domain knowledge**: Emails from attendee domains discussing relevant topics
+1. Email involves meeting attendees AND relates to understood purpose/entities/topics
+2. Email discusses meeting-specific entities/topics (not just company name)
+3. Email provides context about the understood meeting purpose
+4. Email involves extracted key entities (${meetingContext?.keyEntities?.length > 0 ? meetingContext.keyEntities.join(', ') : 'none'})
 
-❌ EXCLUDE ONLY:
-- Obvious spam, marketing newsletters, promotional emails
-- Automated system notifications (CI/CD, calendar invites without content)
-- Completely unrelated topics from different work streams
+❌ EXCLUDE IF:
+1. Email only mentions company name without meeting context/entities/topics
+2. Email is about different entities/topics than meeting
+3. Email is general company operations unrelated to understood purpose
+4. Email doesn't involve meeting attendees or extracted entities
 
-DATE PRIORITIZATION: Prioritize emails from the last 30 days, but include older emails if highly relevant. Recent emails provide more current context, while older emails provide valuable historical context.
+DATE PRIORITIZATION: Prioritize emails from the last 30 days, but include older emails if highly relevant.
 
-ATTENDEE PRIORITIZATION: Prioritize emails with multiple meeting attendees (higher attendee count = more relevant to meeting context).
+ATTENDEE PRIORITIZATION: Prioritize emails with multiple meeting attendees (higher attendee count = more relevant).
 
-COMPREHENSIVE OVER SELECTIVE: Include 60-80% of emails (err on the side of inclusion), but weight recent emails and emails with more attendees higher in your decision
+${filteringStrictness}
 
 Return JSON with email indices to INCLUDE (relative to this batch) AND reasoning:
 {"relevant_indices": [0, 3, 7, ...], "reasoning": {"0": "why email 0 is relevant", "3": "why email 3 is relevant", ...}}`,
@@ -797,9 +956,10 @@ Return JSON with email indices to INCLUDE (relative to this batch) AND reasoning
                     Object.assign(allRelevanceReasoning, result.reasoning);
                 });
                 
-                // Store reasoning in brief for UI access
+                // Store reasoning and meeting context in brief for UI access
                 if (!brief._extractionData) brief._extractionData = {};
                 brief._extractionData.emailRelevanceReasoning = allRelevanceReasoning;
+                brief._extractionData.meetingContext = meetingContext;
 
                 console.log(`  ✓ Total relevant emails: ${allRelevantIndices.length}/${emails.length}`);
 
