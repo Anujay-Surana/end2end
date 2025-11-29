@@ -983,12 +983,16 @@ async def prep_meeting(
                 'analysisError': str(analysis_error)
             }
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (401, 400, etc.) as-is
+        raise
     except Exception as error:
         logger.error(
             f'Error preparing meeting brief',
             requestId=request_id,
             error=str(error),
-            stack=str(error.__traceback__),
+            errorType=type(error).__name__,
+            stack=str(error.__traceback__) if hasattr(error, '__traceback__') else None,
             meetingTitle=meeting.get('summary') or meeting.get('title') if meeting else 'unknown',
             userId=user.get('id') if user else 'anonymous'
         )
@@ -998,6 +1002,7 @@ async def prep_meeting(
             detail={
                 'error': 'Meeting preparation failed',
                 'message': str(error),
+                'errorType': type(error).__name__,
                 'requestId': request_id
             }
         )

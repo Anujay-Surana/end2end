@@ -79,6 +79,11 @@ async def optional_auth(
     try:
         return await require_auth(session, authorization)
     except HTTPException:
+        # Expected authentication failure - return None
+        return None
+    except Exception as e:
+        # Unexpected error (database, network, etc.) - log and return None gracefully
+        logger.warning(f'Unexpected error in optional_auth: {str(e)}')
         return None
 
 
