@@ -234,13 +234,28 @@ async def delete_credential(
     Returns:
         Success status
     """
-    response = supabase.table('service_credentials').delete().eq('id', credential_id).select('id').execute()
+    if not credential_id:
+        return False
     
-    if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to delete credential: {response.error.message}')
-    
-    success = response.data is not None and len(response.data) > 0
-    if success:
+    # Supabase delete().eq() doesn't support .select() - query first to verify existence
+    try:
+        # First check if credential exists
+        query_response = supabase.table('service_credentials').select('id').eq('id', credential_id).maybe_single().execute()
+        
+        if query_response is None or not query_response.data:
+            return False
+        
+        # Then delete (without select)
+        delete_response = supabase.table('service_credentials').delete().eq('id', credential_id).execute()
+        
+        if delete_response is None:
+            return False
+        if hasattr(delete_response, 'error') and delete_response.error:
+            raise Exception(f'Failed to delete credential: {delete_response.error.message}')
+        
         logger.info(f'Credential deleted: {credential_id}')
-    return success
+        return True
+    except Exception as e:
+        logger.error(f'Error deleting credential: {str(e)}')
+        return False
 

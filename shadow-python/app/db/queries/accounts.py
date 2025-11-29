@@ -211,14 +211,28 @@ async def delete_account(account_id: str) -> bool:
     """
     if not account_id:
         return False
-        
-    response = supabase.table('connected_accounts').delete().eq('id', account_id).select('id').execute()
     
-    if response is None:
+    # Supabase delete().eq() doesn't support .select() - query first to verify existence
+    try:
+        # First check if account exists
+        query_response = supabase.table('connected_accounts').select('id').eq('id', account_id).maybe_single().execute()
+        
+        if query_response is None or not query_response.data:
+            return False
+        
+        # Then delete (without select)
+        delete_response = supabase.table('connected_accounts').delete().eq('id', account_id).execute()
+        
+        if delete_response is None:
+            return False
+        if hasattr(delete_response, 'error') and delete_response.error:
+            raise Exception(f'Failed to delete account: {delete_response.error.message}')
+        
+        return True
+    except Exception as e:
+        from app.services.logger import logger
+        logger.warn(f'Error deleting account: {str(e)}')
         return False
-    if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to delete account: {response.error.message}')
-    return response.data is not None and len(response.data) > 0
 
 
 async def count_user_accounts(user_id: str) -> int:

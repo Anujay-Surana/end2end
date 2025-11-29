@@ -6,7 +6,7 @@ Handles day prep requests - fetches all meetings for a day and prepares comprehe
 
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.middleware.auth import optional_auth
@@ -47,10 +47,10 @@ async def get_meetings_for_day(
     try:
         logger.info('Fetching meetings for day', requestId=request_id, date=date)
 
-        # Parse date string (YYYY-MM-DD) - create date at midnight in local timezone
+        # Parse date string (YYYY-MM-DD) - create date at midnight in UTC
         try:
             year, month, day = map(int, date.split('-'))
-            selected_date = datetime(year, month, day)  # Creates date in local timezone
+            selected_date = datetime(year, month, day, tzinfo=timezone.utc)  # Creates date in UTC
         except (ValueError, TypeError):
             raise HTTPException(
                 status_code=400,
@@ -64,7 +64,7 @@ async def get_meetings_for_day(
                 }
             )
 
-        # Set time boundaries for the day
+        # Set time boundaries for the day (UTC-aware for RFC3339 format)
         start_of_day = selected_date.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = selected_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 

@@ -8,7 +8,7 @@ Supports multi-account and single-account modes
 import asyncio
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -263,7 +263,13 @@ async def prep_meeting(
             # Fetch calendar events
             # Extract meeting date from meeting object (as datetime for calendar query)
             meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
-            meeting_datetime = datetime.fromisoformat(meeting_start.replace('Z', '+00:00')) if meeting_start else datetime.utcnow()
+            if meeting_start:
+                meeting_datetime = datetime.fromisoformat(meeting_start.replace('Z', '+00:00'))
+                # Ensure timezone-aware (if naive, assume UTC)
+                if meeting_datetime.tzinfo is None:
+                    meeting_datetime = meeting_datetime.replace(tzinfo=timezone.utc)
+            else:
+                meeting_datetime = datetime.now(timezone.utc)
             
             calendar_result = await fetch_calendar_from_all_accounts(accounts, meeting_datetime)
             calendar_events = calendar_result.get('results', [])

@@ -133,12 +133,26 @@ async def delete_user(user_id: str) -> bool:
     """
     if not user_id:
         return False
-        
-    response = supabase.table('users').delete().eq('id', user_id).select('id').execute()
     
-    if response is None:
+    # Supabase delete().eq() doesn't support .select() - query first to verify existence
+    try:
+        # First check if user exists
+        query_response = supabase.table('users').select('id').eq('id', user_id).maybe_single().execute()
+        
+        if query_response is None or not query_response.data:
+            return False
+        
+        # Then delete (without select)
+        delete_response = supabase.table('users').delete().eq('id', user_id).execute()
+        
+        if delete_response is None:
+            return False
+        if hasattr(delete_response, 'error') and delete_response.error:
+            raise Exception(f'Failed to delete user: {delete_response.error.message}')
+        
+        return True
+    except Exception as e:
+        from app.services.logger import logger
+        logger.warn(f'Error deleting user: {str(e)}')
         return False
-    if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to delete user: {response.error.message}')
-    return response.data is not None and len(response.data) > 0
 

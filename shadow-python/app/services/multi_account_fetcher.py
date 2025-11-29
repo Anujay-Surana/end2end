@@ -8,7 +8,7 @@ we search ALL their connected accounts, not just the one where the meeting is sc
 
 import asyncio
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from app.services.google_api import (
     fetch_gmail_messages,
@@ -67,7 +67,13 @@ async def fetch_emails_from_all_accounts(
 
     # Extract meeting date for temporal filtering (only use data BEFORE meeting)
     meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
-    meeting_date = datetime.fromisoformat(meeting_start.replace('Z', '+00:00')) if meeting_start else datetime.utcnow()
+    if meeting_start:
+        meeting_date = datetime.fromisoformat(meeting_start.replace('Z', '+00:00'))
+        # Ensure timezone-aware (if naive, assume UTC)
+        if meeting_date.tzinfo is None:
+            meeting_date = meeting_date.replace(tzinfo=timezone.utc)
+    else:
+        meeting_date = datetime.now(timezone.utc)
     
     # Use end of meeting day as cutoff (23:59:59) to include emails from the same day
     meeting_cutoff = meeting_date.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -224,7 +230,13 @@ async def fetch_files_from_all_accounts(
 
     # Extract meeting date for temporal filtering
     meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
-    meeting_date = datetime.fromisoformat(meeting_start.replace('Z', '+00:00')) if meeting_start else datetime.utcnow()
+    if meeting_start:
+        meeting_date = datetime.fromisoformat(meeting_start.replace('Z', '+00:00'))
+        # Ensure timezone-aware (if naive, assume UTC)
+        if meeting_date.tzinfo is None:
+            meeting_date = meeting_date.replace(tzinfo=timezone.utc)
+    else:
+        meeting_date = datetime.now(timezone.utc)
     
     # 2-YEAR lookback FROM MEETING DATE
     two_years_ago = meeting_date - timedelta(days=730)
@@ -339,8 +351,16 @@ async def fetch_calendar_from_all_accounts(
     """
     logger.info(f'📅 Fetching calendar events from {len(accounts)} account(s)...')
 
+    # Ensure meeting_date is timezone-aware (for RFC3339 format)
+    if meeting_date.tzinfo is None:
+        meeting_date = meeting_date.replace(tzinfo=timezone.utc)
+    
     # 6-MONTH lookback FROM MEETING DATE
     six_months_ago = meeting_date - timedelta(days=180)
+    # Ensure timezone-aware for RFC3339 format
+    if six_months_ago.tzinfo is None:
+        six_months_ago = six_months_ago.replace(tzinfo=timezone.utc)
+    
     time_min = six_months_ago.isoformat()
     time_max = meeting_date.isoformat()
 

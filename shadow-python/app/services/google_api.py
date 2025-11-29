@@ -174,15 +174,15 @@ async def _fetch_gmail_messages_with_token(
                     return ''
                 try:
                     # Gmail API uses base64url encoding (uses - and _ instead of + and /)
-                    # Convert base64url to standard base64
-                    data = data.replace('-', '+').replace('_', '/')
-                    # Remove any whitespace or newlines
+                    # Use Python's built-in urlsafe_b64decode which handles base64url correctly
+                    # Remove any whitespace or newlines first
                     data = data.strip()
-                    # Add padding if needed (base64 requires length to be multiple of 4)
+                    # Add padding if needed (base64url requires length to be multiple of 4)
                     padding_needed = (4 - len(data) % 4) % 4
                     if padding_needed:
                         data += '=' * padding_needed
-                    return base64.b64decode(data).decode('utf-8', errors='ignore')
+                    # urlsafe_b64decode handles - and _ characters correctly
+                    return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
                 except Exception as e:
                     logger.warn(f'Failed to decode base64 data: {str(e)}')
                     return ''
