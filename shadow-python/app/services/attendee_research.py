@@ -274,7 +274,13 @@ async def _research_single_attendee(
                         for f in parsed
                     ]
                     key_facts = [f for f in key_facts if f and isinstance(f, str) and len(f) > 10]
-                    logger.info(f'    ✓ Extracted {len(key_facts)} facts from emails', requestId=request_id)
+                    logger.info(
+                        f'    ✓ Extracted {len(key_facts)} facts from emails',
+                        requestId=request_id,
+                        attendeeEmail=attendee_email,
+                        factCount=len(key_facts),
+                        sampleFacts=key_facts[:2] if key_facts else []
+                    )
                 else:
                     logger.warn(
                         f'Email synthesis returned empty or invalid array',
@@ -420,7 +426,14 @@ async def _research_single_attendee(
                                 new_facts = [f for f in new_facts if f and isinstance(f, str) and len(f) > 10]
                                 key_facts.extend(new_facts)
                                 source = 'local+web' if key_facts else 'web'
-                                logger.info(f'    ✓ Extracted {len(new_facts)} facts from web search', requestId=request_id)
+                                logger.info(
+                                    f'    ✓ Extracted {len(new_facts)} facts from web search',
+                                    requestId=request_id,
+                                    attendeeEmail=attendee_email,
+                                    webFactCount=len(new_facts),
+                                    totalFactCount=len(key_facts),
+                                    sampleWebFacts=new_facts[:2] if new_facts else []
+                                )
                             else:
                                 logger.warn(
                                     f'Web synthesis returned empty or invalid array',
@@ -465,6 +478,11 @@ async def _research_single_attendee(
             final_key_facts = [f'Email: {attendee_email}']
         source = 'basic'
 
+    # Separate email facts from web facts for extraction data
+    web_facts_count = len(results_to_use) if results_to_use else 0
+    email_facts = key_facts[:-web_facts_count] if web_facts_count > 0 and len(key_facts) > web_facts_count else key_facts
+    web_facts = key_facts[-web_facts_count:] if web_facts_count > 0 and len(key_facts) >= web_facts_count else []
+    
     attendee_result = {
         'name': name,
         'email': attendee_email,
@@ -477,10 +495,22 @@ async def _research_single_attendee(
             'emailsTo': len(emails_to_attendee),
             'emailData': email_data_for_synthesis[:10],
             'webSearchResults': results_to_use or [],
-            'emailFacts': key_facts[:len(key_facts) - len(results_to_use)] if results_to_use else key_facts,
-            'webFacts': key_facts[-len(results_to_use):] if results_to_use else []
+            'emailFacts': email_facts,
+            'webFacts': web_facts
         }
     }
+    
+    logger.info(
+        f'  ✅ Completed research for {name} ({attendee_email})',
+        requestId=request_id,
+        attendeeEmail=attendee_email,
+        totalFacts=len(final_key_facts),
+        emailFacts=len(email_facts),
+        webFacts=len(web_facts),
+        source=source,
+        hasCompany=bool(company),
+        hasTitle=bool(title)
+    )
 
     return attendee_result
 
@@ -496,47 +526,64 @@ async def research_attendees(
     request_id: str = 'unknown'
 ) -> List[Dict[str, Any]]:
     """
-    Research all attendees using email context and web search
+    Research multiple attendees in parallel
     
     Args:
-        attendees: List of attendee objects
-        emails: List of email objects
-        calendar_events: List of calendar event objects
+        attendees: List of attendee objects to research
+        emails: All emails in context
+        calendar_events: Calendar events for context
         meeting_title: Meeting title
-        meeting_date_context: Formatted meeting date context string
-        user_context: User context object (optional)
-        parallel_client: Parallel AI client (optional)
+        meeting_date_context: Meeting date context string
+        user_context: User context object
+        parallel_client: Parallel AI client for web search
         request_id: Request ID for logging
-    
     Returns:
-        List of attendee research results with name, email, company, title, keyFacts, etc.
+        List of researched attendee objects with keyFacts and extraction data
     """
-    logger.info(f'\n👥 Researching attendees...', requestId=request_id)
+    logger.info(
+        f'Researching {len(attendees)} attendees',
+        requestId=request_id,
+        attendeeCount=len(attendees),
+        emailCount=len(emails),
+        calendarEventCount=len(calendar_events),
+        hasParallelClient=bool(parallel_client)
+    )
     
-    # Use filtered attendees (excluding user)
-    attendees_to_research = attendees
+    # Research all attendees in parallel
+    research_tasks = [
+        _research_single_attendee(
+            attendee, emails, calendar_events, meeting_title,
+            meeting_date_context, user_context, parallel_client, request_id
+        )
+        for attendee in attendees
+    ]
     
-    logger.info(f'   Researching {len(attendees_to_research)} attendee(s) (excluding user)', requestId=request_id)
-
-    # Process all attendees in batches of 10
-    max_concurrent_attendees = 10
-    all_attendee_results = []
-
-    for i in range(0, len(attendees_to_research), max_concurrent_attendees):
-        batch = attendees_to_research[i:i + max_concurrent_attendees]
-        
-        batch_tasks = [
-            _research_single_attendee(
-                att, emails, calendar_events, meeting_title,
-                meeting_date_context, user_context, parallel_client, request_id
+    results = await asyncio.gather(*research_tasks, return_exceptions=True)
+    
+    # Filter out None results and exceptions
+    researched_attendees = []
+    failed_count = 0
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            logger.error(
+                f'Attendee research failed for attendee {i}',
+                requestId=request_id,
+                error=str(r),
+                attendee=attendees[i] if i < len(attendees) else None
             )
-            for att in batch
-        ]
-        
-        batch_results = await asyncio.gather(*batch_tasks)
-        all_attendee_results.extend([r for r in batch_results if r is not None])
-
-    logger.info(f'  ✓ Processed {len(all_attendee_results)} attendees', requestId=request_id)
+            failed_count += 1
+        elif r is not None:
+            researched_attendees.append(r)
     
-    return all_attendee_results
+    logger.info(
+        f'  ✅ Completed attendee research',
+        requestId=request_id,
+        totalAttendees=len(attendees),
+        successful=len(researched_attendees),
+        failed=failed_count,
+        totalFacts=sum(len(att.get('keyFacts', [])) for att in researched_attendees),
+        avgFactsPerAttendee=round(sum(len(att.get('keyFacts', [])) for att in researched_attendees) / len(researched_attendees), 1) if researched_attendees else 0
+    )
+    
+    return researched_attendees
 

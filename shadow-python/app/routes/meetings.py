@@ -18,6 +18,7 @@ from app.db.queries.accounts import get_accounts_by_user_id
 from app.services.logger import logger
 from app.services.gpt_service import call_gpt, safe_parse_json, synthesize_results
 from app.services.user_context import get_user_context, filter_user_from_attendees
+from app.services.user_profiling import build_user_profile
 from app.services.token_refresh import ensure_all_tokens_valid
 from app.services.multi_account_fetcher import (
     fetch_all_account_context,
@@ -266,6 +267,58 @@ async def prep_meeting(
             
             calendar_result = await fetch_calendar_from_all_accounts(accounts, meeting_datetime)
             calendar_events = calendar_result.get('results', [])
+
+            # ===== BUILD USER CONTEXT/PROFILE =====
+            if user_context and emails and len(emails) > 0:
+                logger.info(f'\n  👤 Building user context/profile...', requestId=request_id)
+                try:
+                    user_sent_emails = [
+                        e for e in emails
+                        if isinstance(e, dict) and user_context.get('email', '').lower() in (e.get('from', '') or '').lower()
+                    ]
+                    
+                    # Pass all emails (not just sent) so build_user_profile can extract both sent and received
+                    if len(user_sent_emails) >= 5:
+                        # Get files with content for user profiling
+                        files_with_content = [f for f in files if isinstance(f, dict) and f.get('content')]
+                        user_files = [
+                            f for f in files_with_content
+                            if isinstance(f, dict) and user_context.get('email', '').lower() in (f.get('ownerEmail') or f.get('owner') or '').lower()
+                        ]
+                        
+                        brief['_extractionData']['userContext'] = await build_user_profile(
+                            user_context,
+                            emails,  # Pass all emails so function can extract both sent and received
+                            user_files,
+                            calendar_events,
+                            request_id
+                        )
+                        
+                        profile_parts = []
+                        if brief['_extractionData']['userContext'].get('communicationStyle'):
+                            profile_parts.append('communication style')
+                        if brief['_extractionData']['userContext'].get('expertise'):
+                            profile_parts.append('expertise')
+                        if brief['_extractionData']['userContext'].get('biographicalInfo'):
+                            profile_parts.append('biographical info')
+                        if brief['_extractionData']['userContext'].get('workingPatterns'):
+                            profile_parts.append('working patterns')
+                        
+                        logger.info(f'  ✓ User context built: {", ".join(profile_parts) if profile_parts else "basic info only"}', requestId=request_id)
+                    else:
+                        brief['_extractionData']['userContext'] = {
+                            'name': user_context.get('name'),
+                            'email': user_context.get('email'),
+                            'note': f'Insufficient email data for profiling (need at least 5 sent emails, found {len(user_sent_emails)})'
+                        }
+                        logger.info(f'  ⚠️  Insufficient data for user profiling ({len(user_sent_emails)} sent emails)', requestId=request_id)
+                except Exception as error:
+                    logger.error(f'  ❌ User profiling failed: {str(error)}', requestId=request_id)
+                    brief['_extractionData']['userContext'] = {
+                        'name': user_context.get('name'),
+                        'email': user_context.get('email'),
+                        'error': f'Profiling failed: {str(error)}'
+                    }
 
         # ===== SINGLE-ACCOUNT MODE (OLD - BACKWARD COMPATIBILITY) =====
         elif access_token:
