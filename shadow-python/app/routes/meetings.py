@@ -269,49 +269,96 @@ async def prep_meeting(
             calendar_events = calendar_result.get('results', [])
 
             # ===== BUILD USER CONTEXT/PROFILE =====
-            if user_context and emails and len(emails) > 0:
+            # Always set basic user context, even if there are no emails
+            if user_context:
                 logger.info(f'\n  👤 Building user context/profile...', requestId=request_id)
                 try:
-                    user_sent_emails = [
-                        e for e in emails
-                        if isinstance(e, dict) and user_context.get('email', '').lower() in (e.get('from', '') or '').lower()
-                    ]
+                    # Always set basic user info first
+                    brief['_extractionData']['userContext'] = {
+                        'name': user_context.get('name'),
+                        'email': user_context.get('email')
+                    }
                     
-                    # Pass all emails (not just sent) so build_user_profile can extract both sent and received
-                    if len(user_sent_emails) >= 5:
-                        # Get files with content for user profiling
-                        files_with_content = [f for f in files if isinstance(f, dict) and f.get('content')]
-                        user_files = [
-                            f for f in files_with_content
-                            if isinstance(f, dict) and user_context.get('email', '').lower() in (f.get('ownerEmail') or f.get('owner') or '').lower()
-                        ]
+                    # Only build full profile if we have emails
+                    if emails and len(emails) > 0:
+                        # Get all user emails (user email + primary account email)
+                        user_emails = user_context.get('emails', [])
+                        if not user_emails:
+                            user_emails = [user_context.get('email')] if user_context.get('email') else []
+                        user_emails_lower = [e.lower() for e in user_emails if e]
                         
-                        brief['_extractionData']['userContext'] = await build_user_profile(
-                            user_context,
-                            emails,  # Pass all emails so function can extract both sent and received
-                            user_files,
-                            calendar_events,
-                            request_id
+                        # Extract email from "from" field (handles "Name <email>" format)
+                        def extract_email_from_header(header: str) -> str:
+                            """Extract email address from header like 'Name <email@domain.com>' or 'email@domain.com'"""
+                            if not header:
+                                return ''
+                            # Try to find email in angle brackets
+                            match = re.search(r'<([^>]+)>', header)
+                            if match:
+                                return match.group(1).lower()
+                            # If no brackets, check if it's already an email
+                            if '@' in header:
+                                return header.strip().lower()
+                            return ''
+                        
+                        # Filter emails sent by the user (check against all user emails)
+                        user_sent_emails = []
+                        for e in emails:
+                            if not isinstance(e, dict):
+                                continue
+                            from_header = e.get('from', '') or ''
+                            from_email = extract_email_from_header(from_header)
+                            # Check if extracted email matches any of the user's emails (exact match)
+                            if from_email and from_email in user_emails_lower:
+                                user_sent_emails.append(e)
+                        
+                        logger.info(
+                            f'  📊 Email analysis: {len(emails)} total emails, {len(user_sent_emails)} sent by user',
+                            requestId=request_id,
+                            userEmails=user_emails,
+                            sentEmailCount=len(user_sent_emails)
                         )
                         
-                        profile_parts = []
-                        if brief['_extractionData']['userContext'].get('communicationStyle'):
-                            profile_parts.append('communication style')
-                        if brief['_extractionData']['userContext'].get('expertise'):
-                            profile_parts.append('expertise')
-                        if brief['_extractionData']['userContext'].get('biographicalInfo'):
-                            profile_parts.append('biographical info')
-                        if brief['_extractionData']['userContext'].get('workingPatterns'):
-                            profile_parts.append('working patterns')
-                        
-                        logger.info(f'  ✓ User context built: {", ".join(profile_parts) if profile_parts else "basic info only"}', requestId=request_id)
+                        # Pass all emails (not just sent) so build_user_profile can extract both sent and received
+                        if len(user_sent_emails) >= 5:
+                            # Get files with content for user profiling
+                            files_with_content = [f for f in files if isinstance(f, dict) and f.get('content')]
+                            user_files = [
+                                f for f in files_with_content
+                                if isinstance(f, dict) and any(
+                                    user_email.lower() in (f.get('ownerEmail') or f.get('owner') or '').lower()
+                                    for user_email in user_emails_lower
+                                )
+                            ]
+                            
+                            full_profile = await build_user_profile(
+                                user_context,
+                                emails,  # Pass all emails so function can extract both sent and received
+                                user_files,
+                                calendar_events,
+                                request_id
+                            )
+                            
+                            # Merge full profile with basic info
+                            brief['_extractionData']['userContext'].update(full_profile)
+                            
+                            profile_parts = []
+                            if brief['_extractionData']['userContext'].get('communicationStyle'):
+                                profile_parts.append('communication style')
+                            if brief['_extractionData']['userContext'].get('expertise'):
+                                profile_parts.append('expertise')
+                            if brief['_extractionData']['userContext'].get('biographicalInfo'):
+                                profile_parts.append('biographical info')
+                            if brief['_extractionData']['userContext'].get('workingPatterns'):
+                                profile_parts.append('working patterns')
+                            
+                            logger.info(f'  ✓ User context built: {", ".join(profile_parts) if profile_parts else "basic info only"}', requestId=request_id)
+                        else:
+                            brief['_extractionData']['userContext']['note'] = f'Insufficient email data for profiling (need at least 5 sent emails, found {len(user_sent_emails)})'
+                            logger.info(f'  ⚠️  Insufficient data for user profiling ({len(user_sent_emails)} sent emails)', requestId=request_id)
                     else:
-                        brief['_extractionData']['userContext'] = {
-                            'name': user_context.get('name'),
-                            'email': user_context.get('email'),
-                            'note': f'Insufficient email data for profiling (need at least 5 sent emails, found {len(user_sent_emails)})'
-                        }
-                        logger.info(f'  ⚠️  Insufficient data for user profiling ({len(user_sent_emails)} sent emails)', requestId=request_id)
+                        brief['_extractionData']['userContext']['note'] = 'No email data available for profiling'
+                        logger.info(f'  ⚠️  No emails available for user profiling', requestId=request_id)
                 except Exception as error:
                     logger.error(f'  ❌ User profiling failed: {str(error)}', requestId=request_id)
                     brief['_extractionData']['userContext'] = {
@@ -319,6 +366,8 @@ async def prep_meeting(
                         'email': user_context.get('email'),
                         'error': f'Profiling failed: {str(error)}'
                     }
+            else:
+                logger.info(f'  ⚠️  No user context available for profiling', requestId=request_id)
 
         # ===== SINGLE-ACCOUNT MODE (OLD - BACKWARD COMPATIBILITY) =====
         elif access_token:
@@ -338,6 +387,8 @@ async def prep_meeting(
             logger.info(f'\n👥 Researching attendees...', requestId=request_id)
             attendees_to_research = other_attendees if other_attendees else attendees
 
+            logger.info(f'  📊 Researching {len(attendees_to_research)} attendees', requestId=request_id)
+
             # Get parallel client if available (from request state)
             parallel_client = getattr(request.state, 'parallel_client', None) if request else None
 
@@ -352,27 +403,38 @@ async def prep_meeting(
                 request_id
             )
 
+            logger.info(f'  ✓ Research completed: {len(brief["attendees"])} attendees researched', requestId=request_id)
+
             # Store attendee extraction data for UI
-            brief['_extractionData']['attendeeExtractions'] = [
-                {
+            brief['_extractionData']['attendeeExtractions'] = []
+            for att in brief['attendees']:
+                if not isinstance(att, dict):
+                    continue
+                    
+                extraction_data = att.get('_extractionData', {})
+                if not isinstance(extraction_data, dict):
+                    extraction_data = {}
+                
+                brief['_extractionData']['attendeeExtractions'].append({
                     'name': att.get('name'),
                     'email': att.get('email'),
                     'company': att.get('company'),
                     'title': att.get('title'),
                     'keyFacts': att.get('keyFacts', []),
                     'extractionData': {
-                        'emailsFrom': att.get('_extractionData', {}).get('emailsFrom', 0),
-                        'emailsTo': att.get('_extractionData', {}).get('emailsTo', 0),
-                        'emailFacts': att.get('_extractionData', {}).get('emailFacts', []),
-                        'webFacts': att.get('_extractionData', {}).get('webFacts', []),
-                        'webSearchResults': att.get('_extractionData', {}).get('webSearchResults', []),
-                        'emailData': att.get('_extractionData', {}).get('emailData', [])
+                        'emailsFrom': extraction_data.get('emailsFrom', 0),
+                        'emailsTo': extraction_data.get('emailsTo', 0),
+                        'emailFacts': extraction_data.get('emailFacts', []),
+                        'webFacts': extraction_data.get('webFacts', []),
+                        'webSearchResults': extraction_data.get('webSearchResults', []),
+                        'emailData': extraction_data.get('emailData', [])
                     }
-                }
-                for att in brief['attendees']
-            ]
+                })
 
-            logger.info(f'  ✓ Processed {len(brief["attendees"])} attendees', requestId=request_id)
+            logger.info(
+                f'  ✓ Processed {len(brief["attendees"])} attendees, {len(brief["_extractionData"]["attendeeExtractions"])} extraction records',
+                requestId=request_id
+            )
 
             # ===== STEP 1.5: UNDERSTAND MEETING CONTEXT BEFORE FILTERING =====
             logger.info(f'\n  🧠 Understanding meeting context...', requestId=request_id)
