@@ -40,6 +40,8 @@ async def create_or_update_account(account_data: dict) -> dict:
         'user_id', account_data.get('user_id')
     ).eq('account_email', account_data.get('account_email')).maybe_single().execute()
     
+    if response is None:
+        raise Exception('Failed to create or update account: No response from database')
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to fetch account: {response.error.message}')
     if response.data:
@@ -55,11 +57,16 @@ async def get_accounts_by_user_id(user_id: str) -> list:
     Returns:
         Array of connected accounts
     """
+    if not user_id:
+        return []
+        
     response = supabase.table('connected_accounts').select(
         'id, user_id, provider, account_email, account_name, access_token, refresh_token, '
         'token_expires_at, scopes, is_primary, created_at, updated_at'
     ).eq('user_id', user_id).order('is_primary', desc=True).order('created_at').execute()
     
+    if response is None:
+        return []
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     return response.data if response.data else []
@@ -73,8 +80,13 @@ async def get_account_by_id(account_id: str) -> dict | None:
     Returns:
         Account or None
     """
+    if not account_id:
+        return None
+        
     response = supabase.table('connected_accounts').select('*').eq('id', account_id).maybe_single().execute()
     
+    if response is None:
+        return None
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     if response.data:
@@ -91,10 +103,15 @@ async def get_account_by_email(user_id: str, account_email: str) -> dict | None:
     Returns:
         Account or None
     """
+    if not user_id or not account_email:
+        return None
+        
     response = supabase.table('connected_accounts').select('*').eq('user_id', user_id).eq(
         'account_email', account_email
     ).maybe_single().execute()
     
+    if response is None:
+        return None
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     if response.data:
@@ -110,10 +127,15 @@ async def get_primary_account(user_id: str) -> dict | None:
     Returns:
         Primary account or None
     """
+    if not user_id:
+        return None
+        
     response = supabase.table('connected_accounts').select('*').eq('user_id', user_id).eq(
         'is_primary', True
     ).maybe_single().execute()
     
+    if response is None:
+        return None
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     if response.data:
@@ -143,6 +165,8 @@ async def update_account_token(account_id: str, token_data: dict) -> dict:
     # Then query to get the updated record
     response = supabase.table('connected_accounts').select('*').eq('id', account_id).maybe_single().execute()
     
+    if response is None:
+        raise Exception('Failed to update account token: No response from database')
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to fetch updated account: {response.error.message}')
     if response.data:
@@ -168,6 +192,8 @@ async def set_primary_account(account_id: str) -> dict:
     # Then query to get the updated record
     response = supabase.table('connected_accounts').select('*').eq('id', account_id).maybe_single().execute()
     
+    if response is None:
+        raise Exception('Failed to set primary account: No response from database')
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to fetch updated account: {response.error.message}')
     if response.data:
@@ -183,8 +209,13 @@ async def delete_account(account_id: str) -> bool:
     Returns:
         Success
     """
+    if not account_id:
+        return False
+        
     response = supabase.table('connected_accounts').delete().eq('id', account_id).select('id').execute()
     
+    if response is None:
+        return False
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to delete account: {response.error.message}')
     return response.data is not None and len(response.data) > 0
@@ -198,8 +229,13 @@ async def count_user_accounts(user_id: str) -> int:
     Returns:
         Account count
     """
+    if not user_id:
+        return 0
+        
     response = supabase.table('connected_accounts').select('*', count='exact').eq('user_id', user_id).execute()
     
+    if response is None:
+        return 0
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     return response.count if hasattr(response, 'count') and response.count is not None else 0

@@ -32,6 +32,8 @@ async def create_user(user_data: dict) -> dict:
     # Then query to get the created/updated record
     response = supabase.table('users').select('*').eq('email', email).maybe_single().execute()
     
+    if response is None:
+        raise Exception('Failed to create user: No response from database')
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to fetch user: {response.error.message}')
     if response.data:
@@ -47,8 +49,13 @@ async def find_user_by_email(email: str) -> dict | None:
     Returns:
         User or None
     """
+    if not email:
+        return None
+        
     response = supabase.table('users').select('*').eq('email', email).maybe_single().execute()
     
+    if response is None:
+        return None
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     if response.data:
@@ -64,8 +71,13 @@ async def find_user_by_id(user_id: str) -> dict | None:
     Returns:
         User or None
     """
+    if not user_id:
+        return None
+        
     response = supabase.table('users').select('*').eq('id', user_id).maybe_single().execute()
     
+    if response is None:
+        return None
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     if response.data:
@@ -102,6 +114,8 @@ async def update_user(user_id: str, updates: dict) -> dict:
     # Then query to get the updated record
     response = supabase.table('users').select('*').eq('id', user_id).maybe_single().execute()
     
+    if response is None:
+        raise Exception('Failed to update user: No response from database')
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to fetch updated user: {response.error.message}')
     if response.data:
@@ -117,8 +131,13 @@ async def delete_user(user_id: str) -> bool:
     Returns:
         Success
     """
+    if not user_id:
+        return False
+        
     response = supabase.table('users').delete().eq('id', user_id).select('id').execute()
     
+    if response is None:
+        return False
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to delete user: {response.error.message}')
     return response.data is not None and len(response.data) > 0

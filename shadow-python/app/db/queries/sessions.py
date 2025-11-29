@@ -44,6 +44,8 @@ async def create_session(user_id: str, expires_in_days: int = 30) -> dict:
     # Then query to get the created record
     response = supabase.table('sessions').select('*').eq('session_token', session_token).maybe_single().execute()
     
+    if response is None:
+        raise Exception('Failed to create session: No response from database')
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to fetch session: {response.error.message}')
     if response.data:
@@ -59,16 +61,28 @@ async def find_session_by_token(session_token: str) -> dict | None:
     Returns:
         Session or None
     """
+    if not session_token:
+        return None
+        
     now = datetime.utcnow().isoformat()
-    response = supabase.table('sessions').select('*').eq('session_token', session_token).gt(
-        'expires_at', now
-    ).maybe_single().execute()
-    
-    if hasattr(response, 'error') and response.error:
-        raise Exception(f'Database error: {response.error.message}')
-    if response.data:
-        return response.data
-    return None
+    try:
+        response = supabase.table('sessions').select('*').eq('session_token', session_token).gt(
+            'expires_at', now
+        ).maybe_single().execute()
+        
+        if response is None:
+            return None
+            
+        if hasattr(response, 'error') and response.error:
+            raise Exception(f'Database error: {response.error.message}')
+        if response.data:
+            return response.data
+        return None
+    except Exception as e:
+        # Log error but return None gracefully
+        from app.services.logger import logger
+        logger.warn(f'Error finding session by token: {str(e)}')
+        return None
 
 
 async def delete_session(session_token: str) -> bool:
@@ -79,8 +93,13 @@ async def delete_session(session_token: str) -> bool:
     Returns:
         Success
     """
+    if not session_token:
+        return False
+        
     response = supabase.table('sessions').delete().eq('session_token', session_token).select('id').execute()
     
+    if response is None:
+        return False
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to delete session: {response.error.message}')
     return response.data is not None and len(response.data) > 0
@@ -94,8 +113,13 @@ async def delete_all_user_sessions(user_id: str) -> int:
     Returns:
         Number of sessions deleted
     """
+    if not user_id:
+        return 0
+        
     response = supabase.table('sessions').delete().eq('user_id', user_id).select('id').execute()
     
+    if response is None:
+        return 0
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Failed to delete user sessions: {response.error.message}')
     return len(response.data) if response.data else 0
@@ -112,6 +136,8 @@ async def delete_expired_sessions() -> int:
     # Workaround: Query expired sessions first, then delete by IDs
     query_response = supabase.table('sessions').select('id').lt('expires_at', now).execute()
     
+    if query_response is None:
+        return 0
     if hasattr(query_response, 'error') and query_response.error:
         raise Exception(f'Failed to query expired sessions: {query_response.error.message}')
     
@@ -129,7 +155,7 @@ async def delete_expired_sessions() -> int:
         for session_id in batch:
             try:
                 delete_response = supabase.table('sessions').delete().eq('id', session_id).select('id').execute()
-                if delete_response.data:
+                if delete_response and delete_response.data:
                     deleted_count += 1
             except Exception as e:
                 # Log but continue with other deletions
@@ -146,11 +172,16 @@ async def get_user_sessions(user_id: str) -> list:
     Returns:
         Array of sessions
     """
+    if not user_id:
+        return []
+        
     now = datetime.utcnow().isoformat()
     response = supabase.table('sessions').select(
         'id, user_id, session_token, expires_at, created_at'
     ).eq('user_id', user_id).gt('expires_at', now).order('created_at', desc=True).execute()
     
+    if response is None:
+        return []
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     return response.data if response.data else []
@@ -180,6 +211,8 @@ async def extend_session(session_token: str, expires_in_days: int = 30) -> dict 
     # Then query to get the updated record
     response = supabase.table('sessions').select('*').eq('session_token', session_token).maybe_single().execute()
     
+    if response is None:
+        return None
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     if response.data:
