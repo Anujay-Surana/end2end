@@ -352,8 +352,8 @@ async def get_current_user(
 
 @router.post('/logout')
 async def logout(
-    user: Dict[str, Any] = Depends(require_auth),
     response: Response,
+    user: Dict[str, Any] = Depends(require_auth),
     session: Optional[str] = Cookie(None, alias='session')
 ):
     """
