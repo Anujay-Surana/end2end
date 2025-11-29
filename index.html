@@ -4223,7 +4223,7 @@
                     `${name} ${company} news ${new Date().getFullYear()}`
                 ];
 
-                const response = await fetch('/api/parallel-search', {
+                const response = await fetch('/api/parallel/search', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -4262,7 +4262,7 @@
                     `${companyName} products services`
                 ];
 
-                const response = await fetch('/api/parallel-search', {
+                const response = await fetch('/api/parallel/search', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -4302,7 +4302,7 @@
                     `${title} insights`
                 ].filter(q => q.length > 10); // Only valid queries
 
-                const response = await fetch('/api/parallel-search', {
+                const response = await fetch('/api/parallel/search', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
