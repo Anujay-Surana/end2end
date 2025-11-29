@@ -217,7 +217,7 @@ async def generate_executive_summary(
         f'3. **Tell the STORY**: Explain the journey that led to this meeting (use the "narrative" field)\n'
         f'4. **Highlight STAKES**: What matters here for {user_name}? (use the "stakes" field)\n'
         f'5. **Reference KEY QUESTIONS**: What needs to be answered? (use "keyQuestions")\n'
-        f'6. **TEMPORAL ACCURACY**: This meeting is on {meeting_date.get("readable", "the scheduled date") if meeting_date else "the scheduled date"}. Ground everything in the correct timeframe.\n'
+        f'6. **TEMPORAL ACCURACY**: This meeting is on {meeting_date.get("readable", "the scheduled date") if (meeting_date and isinstance(meeting_date, dict)) else "the scheduled date"}. Ground everything in the correct timeframe.\n'
         f'7. **USER PERSPECTIVE**: Write from {user_possessive} perspective. Use "you" to refer to {user_name}.\n\n'
         f'STRUCTURE (4-5 sentences):\n'
         f'- Sentence 1: {"You are meeting with" if user_context else "WHO is meeting"} and WHAT is the core purpose (use "corePurpose" from analysis)\n'

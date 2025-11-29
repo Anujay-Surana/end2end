@@ -56,7 +56,9 @@ async def synthesize_day_prep(
         afternoon_meetings = []
 
         for meeting, brief in zip(meetings, briefs + [None] * (len(meetings) - len(briefs))):
-            start_time = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
+            if not isinstance(meeting, dict):
+                continue
+            start_time = meeting.get('start', {}).get('dateTime') if isinstance(meeting.get('start'), dict) else (meeting.get('start', {}).get('date') if isinstance(meeting.get('start'), dict) else meeting.get('start'))
             if not start_time:
                 continue
 
@@ -82,10 +84,16 @@ async def synthesize_day_prep(
         # Build comprehensive context for Shadow persona
         meeting_context = []
         for meeting, brief in zip(meetings, briefs + [None] * (len(meetings) - len(briefs))):
-            start_time = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
+            if not isinstance(meeting, dict):
+                continue
+            start_time_obj = meeting.get('start')
+            if isinstance(start_time_obj, dict):
+                start_time = start_time_obj.get('dateTime') or start_time_obj.get('date')
+            else:
+                start_time = start_time_obj
             
             # Extract full attendee details with keyFacts from brief
-            brief_attendees = brief.get('attendees', []) if brief else []
+            brief_attendees = brief.get('attendees', []) if (brief and isinstance(brief, dict)) else []
             meeting_attendees = meeting.get('attendees', [])
             
             # Merge attendees: prefer brief attendees (with keyFacts), fallback to meeting attendees
@@ -97,7 +105,7 @@ async def synthesize_day_prep(
                     'title': a.get('title', ''),
                     'keyFacts': []
                 }
-                for a in meeting_attendees
+                for a in meeting_attendees if isinstance(a, dict)
             ]
             
             meeting_context.append({
@@ -113,26 +121,30 @@ async def synthesize_day_prep(
                     }
                     for a in all_attendees
                 ],
-                'summary': brief.get('summary', '') if brief else '',
-                'relationshipAnalysis': brief.get('relationshipAnalysis', '') if brief else '',
-                'emailAnalysis': brief.get('emailAnalysis', '') if brief else '',
-                'documentAnalysis': brief.get('documentAnalysis', '') if brief else '',
-                'companyResearch': brief.get('companyResearch', '') if brief else '',
-                'contributionAnalysis': brief.get('contributionAnalysis', '') if brief else '',
-                'broaderNarrative': brief.get('broaderNarrative', '') if brief else '',
-                'recommendations': brief.get('recommendations', []) if brief else [],
-                'actionItems': brief.get('actionItems', []) if brief else [],
-                'timeline': brief.get('timeline', []) if brief else [],
-                'keyPoints': (brief.get('actionItems', [])[:5] if brief else []),
-                'context': brief.get('context', {}) if brief else {}
+                'summary': brief.get('summary', '') if (brief and isinstance(brief, dict)) else '',
+                'relationshipAnalysis': brief.get('relationshipAnalysis', '') if (brief and isinstance(brief, dict)) else '',
+                'emailAnalysis': brief.get('emailAnalysis', '') if (brief and isinstance(brief, dict)) else '',
+                'documentAnalysis': brief.get('documentAnalysis', '') if (brief and isinstance(brief, dict)) else '',
+                'companyResearch': brief.get('companyResearch', '') if (brief and isinstance(brief, dict)) else '',
+                'contributionAnalysis': brief.get('contributionAnalysis', '') if (brief and isinstance(brief, dict)) else '',
+                'broaderNarrative': brief.get('broaderNarrative', '') if (brief and isinstance(brief, dict)) else '',
+                'recommendations': brief.get('recommendations', []) if (brief and isinstance(brief, dict)) else [],
+                'actionItems': brief.get('actionItems', []) if (brief and isinstance(brief, dict)) else [],
+                'timeline': brief.get('timeline', []) if (brief and isinstance(brief, dict)) else [],
+                'keyPoints': (brief.get('actionItems', [])[:5] if (brief and isinstance(brief, dict)) else []),
+                'context': brief.get('context', {}) if (brief and isinstance(brief, dict)) else {}
             })
 
-        meeting_context = [m for m in meeting_context if m['title'] != 'Untitled Meeting' or m['summary']]
+        meeting_context = [m for m in meeting_context if isinstance(m, dict) and (m.get('title') != 'Untitled Meeting' or m.get('summary'))]
         
         # Aggregate all unique attendees across all meetings with their keyFacts
         attendee_map = {}
         for m in meeting_context:
-            for att in m['attendees']:
+            if not isinstance(m, dict):
+                continue
+            for att in m.get('attendees', []):
+                if not isinstance(att, dict):
+                    continue
                 email = (att.get('email') or '').lower()
                 if email and email not in attendee_map:
                     attendee_map[email] = {
@@ -153,29 +165,33 @@ async def synthesize_day_prep(
         # Extract all attendee names for transcription hints
         all_attendee_names = []
         for a in aggregated_attendees:
+            if not isinstance(a, dict):
+                continue
             name = a.get('name') or ''
             parts = name.split()
             all_attendee_names.extend([name, parts[0], parts[-1]] if len(parts) > 1 else [name])
         all_attendee_names = list(dict.fromkeys(all_attendee_names))  # Remove duplicates while preserving order
         
         # Intelligently aggregate context across all meetings
-        intelligent_aggregation = await intelligently_aggregate([b for b in briefs if b])
+        intelligent_aggregation = await intelligently_aggregate([b for b in briefs if b and isinstance(b, dict)])
         
         # Build aggregated context with intelligent insights
+        if not isinstance(intelligent_aggregation, dict):
+            intelligent_aggregation = {}
         aggregated_context = {
-            'relationshipAnalysis': intelligent_aggregation.get('relationshipAnalysis', ''),
-            'emailAnalysis': intelligent_aggregation.get('emailAnalysis', ''),
-            'documentAnalysis': intelligent_aggregation.get('documentAnalysis', ''),
-            'companyResearch': '\n\n'.join([m.get('companyResearch', '') for m in meeting_context if m.get('companyResearch')]),
-            'contributionAnalysis': '\n\n'.join([m.get('contributionAnalysis', '') for m in meeting_context if m.get('contributionAnalysis')]),
-            'broaderNarrative': '\n\n'.join([m.get('broaderNarrative', '') for m in meeting_context if m.get('broaderNarrative')]),
-            'recommendations': list(set([r for m in meeting_context for r in (m.get('recommendations') or [])])),
-            'actionItems': intelligent_aggregation.get('actionItems', []),
-            'timeline': intelligent_aggregation.get('timeline', []),
-            'conflicts': intelligent_aggregation.get('conflicts', []),
-            'themes': intelligent_aggregation.get('themes', []),
-            'keyPeople': intelligent_aggregation.get('keyPeople', []),
-            'dependencies': intelligent_aggregation.get('dependencies', [])
+            'relationshipAnalysis': intelligent_aggregation.get('relationshipAnalysis', '') if isinstance(intelligent_aggregation, dict) else '',
+            'emailAnalysis': intelligent_aggregation.get('emailAnalysis', '') if isinstance(intelligent_aggregation, dict) else '',
+            'documentAnalysis': intelligent_aggregation.get('documentAnalysis', '') if isinstance(intelligent_aggregation, dict) else '',
+            'companyResearch': '\n\n'.join([m.get('companyResearch', '') for m in meeting_context if isinstance(m, dict) and m.get('companyResearch')]),
+            'contributionAnalysis': '\n\n'.join([m.get('contributionAnalysis', '') for m in meeting_context if isinstance(m, dict) and m.get('contributionAnalysis')]),
+            'broaderNarrative': '\n\n'.join([m.get('broaderNarrative', '') for m in meeting_context if isinstance(m, dict) and m.get('broaderNarrative')]),
+            'recommendations': list(set([r for m in meeting_context if isinstance(m, dict) for r in (m.get('recommendations') or [])])),
+            'actionItems': intelligent_aggregation.get('actionItems', []) if isinstance(intelligent_aggregation, dict) else [],
+            'timeline': intelligent_aggregation.get('timeline', []) if isinstance(intelligent_aggregation, dict) else [],
+            'conflicts': intelligent_aggregation.get('conflicts', []) if isinstance(intelligent_aggregation, dict) else [],
+            'themes': intelligent_aggregation.get('themes', []) if isinstance(intelligent_aggregation, dict) else [],
+            'keyPeople': intelligent_aggregation.get('keyPeople', []) if isinstance(intelligent_aggregation, dict) else [],
+            'dependencies': intelligent_aggregation.get('dependencies', []) if isinstance(intelligent_aggregation, dict) else []
         }
 
         # Get user context
@@ -221,7 +237,7 @@ DAY OVERVIEW:
 - Date: [DATE]
 - Meeting Count: {len(meeting_context)}
 - Attendee Count: {len(aggregated_attendees)}
-- Companies: {', '.join(set([a.get('company') for a in aggregated_attendees if a.get('company')])) or 'Various'}
+- Companies: {', '.join(set([a.get('company') for a in aggregated_attendees if isinstance(a, dict) and a.get('company')])) or 'Various'}
 
 The structure should include placeholders for:
 - [ATTENDEE_NAMES] - list of all attendee names for transcription hints
@@ -249,23 +265,26 @@ Generate a comprehensive system prompt structure for Shadow's day prep mode."""
         # Build comprehensive meeting context section
         def format_attendee(a):
             """Format attendee information without nested f-strings"""
+            if not isinstance(a, dict):
+                return ''
             name = a.get('name', '')
-            company_part = f" ({a['company']})" if a.get('company') else ''
-            title_part = f" - {a['title']}" if a.get('title') else ''
+            company_part = f" ({a.get('company', '')})" if a.get('company') else ''
+            title_part = f" - {a.get('title', '')}" if a.get('title') else ''
             return f"{name}{company_part}{title_part}"
         
         meeting_context_section = '\n---\n'.join([
-            f"""Meeting {i + 1}: {m['title']}
-Time: {m['time']}
-Attendees: {', '.join([format_attendee(a) for a in m['attendees']])}
-{f"Summary: {m['summary']}" if m.get('summary') else ''}
-{f"Key Action Items: {'; '.join(m['keyPoints'])}" if m.get('keyPoints') else ''}
-{f"Relationship Context: {m['relationshipAnalysis'][:400]}" if m.get('relationshipAnalysis') else ''}
-{f"Email Context: {m['emailAnalysis'][:400]}" if m.get('emailAnalysis') else ''}
-{f"Document Context: {m['documentAnalysis'][:400]}" if m.get('documentAnalysis') else ''}
-{f"Company Research: {m['companyResearch'][:400]}" if m.get('companyResearch') else ''}
-{f"Recommendations: {'; '.join(m['recommendations'])}" if m.get('recommendations') else ''}"""
+            f"""Meeting {i + 1}: {m.get('title', 'Untitled')}
+Time: {m.get('time', 'TBD')}
+Attendees: {', '.join([format_attendee(a) for a in m.get('attendees', []) if isinstance(a, dict)])}
+{f"Summary: {m.get('summary', '')}" if isinstance(m, dict) and m.get('summary') else ''}
+{f"Key Action Items: {'; '.join(m.get('keyPoints', []))}" if isinstance(m, dict) and m.get('keyPoints') else ''}
+{f"Relationship Context: {m.get('relationshipAnalysis', '')[:400]}" if isinstance(m, dict) and m.get('relationshipAnalysis') else ''}
+{f"Email Context: {m.get('emailAnalysis', '')[:400]}" if isinstance(m, dict) and m.get('emailAnalysis') else ''}
+{f"Document Context: {m.get('documentAnalysis', '')[:400]}" if isinstance(m, dict) and m.get('documentAnalysis') else ''}
+{f"Company Research: {m.get('companyResearch', '')[:400]}" if isinstance(m, dict) and m.get('companyResearch') else ''}
+{f"Recommendations: {'; '.join(m.get('recommendations', []))}" if isinstance(m, dict) and m.get('recommendations') else ''}"""
             for i, m in enumerate(meeting_context)
+            if isinstance(m, dict)
         ])
         
         # Build aggregated context section
@@ -280,8 +299,9 @@ Attendees: {', '.join([format_attendee(a) for a in m['attendees']])}
         # Build timeline events string
         timeline_events = aggregated_context.get('timeline', [])[:10]
         timeline_events_str = '\n'.join([
-            f"{idx + 1}. [{event.get('date') or event.get('start', {}).get('dateTime') or 'Date unknown'}] {event.get('type', 'event')}: {event.get('title') or event.get('summary') or 'Untitled'}"
+            f"{idx + 1}. [{event.get('date') or (event.get('start', {}).get('dateTime') if isinstance(event.get('start'), dict) else '') or 'Date unknown'}] {event.get('type', 'event')}: {event.get('title') or event.get('summary') or 'Untitled'}"
             for idx, event in enumerate(timeline_events)
+            if isinstance(event, dict)
         ]) if timeline_events else 'No timeline events available.'
         
         aggregated_context_section = f"""
@@ -466,7 +486,7 @@ IMPORTANT: Use the conflicts, themes, key people, and dependencies to create a C
                 'afternoon': extract_section(narrative, 'Afternoon', 'Win'),
                 'winCondition': extract_section(narrative, 'Win', 'Optional')
             },
-            'meetings': [b for b in briefs if b is not None],
+            'meetings': [b for b in briefs if b is not None and isinstance(b, dict)],
             'aggregatedAttendees': aggregated_attendees,
             'aggregatedContext': aggregated_context,
             'date': date_str,
@@ -489,7 +509,7 @@ IMPORTANT: Use the conflicts, themes, key people, and dependencies to create a C
                 'afternoon': '',
                 'winCondition': ''
             },
-            'meetings': [b for b in briefs if b is not None],
+            'meetings': [b for b in briefs if b is not None and isinstance(b, dict)],
             'aggregatedAttendees': [],
             'aggregatedContext': {
                 'relationshipAnalysis': '',

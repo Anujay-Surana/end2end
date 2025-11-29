@@ -481,6 +481,8 @@ Analyze the relationship dynamics."""
         # Add emails to timeline
         if emails:
             for email in emails:
+                if not isinstance(email, dict):
+                    continue
                 timeline.append({
                     'type': 'email',
                     'date': self._parse_date(email.get('date', '')),
@@ -492,6 +494,8 @@ Analyze the relationship dynamics."""
         # Add documents to timeline
         if files:
             for file in files:
+                if not isinstance(file, dict):
+                    continue
                 timeline.append({
                     'type': 'document',
                     'date': file.get('modifiedTime') or file.get('createdTime', ''),
@@ -503,11 +507,18 @@ Analyze the relationship dynamics."""
         # Add calendar events to timeline
         if calendar_events:
             for event in calendar_events:
+                if not isinstance(event, dict):
+                    continue
+                event_start_obj = event.get('start')
+                if isinstance(event_start_obj, dict):
+                    event_date_str = event_start_obj.get('dateTime') or event_start_obj.get('date')
+                else:
+                    event_date_str = event_start_obj
                 timeline.append({
                     'type': 'meeting',
-                    'date': event.get('start', {}).get('dateTime') or event.get('start', {}).get('date'),
+                    'date': event_date_str or '',
                     'subject': event.get('summary', 'Untitled'),
-                    'participants': [a.get('email') for a in (event.get('attendees') or [])]
+                    'participants': [a.get('email') for a in (event.get('attendees') or []) if isinstance(a, dict)]
                 })
 
         # Sort by date (most recent first)

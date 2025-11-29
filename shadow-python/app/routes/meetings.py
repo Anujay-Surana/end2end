@@ -260,11 +260,11 @@ async def prep_meeting(
             brief['_multiAccountStats'] = context_result.get('accountStats', {})
 
             # Fetch calendar events
-            # Extract meeting date from meeting object
+            # Extract meeting date from meeting object (as datetime for calendar query)
             meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
-            meeting_date = datetime.fromisoformat(meeting_start.replace('Z', '+00:00')) if meeting_start else datetime.utcnow()
+            meeting_datetime = datetime.fromisoformat(meeting_start.replace('Z', '+00:00')) if meeting_start else datetime.utcnow()
             
-            calendar_result = await fetch_calendar_from_all_accounts(accounts, meeting_date)
+            calendar_result = await fetch_calendar_from_all_accounts(accounts, meeting_datetime)
             calendar_events = calendar_result.get('results', [])
 
         # ===== SINGLE-ACCOUNT MODE (OLD - BACKWARD COMPATIBILITY) =====
@@ -713,12 +713,13 @@ async def prep_meeting(
                         + f'Other Attendees: {", ".join([a.get("name") for a in brief["attendees"]])}\n\n'
                         f'Timeline Events ({len(events_to_analyze)} events):\n'
                         + '\n\n'.join([
-                            f'[{i}] ID: {e["id"]}\nType: {e["type"]}\nDate: {e["date"]}\n'
-                            + (f'Subject: {e.get("subject", "")}\nFrom/To: {", ".join(e.get("participants", []))}\nContent: {e.get("snippet", "")[:200]}' if e['type'] == 'email' else '')
-                            + (f'Document: {e.get("name", "")}\nOwner: {", ".join(e.get("participants", []))}' if e['type'] == 'document' else '')
-                            + (f'Meeting: {e.get("name", "")}\nAttendees: {", ".join(e.get("participants", []))}' if e['type'] == 'meeting' else '')
+                            f'[{i}] ID: {e.get("id", "")}\nType: {e.get("type", "")}\nDate: {e.get("date", "")}\n'
+                            + (f'Subject: {e.get("subject", "")}\nFrom/To: {", ".join(e.get("participants", []))}\nContent: {e.get("snippet", "")[:200]}' if isinstance(e, dict) and e.get('type') == 'email' else '')
+                            + (f'Document: {e.get("name", "")}\nOwner: {", ".join(e.get("participants", []))}' if isinstance(e, dict) and e.get('type') == 'document' else '')
+                            + (f'Meeting: {e.get("name", "")}\nAttendees: {", ".join(e.get("participants", []))}' if isinstance(e, dict) and e.get('type') == 'meeting' else '')
                             + '\n---'
                             for i, e in enumerate(events_to_analyze)
+                            if isinstance(e, dict)
                         ])
                     )
                 }], 4000)
@@ -787,7 +788,7 @@ async def prep_meeting(
                     f'{important_msg4}\n\n'
                     f'Based on the LOCAL CONTEXT (emails, documents, attendee info), provide 3-5 strategic recommendations for {refer_to_str4} for THIS SPECIFIC MEETING.\n\n'
                     f'Context available:\n'
-                    f'- Attendees: {" | ".join([a.get("name") + " (" + str(a.get("keyFacts", [])[:2]) + ")" for a in brief["attendees"]])}\n'
+                    f'- Attendees: {" | ".join([a.get("name", "") + " (" + str(a.get("keyFacts", [])[:2]) + ")" for a in brief.get("attendees", []) if isinstance(a, dict)]) if isinstance(brief, dict) else ""}\n'
                     f'- Email discussions: {email_analysis[:500]}\n'
                     f'- Documents: {document_analysis[:500]}\n\n'
                     f'Each recommendation should:\n'

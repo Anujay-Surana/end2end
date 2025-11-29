@@ -369,7 +369,7 @@ async def analyze_documents(
 
             # Sort by recency first
             relevant_files.sort(
-                key=lambda item: datetime.fromisoformat(item['file']['modifiedTime'].replace('Z', '+00:00')).timestamp() if item['file'].get('modifiedTime') else 0,
+                key=lambda item: datetime.fromisoformat(item.get('file', {}).get('modifiedTime', '').replace('Z', '+00:00')).timestamp() if (isinstance(item, dict) and isinstance(item.get('file'), dict) and item.get('file', {}).get('modifiedTime')) else 0,
                 reverse=True
             )
 
@@ -434,13 +434,18 @@ async def analyze_documents(
             for file in files_with_content
         ]
 
-        stale_documents = [r for r in staleness_results if r['staleness'].get('isStale')]
+        stale_documents = [r for r in staleness_results if isinstance(r, dict) and isinstance(r.get('staleness'), dict) and r.get('staleness', {}).get('isStale')]
         if stale_documents:
             logger.info(f'  ⚠️  Detected {len(stale_documents)} potentially stale documents', requestId=request_id)
-            for doc in stale_documents:
-                indicators = doc['staleness'].get('indicators', [])
-                indicator_values = [i.get('value', '') for i in indicators]
-                logger.info(f'     - {doc["fileName"]}: {", ".join(indicator_values)}', requestId=request_id)
+            for doc in stale_documents[:5]:
+                if not isinstance(doc, dict):
+                    continue
+                staleness_obj = doc.get('staleness')
+                if not isinstance(staleness_obj, dict):
+                    continue
+                indicators = staleness_obj.get('indicators', [])
+                indicator_values = [i.get('value', '') for i in indicators if isinstance(i, dict)]
+                logger.info(f'     - {doc.get("fileName", "Unknown")}: {", ".join(indicator_values)}', requestId=request_id)
 
         # Store document staleness info for UI
         for r in staleness_results:
@@ -455,8 +460,9 @@ async def analyze_documents(
             staleness_warning = ''
             if stale_documents:
                 warning_lines = [
-                    f'- "{d["fileName"]}": {", ".join([i.get("value", "") for i in d["staleness"].get("indicators", [])])}'
+                    f'- "{d.get("fileName", "Unknown")}": {", ".join([i.get("value", "") for i in d.get("staleness", {}).get("indicators", []) if isinstance(i, dict)]) if isinstance(d.get("staleness"), dict) else ""}'
                     for d in stale_documents
+                    if isinstance(d, dict)
                 ]
                 staleness_warning = f'\n\nWARNING - POTENTIALLY OUTDATED CONTENT: {len(stale_documents)} documents contain temporal references that may be outdated:\n' + '\n'.join(warning_lines) + '\n\nWhen synthesizing, FLAG any information that may be outdated and note the document\'s last modified date.'
 
