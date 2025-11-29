@@ -151,7 +151,12 @@ async def get_meetings_for_day(
         # Sort by start time
         def get_start_time(meeting):
             start = meeting.get('start', {})
-            return start.get('dateTime') or start.get('date') or meeting.get('start') or ''
+            # Handle both dict and string formats
+            if isinstance(start, dict):
+                return start.get('dateTime') or start.get('date') or ''
+            elif isinstance(start, str):
+                return start
+            return ''
 
         all_meetings.sort(key=lambda m: get_start_time(m) or '0')
 
@@ -299,7 +304,12 @@ async def day_prep(
         # Sort meetings by time
         def get_start_time(meeting):
             start = meeting.get('start', {})
-            return start.get('dateTime') or start.get('date') or meeting.get('start') or ''
+            # Handle both dict and string formats
+            if isinstance(start, dict):
+                return start.get('dateTime') or start.get('date') or ''
+            elif isinstance(start, str):
+                return start
+            return ''
 
         all_meetings.sort(key=lambda m: get_start_time(m) or '0')
 

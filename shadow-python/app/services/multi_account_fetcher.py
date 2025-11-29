@@ -14,7 +14,8 @@ from app.services.google_api import (
     fetch_gmail_messages,
     fetch_drive_files,
     fetch_drive_file_contents,
-    fetch_calendar_events
+    fetch_calendar_events,
+    parse_email_date
 )
 from app.services.logger import logger
 
@@ -108,10 +109,15 @@ async def fetch_emails_from_all_accounts(
                 emails = await fetch_gmail_messages(account, query, 100)
                 
                 # Post-fetch filtering: Remove any emails after meeting date
-                emails = [
-                    e for e in emails
-                    if not e.get('date') or datetime.fromisoformat(e['date'].replace('Z', '+00:00')) <= meeting_date
-                ]
+                filtered_emails = []
+                for e in emails:
+                    if not e.get('date'):
+                        filtered_emails.append(e)
+                        continue
+                    email_date = parse_email_date(e['date'])
+                    if email_date and email_date <= meeting_date:
+                        filtered_emails.append(e)
+                emails = filtered_emails
                 
                 return {
                     'accountEmail': account_email,

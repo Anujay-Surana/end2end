@@ -9,11 +9,45 @@ Centralized functions for interacting with Google APIs:
 
 import base64
 import asyncio
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus
 from typing import Dict, List, Any, Optional, Union
+from datetime import datetime
 from app.services.google_api_retry import fetch_with_retry
 from app.services.token_refresh import ensure_valid_token
 from app.services.logger import logger
+
+
+def parse_email_date(date_str: str) -> Optional[datetime]:
+    """
+    Parse email date string that can be in RFC 2822 or ISO format
+    Args:
+        date_str: Date string from email header (RFC 2822) or ISO format
+    Returns:
+        datetime object or None if parsing fails
+    """
+    if not date_str:
+        return None
+    
+    try:
+        # Try RFC 2822 format first (common in email headers)
+        # Example: 'Thu, 27 Nov 2025 23:30:18 +0000'
+        dt = parsedate_to_datetime(date_str)
+        return dt
+    except (ValueError, TypeError):
+        try:
+            # Fall back to ISO format
+            # Handle both with and without timezone
+            date_str_clean = date_str.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(date_str_clean)
+            # Ensure timezone-aware
+            if dt.tzinfo is None:
+                from datetime import timezone
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except (ValueError, TypeError):
+            logger.warn(f'Failed to parse email date: {date_str}')
+            return None
 
 
 async def fetch_gmail_messages(

@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from app.services.gpt_service import call_gpt, safe_parse_json
 from app.services.temporal_scoring import score_and_rank_emails
+from app.services.google_api import parse_email_date
 from app.services.logger import logger
 
 
@@ -47,9 +48,11 @@ def _calculate_days_ago(date_str: Optional[str]) -> int:
     if not date_str:
         return 999999  # Very old
     try:
-        date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-        now = datetime.utcnow()
-        days = (now - date.replace(tzinfo=None)).days
+        date = parse_email_date(date_str)
+        if not date:
+            return 999999
+        now = datetime.now(date.tzinfo) if date.tzinfo else datetime.utcnow()
+        days = (now - date.replace(tzinfo=None) if date.tzinfo else now - date).days
         return max(0, days)
     except Exception:
         return 999999
@@ -478,10 +481,7 @@ async def filter_relevant_emails(
 
         email_date = None
         if email.get('date'):
-            try:
-                email_date = datetime.fromisoformat(email['date'].replace('Z', '+00:00'))
-            except Exception:
-                pass
+            email_date = parse_email_date(email['date'])
 
         if email_date:
             if not thread['dateRange']['earliest'] or email_date < thread['dateRange']['earliest']:

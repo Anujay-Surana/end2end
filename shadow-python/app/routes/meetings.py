@@ -18,6 +18,7 @@ from app.db.queries.accounts import get_accounts_by_user_id
 from app.services.logger import logger
 from app.services.gpt_service import call_gpt, safe_parse_json, synthesize_results
 from app.services.user_context import get_user_context, filter_user_from_attendees
+from app.services.google_api import parse_email_date
 from app.services.user_profiling import build_user_profile
 from app.services.token_refresh import ensure_all_tokens_valid
 from app.services.multi_account_fetcher import (
@@ -724,7 +725,9 @@ async def prep_meeting(
                     continue
                 if email.get('date'):
                     try:
-                        email_date = datetime.fromisoformat(email['date'].replace('Z', '+00:00'))
+                        email_date = parse_email_date(email['date'])
+                        if not email_date:
+                            continue
                         participants = []
                         if email.get('from'):
                             from_match = re.match(r'^([^<]+)(?=\s*<)|^([^@]+@[^>]+)$', email['from'])
