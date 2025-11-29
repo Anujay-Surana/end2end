@@ -176,10 +176,12 @@ async def _fetch_gmail_messages_with_token(
                     # Gmail API uses base64url encoding (uses - and _ instead of + and /)
                     # Convert base64url to standard base64
                     data = data.replace('-', '+').replace('_', '/')
-                    # Add padding if needed
-                    padding = len(data) % 4
-                    if padding:
-                        data += '=' * (4 - padding)
+                    # Remove any whitespace or newlines
+                    data = data.strip()
+                    # Add padding if needed (base64 requires length to be multiple of 4)
+                    padding_needed = (4 - len(data) % 4) % 4
+                    if padding_needed:
+                        data += '=' * padding_needed
                     return base64.b64decode(data).decode('utf-8', errors='ignore')
                 except Exception as e:
                     logger.warn(f'Failed to decode base64 data: {str(e)}')
@@ -519,10 +521,11 @@ async def fetch_calendar_events(
     try:
         logger.debug(f"  📅 Calendar query: {time_min} to {time_max}")
 
+        # URL encode the datetime strings to handle special characters
         calendar_url = (
             f"https://www.googleapis.com/calendar/v3/calendars/primary/events?"
-            f"timeMin={time_min}&"
-            f"timeMax={time_max}&"
+            f"timeMin={quote_plus(time_min)}&"
+            f"timeMax={quote_plus(time_max)}&"
             f"singleEvents=true&"
             f"orderBy=startTime&"
             f"maxResults={max_results}"

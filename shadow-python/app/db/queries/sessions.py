@@ -123,14 +123,35 @@ async def delete_all_user_sessions(user_id: str) -> int:
     """
     if not user_id:
         return 0
-        
-    response = supabase.table('sessions').delete().eq('user_id', user_id).select('id').execute()
     
-    if response is None:
+    # Supabase delete().eq() doesn't support .select() - query first to get count
+    try:
+        # First query to get session IDs (for counting)
+        query_response = supabase.table('sessions').select('id').eq('user_id', user_id).execute()
+        
+        if query_response is None:
+            return 0
+        if hasattr(query_response, 'error') and query_response.error:
+            raise Exception(f'Failed to query user sessions: {query_response.error.message}')
+        
+        session_count = len(query_response.data) if query_response.data else 0
+        
+        if session_count == 0:
+            return 0
+        
+        # Then delete (without select)
+        delete_response = supabase.table('sessions').delete().eq('user_id', user_id).execute()
+        
+        if delete_response is None:
+            return 0
+        if hasattr(delete_response, 'error') and delete_response.error:
+            raise Exception(f'Failed to delete user sessions: {delete_response.error.message}')
+        
+        return session_count
+    except Exception as e:
+        from app.services.logger import logger
+        logger.warn(f'Error deleting user sessions: {str(e)}')
         return 0
-    if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to delete user sessions: {response.error.message}')
-    return len(response.data) if response.data else 0
 
 
 async def delete_expired_sessions() -> int:
@@ -162,8 +183,9 @@ async def delete_expired_sessions() -> int:
         batch = expired_ids[i:i + batch_size]
         for session_id in batch:
             try:
-                delete_response = supabase.table('sessions').delete().eq('id', session_id).select('id').execute()
-                if delete_response and delete_response.data:
+                # Supabase delete().eq() doesn't support .select() - just delete directly
+                delete_response = supabase.table('sessions').delete().eq('id', session_id).execute()
+                if delete_response and not (hasattr(delete_response, 'error') and delete_response.error):
                     deleted_count += 1
             except Exception as e:
                 # Log but continue with other deletions
