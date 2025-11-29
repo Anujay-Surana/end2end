@@ -437,11 +437,7 @@ async def filter_relevant_emails(
 
     # Apply temporal scoring to rank emails by recency + relevance
     logger.info(f'  ⏰ Applying temporal scoring to {len(relevant_emails)} emails...', requestId=request_id)
-    relevant_emails = score_and_rank_emails(relevant_emails, 0.8, {
-        'recencyWeight': 0.3,
-        'attendeeBoost': 0.1,
-        'threadBoost': 0.1
-    })
+    relevant_emails = score_and_rank_emails(relevant_emails, meeting_date=None)
 
     # Log temporal distribution
     recent_count = sum(1 for e in relevant_emails if e.get('_daysOld') is not None and e.get('_daysOld') <= 30)
