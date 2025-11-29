@@ -565,7 +565,20 @@ def analyze_working_patterns(events: List[Dict[str, Any]], user_email: str) -> D
     
     # Response patterns (organizer vs attendee)
     user_email_lower = user_email.lower()
-    organized = sum(1 for e in events if isinstance(e, dict) and user_email_lower in (e.get('organizer', {}).get('email', '') or '').lower())
+    organized = 0
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        organizer = e.get('organizer', '')
+        # Handle both string (email) and dict formats
+        if isinstance(organizer, str):
+            organizer_email = organizer
+        elif isinstance(organizer, dict):
+            organizer_email = organizer.get('email', '')
+        else:
+            organizer_email = ''
+        if user_email_lower in organizer_email.lower():
+            organized += 1
     
     return {
         'meetingsPerWeek': round(meetings_per_week),
