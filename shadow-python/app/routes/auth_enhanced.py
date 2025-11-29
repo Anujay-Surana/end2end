@@ -7,7 +7,7 @@ OAuth routes with progressive permissions and modular OAuth service
 import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Request, Cookie
+from fastapi import APIRouter, Depends, HTTPException, Request, Cookie, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
@@ -73,6 +73,7 @@ async def initiate_google_oauth(
 @router.post('/google/callback')
 async def google_callback(
     request: OAuthCallbackRequest,
+    response: Response,
     session: Optional[str] = Cookie(None, alias='session'),
     authorization: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
@@ -153,6 +154,24 @@ async def google_callback(
         
         logger.info(f'Session created for {user["email"]}')
         
+        # Set session cookie
+        session_token = session_obj['session_token']
+        expires_at = datetime.fromisoformat(session_obj['expires_at'])
+        max_age = int((expires_at - datetime.utcnow()).total_seconds())
+        
+        # Determine if we're in production (HTTPS)
+        is_production = os.getenv('NODE_ENV') == 'production' or os.getenv('RAILWAY_ENVIRONMENT') is not None
+        
+        response.set_cookie(
+            key='session',
+            value=session_token,
+            max_age=max_age,
+            httponly=True,  # Prevent JavaScript access (security)
+            secure=is_production,  # Only send over HTTPS in production
+            samesite='lax',  # CSRF protection
+            path='/'
+        )
+        
         return {
             'success': True,
             'user': {
@@ -162,7 +181,7 @@ async def google_callback(
                 'picture': user.get('picture_url')
             },
             'session': {
-                'token': session_obj['session_token'],
+                'token': session_token,
                 'expires_at': session_obj['expires_at']
             },
             'access_token': access_token,
@@ -334,10 +353,11 @@ async def get_current_user(
 @router.post('/logout')
 async def logout(
     user: Dict[str, Any] = Depends(require_auth),
+    response: Response,
     session: Optional[str] = Cookie(None, alias='session')
 ):
     """
-    Delete session (logout)
+    Delete session (logout) and clear cookie
     """
     try:
         from app.db.queries.sessions import delete_session
@@ -346,6 +366,13 @@ async def logout(
         if session_token:
             await delete_session(session_token)
             logger.info(f'User logged out: {user["email"]}')
+        
+        # Clear session cookie
+        response.delete_cookie(
+            key='session',
+            path='/',
+            samesite='lax'
+        )
         
         return {'success': True, 'message': 'Logged out successfully'}
     
