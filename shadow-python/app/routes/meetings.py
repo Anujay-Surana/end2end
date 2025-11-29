@@ -599,6 +599,8 @@ async def prep_meeting(
             all_timeline_events = []
 
             for email in relevant_emails:
+                if not isinstance(email, dict):
+                    continue
                 if email.get('date'):
                     try:
                         email_date = datetime.fromisoformat(email['date'].replace('Z', '+00:00'))
@@ -633,6 +635,8 @@ async def prep_meeting(
                         continue
 
             for file in files_with_content:
+                if not isinstance(file, dict):
+                    continue
                 if file.get('modifiedTime'):
                     try:
                         modified_date = datetime.fromisoformat(file['modifiedTime'].replace('Z', '+00:00'))
@@ -649,11 +653,17 @@ async def prep_meeting(
                         continue
 
             for event in calendar_events:
-                event_start = event.get('start', {}).get('dateTime') or event.get('start', {}).get('date') or event.get('start')
+                if not isinstance(event, dict):
+                    continue
+                event_start_obj = event.get('start')
+                if isinstance(event_start_obj, dict):
+                    event_start = event_start_obj.get('dateTime') or event_start_obj.get('date')
+                else:
+                    event_start = event_start_obj
                 if event_start:
                     try:
                         event_date = datetime.fromisoformat(str(event_start).replace('Z', '+00:00'))
-                        event_attendees = [a.get('displayName') or a.get('email') or a.get('emailAddress') for a in event.get('attendees', []) if a.get('displayName') or a.get('email') or a.get('emailAddress')]
+                        event_attendees = [a.get('displayName') or a.get('email') or a.get('emailAddress') for a in event.get('attendees', []) if isinstance(a, dict) and (a.get('displayName') or a.get('email') or a.get('emailAddress'))]
                         all_timeline_events.append({
                             'type': 'meeting',
                             'date': event_date.isoformat(),
@@ -679,10 +689,11 @@ async def prep_meeting(
                 user_context_prefix3 = f'You are preparing a brief for {user_context.get("formattedName", "the user")} ({user_context.get("formattedEmail", "")}). ' if user_context and isinstance(user_context, dict) else ''
                 
                 important_msg3 = ""
-                if user_context:
-                    important_msg3 = f"IMPORTANT: {user_context['formattedName']} is the user you are preparing this brief for. Focus on events that are relevant to {user_context['formattedName']}'s understanding of this meeting."
+                if user_context and isinstance(user_context, dict):
+                    user_name = user_context.get('formattedName', 'the user')
+                    important_msg3 = f"IMPORTANT: {user_name} is the user you are preparing this brief for. Focus on events that are relevant to {user_name}'s understanding of this meeting."
                 
-                perspective_str3 = "the user's" if not user_context else user_context["formattedName"] + "'s"
+                perspective_str3 = "the user's" if not (user_context and isinstance(user_context, dict)) else user_context.get("formattedName", "the user") + "'s"
                 
                 timeline_analysis = await call_gpt([{
                     'role': 'system',

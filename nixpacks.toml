@@ -1,12 +1,13 @@
 [phases.setup]
-nixPkgs = ["python312"]
+nixPkgs = ["python312", "pip"]
 
 [phases.build]
 cmds = [
-  "cd shadow-python && python -m ensurepip --upgrade",
-  "cd shadow-python && python -m pip install -r requirements.txt"
+  "cd shadow-python && python -m venv venv",
+  "cd shadow-python && venv/bin/pip install --upgrade pip",
+  "cd shadow-python && venv/bin/pip install -r requirements.txt"
 ]
 
 [start]
-cmd = "cd shadow-python && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+cmd = "cd shadow-python && venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 
