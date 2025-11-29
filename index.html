@@ -8344,7 +8344,8 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
         }
 
         // Export chat mode functions
-        window.toggleChatMode = toggleChatMode;
+        // Note: toggleChatMode is an alias for toggleChatPanel
+        window.toggleChatMode = toggleChatPanel;
         window.startDayPrep = startDayPrep;
         window.startMeetingPrep = startMeetingPrep;
         window.closeMeetingSelection = closeMeetingSelection;

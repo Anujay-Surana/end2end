@@ -220,7 +220,6 @@ FILTERING STRICTNESS (HIGH CONFIDENCE):
         logger.info(f'  ⚠️  Failed to parse relevance check for batch {batch_index + 1}, excluding from analysis', requestId=request_id)
         batch_indices = []
 
-    logger.info(f'     ✓ Found {len(batch_indices)}/{len(batch["emails"])} relevant emails in batch {batch_index + 1}', requestId=request_id)
     
     return {'indices': batch_indices, 'reasoning': batch_reasoning}
 
@@ -324,7 +323,6 @@ async def _extract_context_batch(
 
     try:
         batch_data = safe_parse_json(topics_extraction)
-        logger.info(f'     ✓ Extracted context from batch {batch_index + 1}', requestId=request_id)
         return batch_data
     except Exception as e:
         logger.info(f'  ⚠️  Failed to parse topics extraction for batch {batch_index + 1}: {str(e)}', requestId=request_id)
@@ -370,7 +368,7 @@ async def filter_relevant_emails(
         email_analysis = 'No email activity found.'
         return relevant_emails, email_analysis, extraction_data
 
-    logger.info(f'  🔍 Filtering {len(emails)} emails for meeting relevance (processing in batches of 25)...', requestId=request_id)
+    logger.info(f'  🔍 Filtering {len(emails)} emails for meeting relevance...', requestId=request_id)
 
     # PASS 1: Relevance filtering in PARALLEL batches of 25
     batch_size = 25
@@ -382,7 +380,7 @@ async def filter_relevant_emails(
             'emails': emails[batch_start:min(batch_start + batch_size, len(emails))]
         })
 
-    logger.info(f'  🚀 Processing {len(batches)} email batches in PARALLEL...', requestId=request_id)
+    logger.info(f'  🚀 Processing {len(batches)} email batches...', requestId=request_id)
 
     relevance_promises = [
         _filter_email_batch(
@@ -521,7 +519,7 @@ async def filter_relevant_emails(
     relevant_emails = relevant_emails_with_threads
     logger.info(f'  📧 Grouped into {len(thread_map)} email threads', requestId=request_id)
 
-    logger.info(f'  📊 Extracting context from {len(relevant_emails)} relevant emails (processing in PARALLEL batches of 20)...', requestId=request_id)
+    logger.info(f'  📊 Extracting context from {len(relevant_emails)} relevant emails...', requestId=request_id)
 
     # PASS 2: Extract context in PARALLEL batches of 20
     extraction_batch_size = 20

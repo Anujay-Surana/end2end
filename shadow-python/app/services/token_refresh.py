@@ -122,7 +122,7 @@ async def ensure_valid_token(account: Dict[str, Any]) -> Dict[str, Any]:
             # Token was refreshed by another request, return current account
             return account
 
-        logger.info(f"🔄 Refreshing token for {account.get('account_email')} (expires: {expires_at.isoformat() if expires_at else 'unknown'})")
+        logger.debug(f"🔄 Refreshing token for {account.get('account_email')}")
 
         if not account.get('refresh_token'):
             raise Exception(f"No refresh token available for account {account.get('account_email')}. User needs to re-authenticate.")
@@ -160,7 +160,7 @@ async def ensure_all_tokens_valid(accounts: List[Dict[str, Any]]) -> Dict[str, A
     Returns:
         Dict with validAccounts, failedAccounts, allSucceeded, partialSuccess
     """
-    logger.info(f"\n🔐 Validating tokens for {len(accounts)} account(s)...")
+    logger.debug(f"🔐 Validating tokens for {len(accounts)} account(s)...")
 
     results = await asyncio.gather(*[ensure_valid_token(account) for account in accounts], return_exceptions=True)
 
@@ -190,7 +190,7 @@ async def ensure_all_tokens_valid(accounts: List[Dict[str, Any]]) -> Dict[str, A
         for failed in failed_accounts:
             logger.warning(f"   - {failed.get('accountEmail')}: {failed.get('error')}")
 
-    logger.info(f"✅ {len(valid_accounts)}/{len(accounts)} account(s) have valid tokens")
+    logger.debug(f"✅ {len(valid_accounts)}/{len(accounts)} account(s) have valid tokens")
 
     return {
         'validAccounts': valid_accounts,

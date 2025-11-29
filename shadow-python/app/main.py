@@ -6,10 +6,12 @@ Entry point for the Python backend
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import os
+from pathlib import Path
 from app.config import settings, validate_env
 from app.db.connection import test_connection
 from app.middleware.request_logger import RequestLoggerMiddleware
@@ -60,6 +62,8 @@ app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
 
+# Root endpoint removed - handled by serve_frontend below
+
 # Health check endpoint
 @app.get('/health')
 async def health_check():
@@ -105,6 +109,53 @@ app.include_router(websocket.router, prefix='/ws', tags=['websocket'])
 app.include_router(onboarding.router, prefix='/onboarding', tags=['onboarding'])
 app.include_router(credentials.router, prefix='', tags=['credentials'])
 app.include_router(service_auth.router, prefix='/auth', tags=['service-auth'])
+
+# Serve static files (frontend) - must be after API routes
+# Get the project root directory (parent of shadow-python)
+# main.py is at: shadow-python/app/main.py
+# So we go up 2 levels: shadow-python/app -> shadow-python -> project_root
+_current_file = Path(__file__).resolve()
+project_root = _current_file.parent.parent.parent
+static_dir = project_root
+
+# Serve static files (frontend) - catch-all route must be last
+@app.get('/{full_path:path}')
+async def serve_frontend(full_path: str, request: Request):
+    """
+    Serve frontend files. API routes are handled above, so this catches everything else.
+    This enables SPA routing - all non-API routes serve index.html.
+    """
+    # Don't serve API routes or other backend paths (these should be handled by routers above)
+    if full_path.startswith(('api/', 'auth/', 'ws/', 'onboarding/', 'docs', 'openapi.json', 'health', '_')):
+        raise StarletteHTTPException(status_code=404, detail="Not found")
+    
+    # Serve index.html for root path
+    if full_path == '':
+        index_path = static_dir / 'index.html'
+        if index_path.exists():
+            return FileResponse(index_path)
+        raise StarletteHTTPException(status_code=404, detail="Frontend not found")
+    
+    # Try to serve the requested file if it exists
+    file_path = static_dir / full_path
+    # Security: ensure the resolved path is still within static_dir
+    try:
+        file_path_resolved = file_path.resolve()
+        static_dir_resolved = static_dir.resolve()
+        if file_path_resolved.exists() and file_path_resolved.is_file():
+            # Check that the file is within the static directory (prevent directory traversal)
+            if str(file_path_resolved).startswith(str(static_dir_resolved)):
+                return FileResponse(file_path_resolved)
+    except (OSError, ValueError):
+        pass  # Invalid path, fall through to SPA routing
+    
+    # For SPA routing, serve index.html for any path that doesn't match a file
+    # This allows client-side routing to work
+    index_path = static_dir / 'index.html'
+    if index_path.exists():
+        return FileResponse(index_path)
+    
+    raise StarletteHTTPException(status_code=404, detail="Not found")
 
 
 if __name__ == '__main__':

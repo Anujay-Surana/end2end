@@ -1,9 +1,10 @@
 [phases.setup]
-nixPkgs = ["python312", "pip"]
+nixPkgs = ["python312"]
 
 [phases.build]
 cmds = [
-  "cd shadow-python && pip install -r requirements.txt"
+  "cd shadow-python && python -m ensurepip --upgrade",
+  "cd shadow-python && python -m pip install -r requirements.txt"
 ]
 
 [start]

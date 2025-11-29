@@ -28,12 +28,19 @@ structlog.configure(
 )
 
 # Get log level from environment
-log_level = os.getenv('LOG_LEVEL', 'info' if os.getenv('NODE_ENV') == 'production' else 'debug')
+log_level = os.getenv('LOG_LEVEL', 'info' if os.getenv('NODE_ENV') == 'production' else 'info')
 logging.basicConfig(
     format="%(message)s",
     stream=os.sys.stdout,
     level=getattr(logging, log_level.upper()),
 )
+
+# Suppress verbose HTTP client logging (httpx, httpcore)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('httpcore.http11').setLevel(logging.WARNING)
+logging.getLogger('httpcore.http2').setLevel(logging.WARNING)
+logging.getLogger('httpcore.connection').setLevel(logging.WARNING)
 
 # Create logger instance
 logger = structlog.get_logger()

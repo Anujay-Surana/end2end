@@ -2,26 +2,51 @@
 
 Python 3.12 FastAPI backend for HumanMax meeting preparation calendar.
 
-## Setup
+## Quick Start
 
-1. Create virtual environment:
+### 1. Create virtual environment:
 ```bash
 cd shadow-python
 python3.12 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-2. Install dependencies:
+### 2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Set up environment variables in `.env` (same as Node.js backend)
+### 3. Set up environment variables
 
-4. Run the server:
+Create `.env` file in the project root (`/Users/anujaysurana/Desktop/humanMax/.env`) with:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `OPENAI_API_KEY`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `DEEPGRAM_API_KEY`
+- Optional: `PARALLEL_API_KEY`, `JWT_SECRET`, `SESSION_SECRET`, `PORT`
+
+### 4. Run the server:
+
+**Recommended (avoids Python alias issues):**
 ```bash
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+cd shadow-python
+./venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
+
+**Alternative:**
+```bash
+cd shadow-python
+source venv/bin/activate
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+```
+
+### 5. Access the application:
+
+- **Frontend:** http://localhost:8080/
+- **API Docs:** http://localhost:8080/docs
+- **Health Check:** http://localhost:8080/health
 
 ## Project Structure
 

@@ -19,15 +19,23 @@ async def create_user(user_data: dict) -> dict:
     name = user_data.get('name')
     picture_url = user_data.get('picture_url')
     
-    response = supabase.table('users').upsert(
+    # Supabase upsert().select() pattern doesn't work - need to query after upsert
+    # First upsert the record
+    upsert_response = supabase.table('users').upsert(
         {'email': email, 'name': name, 'picture_url': picture_url},
         on_conflict='email'
-    ).select().execute()
+    ).execute()
     
-    if response.data and len(response.data) > 0:
-        return response.data[0]
+    if hasattr(upsert_response, 'error') and upsert_response.error:
+        raise Exception(f'Failed to create or update user: {upsert_response.error.message}')
+    
+    # Then query to get the created/updated record
+    response = supabase.table('users').select('*').eq('email', email).maybe_single().execute()
+    
     if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to create user: {response.error.message}')
+        raise Exception(f'Failed to fetch user: {response.error.message}')
+    if response.data:
+        return response.data
     raise Exception('Failed to create user')
 
 
@@ -84,12 +92,20 @@ async def update_user(user_id: str, updates: dict) -> dict:
     if picture_url is not None:
         update_data['picture_url'] = picture_url
     
-    response = supabase.table('users').update(update_data).eq('id', user_id).select().execute()
+    # Supabase update().eq().select() pattern doesn't work - need to query after update
+    # First update the record
+    update_response = supabase.table('users').update(update_data).eq('id', user_id).execute()
+    
+    if hasattr(update_response, 'error') and update_response.error:
+        raise Exception(f'Failed to update user: {update_response.error.message}')
+    
+    # Then query to get the updated record
+    response = supabase.table('users').select('*').eq('id', user_id).maybe_single().execute()
     
     if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to update user: {response.error.message}')
-    if response.data and len(response.data) > 0:
-        return response.data[0]
+        raise Exception(f'Failed to fetch updated user: {response.error.message}')
+    if response.data:
+        return response.data
     raise Exception('Failed to update user')
 
 

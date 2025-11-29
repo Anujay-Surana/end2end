@@ -64,17 +64,23 @@ async def generate_executive_summary(
     # Format attendees for prompt
     attendees_text = '\n'.join([
         f'- {a.get("name", "")} ({a.get("company", "")})'
-        + (f': {"; ".join(a.get("keyFacts", [])[:2])}' if a.get('keyFacts') else '')
-        for a in attendees
+        + (f': {"; ".join(a.get("keyFacts", [])[:2])}' if isinstance(a, dict) and a.get('keyFacts') else '')
+        for a in attendees if isinstance(a, dict)
     ])
 
     # Format timeline events
     timeline_text = ''
-    if timeline_trend:
-        timeline_text = f'TREND: {timeline_trend.get("description", "")}\n'
+    if timeline_trend and isinstance(timeline_trend, dict):
+        trend_type = timeline_trend.get("trend", "unknown")
+        velocity = timeline_trend.get("velocity", 0)
+        item_count = timeline_trend.get("itemCount", 0)
+        if trend_type != 'insufficient_data':
+            timeline_text = f'TREND: {trend_type} activity ({item_count} items, velocity: {velocity:.2f}/day)\n'
     if timeline:
         timeline_lines = []
         for e in timeline[:15]:
+            if not isinstance(e, dict):
+                continue
             date_str = 'unknown date'
             if e.get('date'):
                 try:
@@ -96,15 +102,15 @@ async def generate_executive_summary(
         return text[:max_length] + '\n[...truncated...]'
 
     # Prepare user context variables to avoid nested f-string issues
-    user_name = user_context["formattedName"] if user_context else "the user"
-    user_possessive = f"{user_context['formattedName']}'s" if user_context else "the user's"
+    user_name = user_context.get("formattedName", "the user") if user_context and isinstance(user_context, dict) else "the user"
+    user_possessive = f"{user_context.get('formattedName', 'the user')}'s" if user_context and isinstance(user_context, dict) else "the user's"
     user_context_note = ''
-    if user_context:
-        user_context_note = f"IMPORTANT: {user_context['formattedName']} is the user you are preparing this brief for. Analyze the meeting purpose from {user_context['formattedName']}'s perspective. Focus on what {user_context['formattedName']} needs to understand about this meeting.\n\n"
-    user_info_line = f"User: {user_context['formattedName']} ({user_context['formattedEmail']})\n" if user_context else ""
+    if user_context and isinstance(user_context, dict):
+        user_context_note = f"IMPORTANT: {user_context.get('formattedName', 'the user')} is the user you are preparing this brief for. Analyze the meeting purpose from {user_context.get('formattedName', 'the user')}'s perspective. Focus on what {user_context.get('formattedName', 'the user')} needs to understand about this meeting.\n\n"
+    user_info_line = f"User: {user_context.get('formattedName', 'Unknown')} ({user_context.get('formattedEmail', '')})\n" if user_context and isinstance(user_context, dict) else ""
     summary_context_note = ''
-    if user_context:
-        summary_context_note = f"IMPORTANT: {user_context['formattedName']} is the user you are preparing this brief for. Structure the summary from {user_context['formattedName']}'s perspective. Use \"you\" to refer to {user_context['formattedName']}.\n\n"
+    if user_context and isinstance(user_context, dict):
+        summary_context_note = f"IMPORTANT: {user_context.get('formattedName', 'the user')} is the user you are preparing this brief for. Structure the summary from {user_context.get('formattedName', 'the user')}'s perspective. Use \"you\" to refer to {user_context.get('formattedName', 'the user')}.\n\n"
 
     meeting_purpose_analysis = await call_gpt([{
         'role': 'system',
@@ -174,6 +180,8 @@ async def generate_executive_summary(
     # Format timeline for synthesis
     timeline_for_synthesis = []
     for e in timeline[:15]:
+        if not isinstance(e, dict):
+            continue
         timeline_for_synthesis.append({
             'type': e.get('type', ''),
             'date': e.get('date', ''),
@@ -187,9 +195,9 @@ async def generate_executive_summary(
             'name': a.get('name', ''),
             'title': a.get('title', ''),
             'company': a.get('company', ''),
-            'keyFacts': a.get('keyFacts', [])[:3] if a.get('keyFacts') else []
+            'keyFacts': a.get('keyFacts', [])[:3] if isinstance(a, dict) and a.get('keyFacts') else []
         }
-        for a in attendees
+        for a in attendees if isinstance(a, dict)
     ]
 
     summary = await synthesize_results(

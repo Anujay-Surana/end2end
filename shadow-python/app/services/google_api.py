@@ -36,7 +36,7 @@ async def fetch_gmail_messages(
     account = access_token_or_account if is_account_object else None
     
     try:
-        logger.info(f"  📧 Gmail query: {query[:150]}...")
+        logger.debug(f"  📧 Gmail query: {query[:150]}...")
 
         # Step 1: Get message IDs (with retry logic)
         list_url = f"https://www.googleapis.com/gmail/v1/users/me/messages?q={quote_plus(query)}&maxResults={max_results}"
@@ -110,14 +110,14 @@ async def _fetch_gmail_messages_with_token(
     """
     try:
         # Process in batches of 20 to avoid rate limits
-        logger.info(f"  📧 Fetching full details for ALL {len(message_ids)} messages (batches of 20)...")
+        logger.info(f"  📧 Fetching full details for {len(message_ids)} messages...")
         all_messages = []
 
         for i in range(0, len(message_ids), 20):
             batch = message_ids[i:i + 20]
-            logger.info(f"     Processing email batch {i // 20 + 1}/{(len(message_ids) + 19) // 20} ({len(batch)} emails)...")
 
             async def fetch_message(msg: Dict[str, str]) -> Optional[Dict[str, Any]]:
+                nonlocal access_token, account  # Allow modifying outer scope variables
                 try:
                     msg_url = f"https://www.googleapis.com/gmail/v1/users/me/messages/{msg['id']}?format=full"
                     msg_response = await fetch_with_retry(
@@ -238,7 +238,7 @@ async def fetch_drive_files(
     account = access_token_or_account if is_account_object else None
     
     try:
-        logger.info(f"  📁 Drive query: {query[:150]}...")
+        logger.debug(f"  📁 Drive query: {query[:150]}...")
 
         drive_url = (
             f"https://www.googleapis.com/drive/v3/files?"
@@ -325,13 +325,13 @@ async def fetch_drive_file_contents(
 
     # Process ALL files found (no artificial limit)
     # Process in batches of 10 to avoid timeouts
-    logger.info(f"  📄 Fetching content for ALL {len(files)} files (processing in batches of 10)...")
+    logger.info(f"  📄 Fetching content for {len(files)} files...")
 
     for i in range(0, len(files), 10):
         batch = files[i:i + 10]
-        logger.info(f"     Processing batch {i // 10 + 1}/{(len(files) + 9) // 10} ({len(batch)} files)...")
 
         async def fetch_file_content(file: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            nonlocal access_token, account  # Allow modifying outer scope variables
             try:
                 content = ''
 
@@ -477,7 +477,7 @@ async def fetch_calendar_events(
     account = access_token_or_account if is_account_object else None
     
     try:
-        logger.info(f"  📅 Calendar query: {time_min} to {time_max}")
+        logger.debug(f"  📅 Calendar query: {time_min} to {time_max}")
 
         calendar_url = (
             f"https://www.googleapis.com/calendar/v3/calendars/primary/events?"

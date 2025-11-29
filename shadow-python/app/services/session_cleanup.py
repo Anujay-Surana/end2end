@@ -34,6 +34,7 @@ async def run_cleanup() -> int:
 
 
 _cleanup_task: Optional[asyncio.Task] = None
+_shutdown_handler_registered = False
 
 
 def start_periodic_cleanup(interval_hours: int = 6):
@@ -66,17 +67,19 @@ def start_periodic_cleanup(interval_hours: int = 6):
                 if 'Internal server error' not in str(err):
                     logger.error(f'Periodic session cleanup failed: {str(err)}', error=str(err))
 
-    global _cleanup_task
+    global _cleanup_task, _shutdown_handler_registered
     _cleanup_task = asyncio.create_task(cleanup_loop())
 
-    # Handle graceful shutdown
-    def signal_handler(sig, frame):
-        logger.info('Stopping session cleanup service')
-        if _cleanup_task:
-            _cleanup_task.cancel()
+    # Handle graceful shutdown (only register once)
+    if not _shutdown_handler_registered:
+        def signal_handler(sig, frame):
+            logger.info('Stopping session cleanup service')
+            if _cleanup_task:
+                _cleanup_task.cancel()
 
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+        _shutdown_handler_registered = True
 
     return _cleanup_task
 

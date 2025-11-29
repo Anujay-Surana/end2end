@@ -15,7 +15,9 @@ async def create_or_update_account(account_data: dict) -> dict:
     Returns:
         Created/updated account
     """
-    response = supabase.table('connected_accounts').upsert(
+    # Supabase upsert().select() pattern doesn't work - need to query after upsert
+    # First upsert the record
+    upsert_response = supabase.table('connected_accounts').upsert(
         {
             'user_id': account_data.get('user_id'),
             'provider': account_data.get('provider', 'google'),
@@ -28,12 +30,20 @@ async def create_or_update_account(account_data: dict) -> dict:
             'is_primary': account_data.get('is_primary', False)
         },
         on_conflict='user_id,account_email'
-    ).select().execute()
+    ).execute()
+    
+    if hasattr(upsert_response, 'error') and upsert_response.error:
+        raise Exception(f'Failed to create or update account: {upsert_response.error.message}')
+    
+    # Then query to get the created/updated record
+    response = supabase.table('connected_accounts').select('*').eq(
+        'user_id', account_data.get('user_id')
+    ).eq('account_email', account_data.get('account_email')).maybe_single().execute()
     
     if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to create or update account: {response.error.message}')
-    if response.data and len(response.data) > 0:
-        return response.data[0]
+        raise Exception(f'Failed to fetch account: {response.error.message}')
+    if response.data:
+        return response.data
     raise Exception('Failed to create or update account')
 
 
@@ -120,15 +130,23 @@ async def update_account_token(account_id: str, token_data: dict) -> dict:
     Returns:
         Updated account
     """
-    response = supabase.table('connected_accounts').update({
+    # Supabase update().eq().select() pattern doesn't work - need to query after update
+    # First update the record
+    update_response = supabase.table('connected_accounts').update({
         'access_token': token_data.get('access_token'),
         'token_expires_at': token_data.get('token_expires_at')
-    }).eq('id', account_id).select().execute()
+    }).eq('id', account_id).execute()
+    
+    if hasattr(update_response, 'error') and update_response.error:
+        raise Exception(f'Failed to update account token: {update_response.error.message}')
+    
+    # Then query to get the updated record
+    response = supabase.table('connected_accounts').select('*').eq('id', account_id).maybe_single().execute()
     
     if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to update account token: {response.error.message}')
-    if response.data and len(response.data) > 0:
-        return response.data[0]
+        raise Exception(f'Failed to fetch updated account: {response.error.message}')
+    if response.data:
+        return response.data
     raise Exception('Failed to update account token')
 
 
@@ -140,12 +158,20 @@ async def set_primary_account(account_id: str) -> dict:
     Returns:
         Updated account
     """
-    response = supabase.table('connected_accounts').update({'is_primary': True}).eq('id', account_id).select().execute()
+    # Supabase update().eq().select() pattern doesn't work - need to query after update
+    # First update the record
+    update_response = supabase.table('connected_accounts').update({'is_primary': True}).eq('id', account_id).execute()
+    
+    if hasattr(update_response, 'error') and update_response.error:
+        raise Exception(f'Failed to set primary account: {update_response.error.message}')
+    
+    # Then query to get the updated record
+    response = supabase.table('connected_accounts').select('*').eq('id', account_id).maybe_single().execute()
     
     if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to set primary account: {response.error.message}')
-    if response.data and len(response.data) > 0:
-        return response.data[0]
+        raise Exception(f'Failed to fetch updated account: {response.error.message}')
+    if response.data:
+        return response.data
     raise Exception('Failed to set primary account')
 
 

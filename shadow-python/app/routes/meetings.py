@@ -260,8 +260,12 @@ async def prep_meeting(
             brief['_multiAccountStats'] = context_result.get('accountStats', {})
 
             # Fetch calendar events
-            calendar_result = await fetch_calendar_from_all_accounts(accounts, attendees, meeting)
-            calendar_events = merge_and_deduplicate_calendar_events(calendar_result)
+            # Extract meeting date from meeting object
+            meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
+            meeting_date = datetime.fromisoformat(meeting_start.replace('Z', '+00:00')) if meeting_start else datetime.utcnow()
+            
+            calendar_result = await fetch_calendar_from_all_accounts(accounts, meeting_date)
+            calendar_events = calendar_result.get('results', [])
 
         # ===== SINGLE-ACCOUNT MODE (OLD - BACKWARD COMPATIBILITY) =====
         elif access_token:
@@ -663,15 +667,16 @@ async def prep_meeting(
                         continue
 
             # Sort chronologically and filter to last 6 months
+            all_timeline_events = [e for e in all_timeline_events if isinstance(e, dict)]
             all_timeline_events.sort(key=lambda e: e.get('timestamp', 0), reverse=True)
             six_months_ago = datetime.utcnow() - timedelta(days=180)
-            recent_events = [e for e in all_timeline_events if e.get('timestamp') and datetime.fromtimestamp(e['timestamp']) >= six_months_ago]
+            recent_events = [e for e in all_timeline_events if isinstance(e, dict) and e.get('timestamp') and datetime.fromtimestamp(e['timestamp']) >= six_months_ago]
 
             # Limit to 100 events for analysis
             events_to_analyze = recent_events[:100]
 
             if events_to_analyze:
-                user_context_prefix3 = f'You are preparing a brief for {user_context["formattedName"]} ({user_context["formattedEmail"]}). ' if user_context else ''
+                user_context_prefix3 = f'You are preparing a brief for {user_context.get("formattedName", "the user")} ({user_context.get("formattedEmail", "")}). ' if user_context and isinstance(user_context, dict) else ''
                 
                 important_msg3 = ""
                 if user_context:
@@ -709,36 +714,49 @@ async def prep_meeting(
 
                 try:
                     parsed = safe_parse_json(timeline_analysis)
-                    important_ids = parsed.get('important_event_ids', []) if parsed else []
-                    event_map = {e['id']: e for e in events_to_analyze}
-                    prioritized_timeline = [event_map[id] for id in important_ids if id in event_map]
-                    remaining_events = [e for e in events_to_analyze if e['id'] not in important_ids]
-                    prioritized_timeline.extend(remaining_events[:50])
+                    if parsed and isinstance(parsed, dict):
+                        important_ids = parsed.get('important_event_ids', [])
+                        event_map = {e['id']: e for e in events_to_analyze if isinstance(e, dict) and 'id' in e}
+                        prioritized_timeline = [event_map[id] for id in important_ids if id in event_map]
+                        remaining_events = [e for e in events_to_analyze if isinstance(e, dict) and e.get('id') not in important_ids]
+                        prioritized_timeline.extend(remaining_events[:50])
+                    else:
+                        prioritized_timeline = [e for e in events_to_analyze if isinstance(e, dict)][:100]
                 except Exception as e:
                     logger.error(f'Failed to parse timeline analysis: {str(e)}', requestId=request_id)
-                    prioritized_timeline = events_to_analyze[:100]
+                    prioritized_timeline = [e for e in events_to_analyze if isinstance(e, dict)][:100]
             else:
                 prioritized_timeline = []
 
             # Add meeting date as reference point
-            if meeting_date:
+            if meeting_date and isinstance(meeting_date, dict):
+                participants = []
+                if brief.get('attendees') and isinstance(brief['attendees'], list):
+                    participants = [a.get('name') for a in brief['attendees'] if isinstance(a, dict)]
                 prioritized_timeline.append({
                     'type': 'meeting',
-                    'date': meeting_date['iso'],
-                    'timestamp': meeting_date['date'].timestamp(),
+                    'date': meeting_date.get('iso', ''),
+                    'timestamp': meeting_date.get('date', datetime.utcnow()).timestamp() if isinstance(meeting_date.get('date'), datetime) else datetime.utcnow().timestamp(),
                     'name': meeting_title,
-                    'participants': [a.get('name') for a in brief['attendees']],
+                    'participants': participants,
                     'action': 'scheduled',
                     'isReference': True,
                     'id': 'current-meeting'
                 })
 
-            # Final sort by timestamp
+            # Final sort by timestamp (only dict items)
+            prioritized_timeline = [e for e in prioritized_timeline if isinstance(e, dict)]
             prioritized_timeline.sort(key=lambda e: e.get('timestamp', 0), reverse=True)
             limited_timeline = prioritized_timeline[:100]
 
             # Analyze trend
-            timeline_trend = analyze_trend(limited_timeline)
+            try:
+                timeline_trend = analyze_trend(limited_timeline)
+                if not isinstance(timeline_trend, dict):
+                    timeline_trend = {'trend': 'unknown', 'velocity': 0}
+            except Exception as e:
+                logger.error(f'Failed to analyze timeline trend: {str(e)}', requestId=request_id)
+                timeline_trend = {'trend': 'unknown', 'velocity': 0}
             brief['_timelineTrend'] = timeline_trend
             logger.info(f'  ✓ Timeline built: {len(limited_timeline)} events', requestId=request_id)
 

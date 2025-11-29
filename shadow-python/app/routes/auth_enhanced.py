@@ -300,6 +300,37 @@ async def request_additional_scopes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get('/me')
+async def get_current_user(
+    user: Optional[Dict[str, Any]] = Depends(optional_auth)
+):
+    """
+    Get current authenticated user
+    Returns user info and access token if authenticated
+    """
+    if not user:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+    
+    try:
+        # Get primary account for access token
+        primary_account = await get_primary_account(user['id'])
+        access_token = primary_account.get('access_token') if primary_account else None
+        
+        return {
+            'success': True,
+            'user': {
+                'id': user['id'],
+                'email': user['email'],
+                'name': user.get('name'),
+                'picture': user.get('picture_url')
+            },
+            'accessToken': access_token
+        }
+    except Exception as e:
+        logger.error(f'Get current user error: {str(e)}')
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post('/logout')
 async def logout(
     user: Dict[str, Any] = Depends(require_auth),

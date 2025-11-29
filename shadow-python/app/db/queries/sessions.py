@@ -30,16 +30,24 @@ async def create_session(user_id: str, expires_in_days: int = 30) -> dict:
     session_token = generate_session_token()
     expires_at = datetime.utcnow() + timedelta(days=expires_in_days)
     
-    response = supabase.table('sessions').insert({
+    # Supabase insert().select() pattern doesn't work - need to query after insert
+    # First insert the record
+    insert_response = supabase.table('sessions').insert({
         'user_id': user_id,
         'session_token': session_token,
         'expires_at': expires_at.isoformat()
-    }).select().execute()
+    }).execute()
+    
+    if hasattr(insert_response, 'error') and insert_response.error:
+        raise Exception(f'Failed to create session: {insert_response.error.message}')
+    
+    # Then query to get the created record
+    response = supabase.table('sessions').select('*').eq('session_token', session_token).maybe_single().execute()
     
     if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to create session: {response.error.message}')
-    if response.data and len(response.data) > 0:
-        return response.data[0]
+        raise Exception(f'Failed to fetch session: {response.error.message}')
+    if response.data:
+        return response.data
     raise Exception('Failed to create session')
 
 
@@ -100,11 +108,34 @@ async def delete_expired_sessions() -> int:
         Number of sessions deleted
     """
     now = datetime.utcnow().isoformat()
-    response = supabase.table('sessions').delete().lt('expires_at', now).select('id').execute()
+    # Note: Supabase delete().lt() doesn't support .select() directly
+    # Workaround: Query expired sessions first, then delete by IDs
+    query_response = supabase.table('sessions').select('id').lt('expires_at', now).execute()
     
-    if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to delete expired sessions: {response.error.message}')
-    return len(response.data) if response.data else 0
+    if hasattr(query_response, 'error') and query_response.error:
+        raise Exception(f'Failed to query expired sessions: {query_response.error.message}')
+    
+    if not query_response.data or len(query_response.data) == 0:
+        return 0
+    
+    # Delete expired sessions by ID (batch delete)
+    expired_ids = [row['id'] for row in query_response.data]
+    deleted_count = 0
+    
+    # Delete in batches of 100 to avoid overwhelming the database
+    batch_size = 100
+    for i in range(0, len(expired_ids), batch_size):
+        batch = expired_ids[i:i + batch_size]
+        for session_id in batch:
+            try:
+                delete_response = supabase.table('sessions').delete().eq('id', session_id).select('id').execute()
+                if delete_response.data:
+                    deleted_count += 1
+            except Exception as e:
+                # Log but continue with other deletions
+                pass
+    
+    return deleted_count
 
 
 async def get_user_sessions(user_id: str) -> list:
@@ -137,9 +168,17 @@ async def extend_session(session_token: str, expires_in_days: int = 30) -> dict 
     new_expires_at = datetime.utcnow() + timedelta(days=expires_in_days)
     now = datetime.utcnow().isoformat()
     
-    response = supabase.table('sessions').update({
+    # Supabase update().eq().gt().select() pattern doesn't work - need to query after update
+    # First update the record
+    update_response = supabase.table('sessions').update({
         'expires_at': new_expires_at.isoformat()
-    }).eq('session_token', session_token).gt('expires_at', now).select().maybe_single().execute()
+    }).eq('session_token', session_token).gt('expires_at', now).execute()
+    
+    if hasattr(update_response, 'error') and update_response.error:
+        raise Exception(f'Database error: {update_response.error.message}')
+    
+    # Then query to get the updated record
+    response = supabase.table('sessions').select('*').eq('session_token', session_token).maybe_single().execute()
     
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')

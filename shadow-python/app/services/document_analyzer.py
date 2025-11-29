@@ -170,7 +170,6 @@ FILTERING STRICTNESS (HIGH CONFIDENCE):
         logger.info(f'  ⚠️  Failed to parse relevance check for batch {batch_index + 1}, excluding from analysis', requestId=request_id)
         batch_indices = []
 
-    logger.info(f'     ✓ Found {len(batch_indices)}/{len(batch["files"])} relevant files in batch {batch_index + 1}', requestId=request_id)
 
     return {'indices': batch_indices, 'reasoning': batch_reasoning}
 
@@ -325,7 +324,7 @@ async def analyze_documents(
     # ===== FILE RELEVANCE FILTERING (METADATA-ONLY) =====
     original_file_count = len(files_with_content)
     if files_with_content and meeting_context:
-        logger.info(f'  🔍 Filtering {len(files_with_content)} files for meeting relevance (metadata-only, processing in batches of 50)...', requestId=request_id)
+        logger.info(f'  🔍 Filtering {len(files_with_content)} files for meeting relevance...', requestId=request_id)
 
         file_batch_size = 50
         file_batches = []
@@ -336,7 +335,7 @@ async def analyze_documents(
                 'files': files_with_content[batch_start:min(batch_start + file_batch_size, len(files_with_content))]
             })
 
-        logger.info(f'  🚀 Processing {len(file_batches)} file batches in PARALLEL...', requestId=request_id)
+        logger.info(f'  🚀 Processing {len(file_batches)} file batches...', requestId=request_id)
 
         file_relevance_promises = [
             _filter_file_batch(
@@ -384,7 +383,7 @@ async def analyze_documents(
         logger.info(f'  ⚠️  Skipping file relevance filtering (no meeting context available), analyzing all {len(files_with_content)} files', requestId=request_id)
 
     if files_with_content:
-        logger.info(f'  📊 Deep analysis of {len(files_with_content)} relevant documents (processing in PARALLEL batches of 5)...', requestId=request_id)
+        logger.info(f'  📊 Deep analysis of {len(files_with_content)} relevant documents...', requestId=request_id)
 
         # Create batches for progress logging
         doc_batch_size = 5

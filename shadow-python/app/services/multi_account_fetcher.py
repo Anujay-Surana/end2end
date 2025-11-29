@@ -57,12 +57,13 @@ async def fetch_emails_from_all_accounts(
     Returns:
         Dict with emails and account stats
     """
-    logger.info(f'\n📧 Fetching emails from {len(accounts)} account(s) in parallel...')
+    logger.info(f'📧 Fetching emails from {len(accounts)} account(s)...')
 
     # Extract keywords from meeting title for enhanced search
     meeting_title = meeting.get('summary') or meeting.get('title') or ''
     keywords = extract_keywords(meeting_title, meeting.get('description') or '')
-    logger.info(f'   🔑 Extracted keywords: {", ".join(keywords)}')
+    if keywords:
+        logger.debug(f'   🔑 Extracted keywords: {", ".join(keywords)}')
 
     # Extract meeting date for temporal filtering (only use data BEFORE meeting)
     meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
@@ -75,12 +76,10 @@ async def fetch_emails_from_all_accounts(
     # CRITICAL: 2-YEAR lookback FROM MEETING DATE (not from today)
     two_years_ago = meeting_date - timedelta(days=730)
     after_date = two_years_ago.strftime('%Y/%m/%d')
-    logger.info(f'   📅 Searching emails from 2 years before meeting (since {after_date}) BEFORE meeting date ({before_date})')
 
     async def fetch_account_emails(account: Dict[str, Any]) -> Dict[str, Any]:
         try:
             account_email = account.get('account_email', 'unknown')
-            logger.info(f'\n   Account: {account_email}')
 
             # Build enhanced Gmail search query with keywords and date filter
             attendee_emails = [
@@ -153,7 +152,7 @@ async def fetch_emails_from_all_accounts(
                 if not e.get('date') or datetime.fromisoformat(e['date'].replace('Z', '+00:00')) <= meeting_date
             ]
 
-            logger.info(f'   ✅ Fetched {len(emails)} emails from {account_email} (filtered to before meeting)')
+            logger.debug(f'   ✅ Fetched {len(emails)} emails from {account_email}')
 
             return {
                 'accountEmail': account_email,
@@ -221,7 +220,7 @@ async def fetch_files_from_all_accounts(
     Returns:
         Dict with files and account stats
     """
-    logger.info(f'\n📁 Fetching Drive files from {len(accounts)} account(s) in parallel...')
+    logger.info(f'📁 Fetching Drive files from {len(accounts)} account(s)...')
 
     # Extract meeting date for temporal filtering
     meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
@@ -263,7 +262,7 @@ async def fetch_files_from_all_accounts(
                 if not f.get('modifiedTime') or datetime.fromisoformat(f['modifiedTime'].replace('Z', '+00:00')) <= meeting_date
             ]
 
-            logger.info(f'   ✅ Found {len(drive_files)} Drive files from {account_email}')
+            logger.debug(f'   ✅ Found {len(drive_files)} Drive files from {account_email}')
 
             # Fetch file contents
             if len(drive_files) > 0:
@@ -338,7 +337,7 @@ async def fetch_calendar_from_all_accounts(
     Returns:
         Dict with calendar events
     """
-    logger.info(f'\n📅 Fetching calendar events from {len(accounts)} account(s)...')
+    logger.info(f'📅 Fetching calendar events from {len(accounts)} account(s)...')
 
     # 6-MONTH lookback FROM MEETING DATE
     six_months_ago = meeting_date - timedelta(days=180)
