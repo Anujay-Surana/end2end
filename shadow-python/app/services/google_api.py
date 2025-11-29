@@ -168,35 +168,75 @@ async def _fetch_gmail_messages_with_token(
             body = ''
             attachments = []
             
+            def decode_base64_data(data: str) -> str:
+                """Decode base64url-encoded data from Gmail API"""
+                if not data:
+                    return ''
+                try:
+                    # Gmail API uses base64url encoding (uses - and _ instead of + and /)
+                    # Convert base64url to standard base64
+                    data = data.replace('-', '+').replace('_', '/')
+                    # Add padding if needed
+                    padding = len(data) % 4
+                    if padding:
+                        data += '=' * (4 - padding)
+                    return base64.b64decode(data).decode('utf-8', errors='ignore')
+                except Exception as e:
+                    logger.warn(f'Failed to decode base64 data: {str(e)}')
+                    return ''
+            
+            def extract_body_from_parts(parts_list: List[Dict[str, Any]], prefer_html: bool = False) -> str:
+                """Recursively extract body text from email parts"""
+                text_plain = ''
+                text_html = ''
+                
+                for part in parts_list:
+                    mime_type = part.get('mimeType', '')
+                    body_data = part.get('body', {}).get('data')
+                    
+                    if body_data:
+                        if mime_type == 'text/plain':
+                            text_plain = decode_base64_data(body_data)
+                        elif mime_type == 'text/html':
+                            text_html = decode_base64_data(body_data)
+                    
+                    # Check for attachments
+                    if part.get('filename') and part.get('body', {}).get('attachmentId'):
+                        attachments.append({
+                            'filename': part.get('filename'),
+                            'mimeType': mime_type,
+                            'size': part.get('body', {}).get('size'),
+                            'attachmentId': part.get('body', {}).get('attachmentId')
+                        })
+                    
+                    # Recursively check nested parts
+                    if part.get('parts'):
+                        nested_result = extract_body_from_parts(part['parts'], prefer_html)
+                        if nested_result:
+                            # Check if nested result is HTML or plain text based on mime type
+                            # If we already have text, prefer the nested result if it's longer/more complete
+                            if not text_plain and not text_html:
+                                text_plain = nested_result
+                            elif len(nested_result) > len(text_plain or text_html):
+                                # Use nested result if it's more complete
+                                if '<' in nested_result or 'html' in nested_result.lower():
+                                    text_html = nested_result
+                                else:
+                                    text_plain = nested_result
+                
+                # Prefer HTML if available and requested, otherwise prefer plain text
+                if prefer_html and text_html:
+                    return text_html
+                return text_plain or text_html
+            
             # Extract body and attachments from email parts
             payload = msg.get('payload', {})
             parts = payload.get('parts', [])
             
             if parts:
-                for part in parts:
-                    # Check for text content
-                    if part.get('mimeType') == 'text/plain' and part.get('body', {}).get('data'):
-                        body = base64.b64decode(part['body']['data']).decode('utf-8')
-                    # Check for attachments
-                    if part.get('filename') and part.get('body', {}).get('attachmentId'):
-                        attachments.append({
-                            'filename': part.get('filename'),
-                            'mimeType': part.get('mimeType'),
-                            'size': part.get('body', {}).get('size'),
-                            'attachmentId': part.get('body', {}).get('attachmentId')
-                        })
-                    # Check nested parts (multipart messages)
-                    if part.get('parts'):
-                        for sub_part in part['parts']:
-                            if sub_part.get('filename') and sub_part.get('body', {}).get('attachmentId'):
-                                attachments.append({
-                                    'filename': sub_part.get('filename'),
-                                    'mimeType': sub_part.get('mimeType'),
-                                    'size': sub_part.get('body', {}).get('size'),
-                                    'attachmentId': sub_part.get('body', {}).get('attachmentId')
-                                })
+                body = extract_body_from_parts(parts, prefer_html=False)
             elif payload.get('body', {}).get('data'):
-                body = base64.b64decode(payload['body']['data']).decode('utf-8')
+                body = decode_base64_data(payload['body']['data'])
 
             # Preserve full email body (up to 50k chars for very long emails)
             # Truncation will be applied later when needed for GPT calls

@@ -95,14 +95,22 @@ async def delete_session(session_token: str) -> bool:
     """
     if not session_token:
         return False
-        
-    response = supabase.table('sessions').delete().eq('session_token', session_token).select('id').execute()
     
-    if response is None:
+    # Supabase delete().eq() doesn't support .select() - just delete directly
+    try:
+        response = supabase.table('sessions').delete().eq('session_token', session_token).execute()
+        
+        if response is None:
+            return False
+        if hasattr(response, 'error') and response.error:
+            raise Exception(f'Failed to delete session: {response.error.message}')
+        # If no error, assume success (Supabase delete returns empty data on success)
+        return True
+    except Exception as e:
+        # Log error but don't fail - session might already be deleted
+        from app.services.logger import logger
+        logger.warn(f'Error deleting session: {str(e)}')
         return False
-    if hasattr(response, 'error') and response.error:
-        raise Exception(f'Failed to delete session: {response.error.message}')
-    return response.data is not None and len(response.data) > 0
 
 
 async def delete_all_user_sessions(user_id: str) -> int:
