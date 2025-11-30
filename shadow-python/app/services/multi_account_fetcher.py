@@ -96,6 +96,7 @@ async def fetch_emails_from_all_accounts(
     logger.info(f'   📅 Using {initial_window["label"]} lookback window', requestId=None)
 
     async def fetch_account_emails(account: Dict[str, Any]) -> Dict[str, Any]:
+        nonlocal initial_window
         try:
             account_email = account.get('account_email', 'unknown')
 
@@ -189,7 +190,8 @@ async def fetch_emails_from_all_accounts(
                 return {
                     'accountEmail': account_email,
                     'emails': [],
-                    'success': True
+                    'success': True,
+                    'timeWindow': initial_window['label']
                 }
 
             query = f'{" OR ".join(query_parts)} after:{after_date} before:{before_date}'
