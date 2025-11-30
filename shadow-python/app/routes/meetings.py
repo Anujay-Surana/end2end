@@ -1344,6 +1344,73 @@ async def _generate_prep_response(
         return
 
 
+class MeetingPurposeRequest(BaseModel):
+    meeting: Dict[str, Any]
+    attendees: List[Dict[str, Any]]
+
+
+@router.post('/detect-meeting-purpose')
+async def detect_meeting_purpose_endpoint(
+    request_body: MeetingPurposeRequest,
+    user: Optional[Dict[str, Any]] = Depends(optional_auth),
+    request: Request = None
+):
+    """
+    Detect meeting purpose from calendar event and attendees
+    Runs BEFORE email fetching - uses only calendar info and LLM inference
+    """
+    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
+    
+    try:
+        meeting = request_body.meeting
+        attendees = request_body.attendees or []
+        
+        # Get user context
+        user_context = await get_user_context(user, request_id) if user else None
+        
+        # Call detect_meeting_purpose with empty emails list (runs Stage 1 and Stage 3 only)
+        purpose_result = await detect_meeting_purpose(
+            meeting,
+            attendees,
+            [],  # Empty emails list - purpose detection without email context
+            user_context,
+            request_id
+        )
+        
+        logger.info(
+            f'Meeting purpose detected',
+            requestId=request_id,
+            purpose=purpose_result.get('purpose'),
+            confidence=purpose_result.get('confidence'),
+            source=purpose_result.get('source'),
+            meetingTitle=meeting.get('summary') or meeting.get('title')
+        )
+        
+        return {
+            'success': True,
+            'purpose': purpose_result.get('purpose'),
+            'agenda': purpose_result.get('agenda', []),
+            'confidence': purpose_result.get('confidence', 'low'),
+            'source': purpose_result.get('source', 'uncertain'),
+            'contextEmail': purpose_result.get('contextEmail')
+        }
+    except Exception as error:
+        logger.error(
+            f'Error detecting meeting purpose',
+            requestId=request_id,
+            error=str(error),
+            errorType=type(error).__name__,
+            meetingTitle=meeting.get('summary') if 'meeting' in locals() else 'unknown'
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                'error': 'Meeting purpose detection failed',
+                'message': str(error)
+            }
+        )
+
+
 @router.post('/prep-meeting')
 async def prep_meeting(
     request_body: MeetingPrepRequest,

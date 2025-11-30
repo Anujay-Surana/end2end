@@ -2609,6 +2609,7 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <button class="back-button" onclick="showCalendarView()">← Back to Calendar</button>
                 <div style="display: flex; gap: 10px;">
+                    <button class="prep-button" id="meetingPurposeButton" onclick="detectMeetingPurpose()">🎯 Meeting Purpose</button>
                     <button class="prep-button" id="prepMeButton" onclick="prepareForMeeting()">Prep Me</button>
                     <button class="prep-button" id="interactivePrepButton" onclick="startInteractivePrep()" style="background: var(--color-primary);">💬 Interactive Prep</button>
                     <button class="prep-button" id="voicePrepButton" onclick="startVoicePrep()" style="background: var(--color-primary);">🎙️ Voice Prep Mode</button>
@@ -4515,6 +4516,83 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             } catch (error) {
                 console.error('Error synthesizing web intelligence:', error);
                 return null;
+            }
+        }
+
+        /**
+         * Detect meeting purpose from calendar event
+         * Runs BEFORE email fetching - uses only calendar info and LLM inference
+         */
+        async function detectMeetingPurpose() {
+            if (!currentMeeting) {
+                alert('Please select a meeting first');
+                return;
+            }
+
+            const button = document.getElementById('meetingPurposeButton');
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Detecting...';
+
+            try {
+                const meeting = currentMeeting;
+                const attendees = meeting.attendees || [];
+
+                const response = await fetch('/api/detect-meeting-purpose', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        meeting,
+                        attendees
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.message || `Failed to detect meeting purpose: ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                // Display results in a modal or alert
+                const confidenceEmoji = {
+                    'high': '✅',
+                    'medium': '⚠️',
+                    'low': '❓'
+                }[result.confidence] || '❓';
+
+                const sourceText = {
+                    'calendar': 'Calendar Event',
+                    'email': 'Email Context',
+                    'llm': 'AI Inference',
+                    'uncertain': 'Uncertain'
+                }[result.source] || 'Unknown';
+
+                let agendaText = '';
+                if (result.agenda && result.agenda.length > 0) {
+                    agendaText = '\n\nAgenda Items:\n' + result.agenda.map((item, i) => `${i + 1}. ${item}`).join('\n');
+                }
+
+                const message = `${confidenceEmoji} Meeting Purpose Detected\n\n` +
+                    `Purpose: ${result.purpose || 'Unable to determine'}\n` +
+                    `Confidence: ${result.confidence}\n` +
+                    `Source: ${sourceText}${agendaText}`;
+
+                // Show in modal or alert
+                alert(message);
+                
+                // Also log to console for debugging
+                console.log('Meeting Purpose Result:', result);
+
+            } catch (error) {
+                console.error('Error detecting meeting purpose:', error);
+                alert('Failed to detect meeting purpose: ' + error.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
             }
         }
 
