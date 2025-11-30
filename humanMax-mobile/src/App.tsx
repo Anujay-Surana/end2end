@@ -9,6 +9,7 @@ import { notificationService } from './services/notificationService';
 import { backgroundSyncService } from './services/backgroundSync';
 import { AuthView } from './components/AuthView';
 import { CalendarView } from './components/CalendarView';
+import { ChatView } from './components/ChatView';
 import { Settings } from './components/Settings';
 import { MeetingPrep } from './components/MeetingPrep';
 import { DayPrep } from './components/DayPrep';
@@ -203,6 +204,18 @@ function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowD
           <h1 className="app-title">Shadow</h1>
           <div className="nav-actions">
             <button
+              className={`nav-button ${location.pathname === '/chat' ? 'active' : ''}`}
+              onClick={() => navigate('/chat')}
+            >
+              💬 Chat
+            </button>
+            <button
+              className={`nav-button ${location.pathname === '/calendar' ? 'active' : ''}`}
+              onClick={() => navigate('/calendar')}
+            >
+              📅 Calendar
+            </button>
+            <button
               className="nav-button"
               onClick={() => setShowDayPrep(true)}
             >
@@ -222,15 +235,21 @@ function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowD
           <Routes>
             <Route
               path="/"
-              element={
-                <CalendarView />
-              }
+              element={<Navigate to="/chat" replace />}
+            />
+            <Route
+              path="/chat"
+              element={<ChatView />}
+            />
+            <Route
+              path="/calendar"
+              element={<CalendarView />}
             />
             <Route
               path="/settings"
               element={<Settings onSignOut={handleSignOut} />}
             />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/chat" replace />} />
           </Routes>
         </main>
 

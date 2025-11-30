@@ -6,11 +6,38 @@ Handles sending push notifications to iOS devices via Apple Push Notification se
 
 import os
 import json
+import sys
 from typing import Dict, List, Any, Optional
-from apns2.client import APNsClient
-from apns2.payload import Payload
-from apns2.credentials import TokenCredentials
 from app.services.logger import logger
+
+# Fix Python 3.12 compatibility for apns2 (collections classes moved to collections.abc)
+if sys.version_info >= (3, 9):
+    import collections.abc
+    import collections
+    # Add all missing collections classes for compatibility
+    for name in ['Iterable', 'Mapping', 'MutableSet', 'MutableMapping', 'Callable', 'Sequence']:
+        if not hasattr(collections, name):
+            setattr(collections, name, getattr(collections.abc, name))
+
+# Try to import APNs2 - handle gracefully if not available
+try:
+    from apns2.client import APNsClient
+    from apns2.payload import Payload
+    from apns2.credentials import TokenCredentials
+    APNS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f'APNs2 library not available: {str(e)}. Push notifications will be disabled.')
+    APNsClient = None
+    Payload = None
+    TokenCredentials = None
+    APNS_AVAILABLE = False
+except Exception as e:
+    # Handle any other compatibility issues
+    logger.warning(f'APNs2 library has compatibility issues: {str(e)}. Push notifications will be disabled.')
+    APNsClient = None
+    Payload = None
+    TokenCredentials = None
+    APNS_AVAILABLE = False
 
 
 class APNsService:
@@ -21,6 +48,10 @@ class APNsService:
     
     def _initialize(self):
         """Initialize APNs client with credentials"""
+        if not APNS_AVAILABLE:
+            logger.warn('APNs2 library not available - push notifications disabled')
+            return
+            
         try:
             key_id = os.getenv('APNS_KEY_ID')
             team_id = os.getenv('APNS_TEAM_ID')
