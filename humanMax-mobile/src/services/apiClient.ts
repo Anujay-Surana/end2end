@@ -207,23 +207,159 @@ class ApiClient {
     }
   }
 
+  /**
+   * Helper function to read streaming response from /api/prep-meeting
+   * Reads newline-delimited JSON chunks and handles progress updates
+   */
+  private async readStreamingPrepResponse(
+    response: Response,
+    onProgress?: (chunk: any) => void
+  ): Promise<any> {
+    if (!response.ok) {
+      let errorMessage = `Server error: ${response.status}`;
+      let errorDetails: any = null;
+
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.message || errorMessage;
+        errorDetails = errorData;
+
+        // Check for revoked token error
+        if (
+          response.status === 401 &&
+          (errorData.error === 'TokenRevoked' || errorData.revoked === true)
+        ) {
+          throw new Error('Your session has expired. Please sign in again.');
+        }
+      } catch (parseError) {
+        try {
+          const errorText = await response.text();
+          errorMessage = errorText || errorMessage;
+        } catch (textError) {
+          // Ignore
+        }
+      }
+
+      const error = new Error(errorMessage) as any;
+      error.status = response.status;
+      error.details = errorDetails;
+      throw error;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('Response body is not readable');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          try {
+            const chunk = JSON.parse(line);
+
+            if (chunk.type === 'progress') {
+              // Handle progress updates
+              if (onProgress) {
+                onProgress(chunk);
+              }
+              console.log('📊 Progress:', chunk.step, chunk.data?.message || '');
+            } else if (chunk.type === 'complete') {
+              // Return final result (chunk contains all brief fields)
+              const brief = { ...chunk };
+              delete brief.type; // Remove type field
+              return brief;
+            } else if (chunk.type === 'error') {
+              // Handle error chunks
+              const error = new Error(chunk.message || chunk.error || 'Unknown error') as any;
+              error.status = chunk.statusCode || 500;
+              error.details = chunk;
+              throw error;
+            }
+          } catch (parseError) {
+            console.warn('Failed to parse chunk:', parseError, 'Line:', line.substring(0, 100));
+            // Continue processing other chunks
+          }
+        }
+      }
+
+      // If we exit the loop without getting a 'complete' chunk, check buffer
+      if (buffer.trim()) {
+        try {
+          const chunk = JSON.parse(buffer);
+          if (chunk.type === 'complete') {
+            const brief = { ...chunk };
+            delete brief.type;
+            return brief;
+          }
+        } catch (e) {
+          console.warn('Failed to parse final buffer:', e);
+        }
+      }
+
+      throw new Error('Stream ended without complete result');
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
   async prepMeeting(meeting: any, attendees: any[], accessToken?: string): Promise<any> {
     try {
-      // Prep meeting can take 2+ minutes, use longer timeout (5 minutes = 300000ms)
-      // Backend returns brief object directly, not wrapped in { success, prep }
-      const response = await this.client.post<any>(
-        '/api/prep-meeting',
-        {
+      // Use fetch API for streaming support (Axios doesn't handle streaming well)
+      // Prep meeting can take 2+ minutes, backend streams response to prevent timeout
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      // Add auth token for mobile if available
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const { Preferences } = await import('@capacitor/preferences');
+          const { value: sessionToken } = await Preferences.get({ key: 'session_token' });
+          if (sessionToken) {
+            headers['Authorization'] = `Bearer ${sessionToken}`;
+          }
+        } catch (error) {
+          console.warn('Failed to get session token for request:', error);
+        }
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/prep-meeting`, {
+        method: 'POST',
+        headers,
+        credentials: Capacitor.isNativePlatform() ? undefined : 'include',
+        body: JSON.stringify({
           meeting,
           attendees,
           accessToken,
-        },
-        {
-          timeout: 300000, // 5 minutes for prep generation
-        }
-      );
-      return response.data;
-    } catch (error) {
+        }),
+      });
+
+      // Read streaming response
+      return await this.readStreamingPrepResponse(response);
+    } catch (error: any) {
+      // Convert fetch errors to match Axios error format for handleError
+      if (error instanceof Error) {
+        const axiosError = {
+          response: {
+            status: error.status || 500,
+            data: error.details || { message: error.message },
+          },
+          message: error.message,
+        } as AxiosError<ApiError>;
+        return this.handleError(axiosError);
+      }
       return this.handleError(error as AxiosError<ApiError>);
     }
   }

@@ -9,8 +9,9 @@ import asyncio
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.middleware.auth import optional_auth
@@ -154,59 +155,36 @@ async def understand_meeting_context(
         }
 
 
-@router.post('/prep-meeting')
-async def prep_meeting(
+async def _generate_prep_response(
     request_body: MeetingPrepRequest,
-    user: Optional[Dict[str, Any]] = Depends(optional_auth),
-    request: Request = None
-):
+    user: Optional[Dict[str, Any]],
+    request: Request,
+    request_id: str
+) -> AsyncGenerator[str, None]:
     """
-    Prepare meeting brief with AI analysis
-    Supports both multi-account (authenticated) and single-account (token-based) modes
+    Generator function that yields progress chunks and final result
+    Sends keep-alive chunks every 10 seconds to prevent Railway timeout
     """
-    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
-    
-    # Track start time for timeout detection (Railway has 60s timeout)
     start_time = datetime.now()
-    RAILWAY_TIMEOUT_SECONDS = 50  # Return partial results at 50s to avoid timeout
-    request_timeout = timedelta(seconds=RAILWAY_TIMEOUT_SECONDS)
+    last_keepalive = start_time
+    KEEPALIVE_INTERVAL = timedelta(seconds=10)  # Send keep-alive every 10 seconds
     
-    def check_timeout() -> bool:
-        """Check if we're approaching Railway timeout"""
-        elapsed = datetime.now() - start_time
-        return elapsed >= request_timeout
+    def send_progress(step: str, data: Optional[Dict] = None):
+        """Helper to yield progress chunk"""
+        progress = {
+            'type': 'progress',
+            'step': step,
+            'timestamp': datetime.now().isoformat(),
+            'elapsedSeconds': round((datetime.now() - start_time).total_seconds(), 1)
+        }
+        if data:
+            progress['data'] = data
+        return json.dumps(progress) + '\n'
     
-    def get_partial_result(brief: Dict[str, Any], emails: List, files: List, calendar_events: List, 
-                          accounts: List, user: Optional[Dict], completed_steps: str) -> Dict[str, Any]:
-        """Return partial result when approaching timeout"""
-        elapsed_seconds = (datetime.now() - start_time).total_seconds()
-        logger.warn(
-            f'⚠️  Approaching Railway timeout ({elapsed_seconds:.1f}s), returning partial results',
-            requestId=request_id,
-            completedSteps=completed_steps
-        )
-        
-        # Ensure brief has required structure
-        if 'stats' not in brief:
-            brief['stats'] = {}
-        
-        brief['stats'].update({
-            'emailCount': len(emails),
-            'fileCount': len(files),
-            'calendarEventCount': len(calendar_events),
-            'attendeeCount': len(brief.get('attendees', [])),
-            'multiAccount': bool(user and user.get('id')),
-            'accountCount': len(accounts),
-            'multiAccountStats': brief.get('_multiAccountStats'),
-            'partialResult': True,
-            'elapsedSeconds': round(elapsed_seconds, 1),
-            'completedSteps': completed_steps
-        })
-        
-        brief['_timeoutWarning'] = f'Request took {elapsed_seconds:.1f}s. Some analysis may be incomplete.'
-        return brief
-
     try:
+        # Yield initial progress
+        yield send_progress('starting', {'message': 'Initializing meeting prep...'})
+        
         meeting = request_body.meeting
         attendees = request_body.attendees or []
         access_token = request_body.accessToken
@@ -225,6 +203,11 @@ async def prep_meeting(
         # Get user context
         user_context = await get_user_context(user, request_id) if user else None
         
+        # Check keep-alive
+        if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+            yield send_progress('keepalive', {'message': 'Processing...'})
+            last_keepalive = datetime.now()
+        
         # Classify the meeting event
         user_email = user_context.get('email') if user_context else (user.get('email') if user else '')
         user_emails = user_context.get('emails', []) if user_context else []
@@ -241,7 +224,8 @@ async def prep_meeting(
             )
             
             # Return minimal brief for non-meeting events
-            return {
+            result = {
+                'type': 'complete',
                 'success': True,
                 'summary': f'{meeting_title} - {classification.get("reason", "Non-meeting event")}',
                 'attendees': attendees,
@@ -250,6 +234,8 @@ async def prep_meeting(
                 'prepDepth': prep_depth,
                 'note': 'This event was classified as a non-meeting. Full prep skipped.'
             }
+            yield json.dumps(result) + '\n'
+            return
 
         logger.info(
             f'Starting meeting prep request',
@@ -295,45 +281,64 @@ async def prep_meeting(
 
         # ===== MULTI-ACCOUNT MODE (NEW) =====
         if user and user.get('id'):
+            yield send_progress('fetching_context', {'message': 'Fetching emails, files, and calendar events...'})
+            
+            # Check keep-alive
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Fetching data from accounts...'})
+                last_keepalive = datetime.now()
+
             logger.info(f'\n🚀 Multi-account mode: Fetching from all connected accounts', requestId=request_id)
 
             accounts = await get_accounts_by_user_id(user['id'])
             if not accounts:
-                raise HTTPException(status_code=400, detail='No accounts connected. Please connect at least one Google account.')
+                error_result = {'type': 'error', 'error': 'No accounts connected. Please connect at least one Google account.'}
+                yield json.dumps(error_result) + '\n'
+                return
 
             # Validate all tokens
             token_validation_result = await ensure_all_tokens_valid(accounts)
+            
+            # Check keep-alive after token validation
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Validating accounts...'})
+                last_keepalive = datetime.now()
+            
             if not token_validation_result.get('validAccounts'):
                 failed_accounts = token_validation_result.get('failedAccounts', [])
                 all_revoked = all(f.get('isRevoked') for f in failed_accounts)
-                raise HTTPException(
-                    status_code=401,
-                    detail={
-                        'error': 'TokenRevoked' if all_revoked else 'AuthenticationError',
-                        'message': 'Your session has expired. Please sign in again.' if all_revoked else 'All accounts need to re-authenticate',
-                        'revoked': all_revoked,
-                        'failedAccounts': [
-                            {
-                                'email': a.get('account_email'),
-                                'reason': 'Token revoked' if a.get('isRevoked') else 'Token expired',
-                                'isRevoked': a.get('isRevoked')
-                            }
-                            for a in failed_accounts
-                        ]
-                    }
-                )
+                error_result = {
+                    'type': 'error',
+                    'statusCode': 401,
+                    'error': 'TokenRevoked' if all_revoked else 'AuthenticationError',
+                    'message': 'Your session has expired. Please sign in again.' if all_revoked else 'All accounts need to re-authenticate',
+                    'revoked': all_revoked,
+                    'failedAccounts': [
+                        {
+                            'email': a.get('account_email'),
+                            'reason': 'Token revoked' if a.get('isRevoked') else 'Token expired',
+                            'isRevoked': a.get('isRevoked')
+                        }
+                        for a in failed_accounts
+                    ]
+                }
+                yield json.dumps(error_result) + '\n'
+                return
 
             accounts = token_validation_result['validAccounts']
 
             # Fetch context from ALL accounts in parallel
+            yield send_progress('fetching_data', {'message': 'Fetching emails, files, and calendar events...'})
+            
             context_result = await fetch_all_account_context(accounts, attendees, meeting)
             emails = context_result.get('emails', [])
             files = context_result.get('files', [])
             brief['_multiAccountStats'] = context_result.get('accountStats', {})
             
-            # Check timeout after fetching context
-            if check_timeout():
-                return get_partial_result(brief, emails, files, calendar_events, accounts, user, 'context_fetched')
+            # Check keep-alive after fetching context
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': f'Fetched {len(emails)} emails, {len(files)} files...'})
+                last_keepalive = datetime.now()
 
             # Fetch calendar events
             # Extract meeting date from meeting object (as datetime for calendar query)
@@ -475,6 +480,13 @@ async def prep_meeting(
 
         try:
             # ===== STEP 1: RESEARCH ATTENDEES =====
+            yield send_progress('researching_attendees', {'message': f'Researching {len(other_attendees)} attendees...'})
+            
+            # Check keep-alive
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Researching attendees...'})
+                last_keepalive = datetime.now()
+            
             logger.info(f'\n👥 Researching attendees...', requestId=request_id)
             attendees_to_research = other_attendees if other_attendees else attendees
 
@@ -518,9 +530,10 @@ async def prep_meeting(
 
             logger.info(f'  ✓ Research completed: {len(brief["attendees"])} attendees researched', requestId=request_id)
             
-            # Check timeout after attendee research
-            if check_timeout():
-                return get_partial_result(brief, emails, files, calendar_events, accounts, user, 'attendees_researched')
+            # Check keep-alive after attendee research
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Attendee research completed...'})
+                last_keepalive = datetime.now()
 
             # Store attendee extraction data for UI
             brief['_extractionData']['attendeeExtractions'] = []
@@ -600,6 +613,11 @@ async def prep_meeting(
             logger.info(f'     Key Entities: {", ".join(meeting_context["keyEntities"]) or "none"}', requestId=request_id)
 
             # ===== STEP 2: EMAIL RELEVANCE FILTERING + BATCH EXTRACTION =====
+            yield send_progress('analyzing_emails', {'message': 'Analyzing email threads...'})
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Processing emails...'})
+                last_keepalive = datetime.now()
+            
             try:
                 relevant_emails, email_analysis, email_extraction_data = await filter_relevant_emails(
                     emails,
@@ -625,6 +643,11 @@ async def prep_meeting(
             brief['_extractionData']['relevantContent']['emails'] = email_extraction_data.get('relevantContent', {}).get('emails', [])
 
             # ===== STEP 3: DOCUMENT ANALYSIS IN BATCHES OF 5 =====
+            yield send_progress('analyzing_documents', {'message': 'Analyzing document content...'})
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Processing documents...'})
+                last_keepalive = datetime.now()
+            
             try:
                 document_analysis, files_with_content, document_extraction_data = await analyze_documents(
                     files,
@@ -650,14 +673,20 @@ async def prep_meeting(
             brief['_extractionData']['documentStaleness'] = document_extraction_data.get('documentStaleness', {})
             brief['_extractionData']['relevantContent']['documents'] = document_extraction_data.get('relevantContent', {}).get('documents', [])
             
-            # Check timeout after document analysis
-            if check_timeout():
-                return get_partial_result(brief, emails, files, calendar_events, accounts, user, 'documents_analyzed')
+            # Check keep-alive after document analysis
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Document analysis completed...'})
+                last_keepalive = datetime.now()
 
             # ===== STEP 4: COMPANY RESEARCH (placeholder) =====
             company_research = 'Company context available from emails and documents.'
 
             # ===== STEP 5: RELATIONSHIP ANALYSIS =====
+            yield send_progress('analyzing_relationships', {'message': 'Analyzing working relationships...'})
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Analyzing relationships...'})
+                last_keepalive = datetime.now()
+            
             logger.info(f'\n  🤝 Analyzing working relationships...', requestId=request_id)
             relationship_analysis = ''
 
@@ -745,6 +774,11 @@ async def prep_meeting(
                 relationship_analysis = 'No relationship context available.'
 
             # ===== STEP 5: DEEP CONTRIBUTION ANALYSIS =====
+            yield send_progress('analyzing_contributions', {'message': 'Analyzing contributions and roles...'})
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Analyzing contributions...'})
+                last_keepalive = datetime.now()
+            
             logger.info(f'\n  👥 Analyzing contributions and roles...', requestId=request_id)
             contribution_analysis = ''
 
@@ -869,6 +903,11 @@ async def prep_meeting(
                 contribution_analysis = 'No contribution context available.'
 
             # ===== STEP 6: BROADER NARRATIVE SYNTHESIS =====
+            yield send_progress('synthesizing_narrative', {'message': 'Synthesizing broader narrative...'})
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Synthesizing narrative...'})
+                last_keepalive = datetime.now()
+            
             logger.info(f'\n  📖 Synthesizing broader narrative...', requestId=request_id)
             broader_narrative = ''
 
@@ -900,6 +939,11 @@ async def prep_meeting(
                 broader_narrative = 'No narrative context available.'
 
             # ===== STEP 7: TIMELINE BUILDING =====
+            yield send_progress('building_timeline', {'message': 'Building interaction timeline...'})
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Building timeline...'})
+                last_keepalive = datetime.now()
+            
             logger.info(f'\n  📅 Building intelligent interaction timeline...', requestId=request_id)
             limited_timeline = []
 
@@ -1164,6 +1208,11 @@ async def prep_meeting(
             logger.info(f'  ✓ Generated {len(parsed_action_items)} action items', requestId=request_id)
 
             # ===== STEP 9: EXECUTIVE SUMMARY (LAST - with full context) =====
+            yield send_progress('generating_summary', {'message': 'Generating executive summary...'})
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Generating summary...'})
+                last_keepalive = datetime.now()
+            
             brief['summary'] = await generate_executive_summary(
                 meeting,
                 meeting_title,
@@ -1183,10 +1232,6 @@ async def prep_meeting(
             )
 
             # ===== ASSEMBLE FINAL BRIEF =====
-            # Check timeout before final synthesis steps
-            if check_timeout():
-                return get_partial_result(brief, emails, files, calendar_events, accounts, user, 'analysis_complete')
-            
             brief['emailAnalysis'] = email_analysis
             brief['documentAnalysis'] = document_analysis
             brief['companyResearch'] = company_research
@@ -1223,7 +1268,10 @@ async def prep_meeting(
                 requestId=request_id
             )
 
-            return brief
+            # Yield final result
+            result = {'type': 'complete', **brief}
+            yield json.dumps(result) + '\n'
+            return
 
         except Exception as analysis_error:
             logger.error(f'❌ AI analysis failed: {str(analysis_error)}', requestId=request_id)
@@ -1238,7 +1286,8 @@ async def prep_meeting(
                 # brief might not be initialized yet, use empty dict
                 multi_account_stats = {}
             
-            return {
+            error_result = {
+                'type': 'complete',
                 'success': True,
                 'context': {
                     'emails': emails,
@@ -1259,10 +1308,19 @@ async def prep_meeting(
                 'error': 'AI analysis failed, showing raw data',
                 'analysisError': str(analysis_error)
             }
+            yield json.dumps(error_result) + '\n'
+            return
 
-    except HTTPException:
-        # Re-raise HTTP exceptions (401, 400, etc.) as-is
-        raise
+    except HTTPException as http_error:
+        # Yield HTTP error as JSON
+        error_result = {
+            'type': 'error',
+            'statusCode': http_error.status_code,
+            'error': http_error.detail if isinstance(http_error.detail, str) else http_error.detail.get('error', 'HTTP Error'),
+            'message': http_error.detail if isinstance(http_error.detail, str) else http_error.detail.get('message', str(http_error.detail))
+        }
+        yield json.dumps(error_result) + '\n'
+        return
     except Exception as error:
         logger.error(
             f'Error preparing meeting brief',
@@ -1274,12 +1332,32 @@ async def prep_meeting(
             userId=user.get('id') if user else 'anonymous'
         )
 
-        raise HTTPException(
-            status_code=500,
-            detail={
-                'error': 'Meeting preparation failed',
-                'message': str(error),
-                'errorType': type(error).__name__,
-                'requestId': request_id
-            }
-        )
+        error_result = {
+            'type': 'error',
+            'statusCode': 500,
+            'error': 'Meeting preparation failed',
+            'message': str(error),
+            'errorType': type(error).__name__,
+            'requestId': request_id
+        }
+        yield json.dumps(error_result) + '\n'
+        return
+
+
+@router.post('/prep-meeting')
+async def prep_meeting(
+    request_body: MeetingPrepRequest,
+    user: Optional[Dict[str, Any]] = Depends(optional_auth),
+    request: Request = None
+):
+    """
+    Prepare meeting brief with AI analysis
+    Supports both multi-account (authenticated) and single-account (token-based) modes
+    Uses streaming response to prevent Railway timeout
+    """
+    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
+    
+    return StreamingResponse(
+        _generate_prep_response(request_body, user, request, request_id),
+        media_type='application/x-ndjson'  # Newline-delimited JSON for streaming
+    )

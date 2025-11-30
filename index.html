@@ -4518,6 +4518,113 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
             }
         }
 
+        /**
+         * Helper function to read streaming response from /api/prep-meeting
+         * Reads newline-delimited JSON chunks and handles progress updates
+         * @param {Response} response - Fetch response object
+         * @param {Function} onProgress - Optional callback for progress updates (chunk) => void
+         * @returns {Promise<Object>} - Final brief object when type: 'complete' is received
+         */
+        async function readStreamingPrepResponse(response, onProgress = null) {
+            if (!response.ok) {
+                // Try to parse error response body
+                let errorMessage = `Server error: ${response.status}`;
+                let errorDetails = null;
+                
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.message || errorMessage;
+                    errorDetails = errorData;
+                    
+                    // Check for revoked token error
+                    if (response.status === 401 && (errorData.error === 'TokenRevoked' || errorData.revoked === true)) {
+                        // Clear session and redirect to sign-in
+                        document.cookie = 'session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+                        alert('Your session has expired. Please sign in again.');
+                        window.location.href = '/';
+                        return null;
+                    }
+                } catch (parseError) {
+                    // If response isn't JSON, try to get text
+                    try {
+                        const errorText = await response.text();
+                        console.error('Server error (non-JSON):', errorText);
+                        errorMessage = errorText || errorMessage;
+                    } catch (textError) {
+                        console.error('Failed to parse error response:', textError);
+                    }
+                }
+                
+                const error = new Error(errorMessage);
+                error.status = response.status;
+                error.details = errorDetails;
+                throw error;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || ''; // Keep incomplete line in buffer
+                    
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        
+                        try {
+                            const chunk = JSON.parse(line);
+                            
+                            if (chunk.type === 'progress') {
+                                // Handle progress updates
+                                if (onProgress) {
+                                    onProgress(chunk);
+                                }
+                                console.log('📊 Progress:', chunk.step, chunk.data?.message || '');
+                            } else if (chunk.type === 'complete') {
+                                // Return final result (chunk contains all brief fields)
+                                const brief = { ...chunk };
+                                delete brief.type; // Remove type field
+                                return brief;
+                            } else if (chunk.type === 'error') {
+                                // Handle error chunks
+                                const error = new Error(chunk.message || chunk.error || 'Unknown error');
+                                error.status = chunk.statusCode || 500;
+                                error.details = chunk;
+                                throw error;
+                            }
+                        } catch (parseError) {
+                            console.warn('Failed to parse chunk:', parseError, 'Line:', line.substring(0, 100));
+                            // Continue processing other chunks
+                        }
+                    }
+                }
+                
+                // If we exit the loop without getting a 'complete' chunk, check buffer
+                if (buffer.trim()) {
+                    try {
+                        const chunk = JSON.parse(buffer);
+                        if (chunk.type === 'complete') {
+                            const brief = { ...chunk };
+                            delete brief.type;
+                            return brief;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse final buffer:', e);
+                    }
+                }
+                
+                throw new Error('Stream ended without complete result');
+            } finally {
+                reader.releaseLock();
+            }
+        }
+
         async function prepareForMeeting() {
             // CRITICAL: Prevent concurrent prep requests
             if (prepRequestInProgress) {
@@ -4571,60 +4678,13 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     })
                 });
 
-                if (!response.ok) {
-                    // Try to parse error response body
-                    let errorMessage = `Server error: ${response.status}`;
-                    let errorDetails = null;
-                    
-                    try {
-                        const errorData = await response.json();
-                        errorMessage = errorData.message || errorMessage;
-                        errorDetails = errorData;
-                        
-                        // Check for revoked token error
-                        if (response.status === 401 && (errorData.error === 'TokenRevoked' || errorData.revoked === true)) {
-                            // Clear session and redirect to sign-in
-                            document.cookie = 'session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
-                            alert('Your session has expired. Please sign in again.');
-                            window.location.href = '/';
-                            return;
-                        }
-                        
-                        // Log full error details to console for debugging
-                        console.error('Server error response:', {
-                            status: response.status,
-                            statusText: response.statusText,
-                            error: errorData
-                        });
-                    } catch (parseError) {
-                        // If response isn't JSON, try to get text
-                        try {
-                            const errorText = await response.text();
-                            console.error('Server error (non-JSON):', errorText);
-                            errorMessage = errorText || errorMessage;
-                        } catch (textError) {
-                            console.error('Failed to parse error response:', textError);
-                        }
+                // Read streaming response with progress updates
+                const brief = await readStreamingPrepResponse(response, (chunk) => {
+                    // Update UI with progress if needed
+                    if (chunk.data && chunk.data.message) {
+                        console.log('📊 Progress:', chunk.data.message);
                     }
-                    
-                    const error = new Error(errorMessage);
-                    error.status = response.status;
-                    error.details = errorDetails;
-                    throw error;
-                }
-
-                const responseText = await response.text();
-                console.log('📥 Raw response length:', responseText.length);
-                console.log('📥 Raw response preview:', responseText.substring(0, 500));
-                
-                let brief;
-                try {
-                    brief = JSON.parse(responseText);
-                } catch (parseError) {
-                    console.error('❌ Failed to parse JSON response:', parseError);
-                    console.error('Response text:', responseText.substring(0, 1000));
-                    throw new Error('Invalid JSON response from server');
-                }
+                });
 
                 // Debug: Log brief structure
                 console.log('📋 Brief received:', {
@@ -6064,9 +6124,13 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     })
                 });
 
-                if (!response.ok) throw new Error('Failed to generate meeting prep');
-
-                interactiveBrief = await response.json();
+                // Read streaming response with progress updates
+                interactiveBrief = await readStreamingPrepResponse(response, (chunk) => {
+                    // Update button text with progress if needed
+                    if (chunk.data && chunk.data.message) {
+                        button.textContent = `⏳ ${chunk.data.message}`;
+                    }
+                });
 
                 // Add meeting info to brief for context
                 interactiveBrief.meeting = meeting;
@@ -8315,12 +8379,17 @@ ${cr.results?.map(r => `- ${r.title || 'Result'}: ${(r.excerpts?.join(' ') || 'N
                     })
                 });
 
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.message || `Meeting prep failed: ${response.status}`);
-                }
-
-                const brief = await response.json();
+                // Read streaming response with progress updates
+                const brief = await readStreamingPrepResponse(response, (chunk) => {
+                    // Update loading modal with progress if needed
+                    if (chunk.data && chunk.data.message) {
+                        const loadingModal = document.getElementById('meetingPrepLoadingModal');
+                        const loadingText = loadingModal?.querySelector('.loading-text');
+                        if (loadingText) {
+                            loadingText.textContent = chunk.data.message;
+                        }
+                    }
+                });
                 console.log('Meeting brief:', brief);
 
                 // Hide loading modal
