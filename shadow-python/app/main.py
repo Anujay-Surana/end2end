@@ -85,6 +85,14 @@ async def startup_event():
     # Start session cleanup
     start_periodic_cleanup()
     
+    # Start scheduler
+    try:
+        from app.services.scheduler import start_scheduler
+        start_scheduler()
+        logger.info('Scheduler started')
+    except Exception as e:
+        logger.error(f'Failed to start scheduler: {str(e)}')
+    
     logger.info('HumanMax Backend started successfully')
 
 
@@ -93,10 +101,17 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info('Shutting down HumanMax Backend...')
+    
+    # Stop scheduler
+    try:
+        from app.services.scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception as e:
+        logger.error(f'Error stopping scheduler: {str(e)}')
 
 
 # Import routes
-from app.routes import auth_enhanced, accounts, meetings, day_prep, parallel, tts, websocket, onboarding, credentials, service_auth, chat_panel
+from app.routes import auth_enhanced, accounts, meetings, day_prep, parallel, tts, websocket, onboarding, credentials, service_auth, chat_panel, devices, chat
 
 app.include_router(auth_enhanced.router, prefix='/auth', tags=['auth'])
 app.include_router(accounts.router, prefix='/api/accounts', tags=['accounts'])
@@ -105,10 +120,12 @@ app.include_router(day_prep.router, prefix='/api', tags=['day-prep'])
 app.include_router(parallel.router, prefix='/api/parallel', tags=['parallel'])
 app.include_router(tts.router, prefix='/api', tags=['tts'])
 app.include_router(chat_panel.router, prefix='/api', tags=['chat-panel'])
+app.include_router(chat.router, prefix='/api', tags=['chat'])
 app.include_router(websocket.router, prefix='/ws', tags=['websocket'])
 app.include_router(onboarding.router, prefix='/onboarding', tags=['onboarding'])
 app.include_router(credentials.router, prefix='', tags=['credentials'])
 app.include_router(service_auth.router, prefix='/auth', tags=['service-auth'])
+app.include_router(devices.router, prefix='/api', tags=['devices'])
 
 # Serve static files (frontend) - must be after API routes
 # Get the project root directory (parent of shadow-python)

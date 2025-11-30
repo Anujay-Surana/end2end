@@ -1,0 +1,19 @@
+{
+  "name": "OpenAIRealtime",
+  "version": "1.0.0",
+  "description": "OpenAI Realtime API audio streaming plugin for iOS",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "capacitor",
+    "plugin",
+    "openai",
+    "realtime",
+    "audio"
+  ],
+  "author": "Shadow",
+  "license": "MIT"
+}
+

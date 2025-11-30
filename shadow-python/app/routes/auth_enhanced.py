@@ -5,6 +5,7 @@ OAuth routes with progressive permissions and modular OAuth service
 """
 
 import os
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Cookie, Response, Query
@@ -404,25 +405,52 @@ async def get_current_user(
     Returns user info and access token if authenticated
     """
     if not user:
+        logger.info('GET /auth/me: Not authenticated')
         raise HTTPException(status_code=401, detail='Not authenticated')
     
+    logger.info(f'GET /auth/me: Authenticated user {user.get("email")} ({user.get("id")})')
+    
+    # Always return user info, even if primary account query fails
+    user_info = {
+        'id': user['id'],
+        'email': user['email'],
+        'name': user.get('name'),
+        'picture': user.get('picture_url')
+    }
+    
+    # Try to get primary account with timeout (5 seconds max)
+    # If it fails or times out, just return user info without access token
+    access_token = None
     try:
-        # Get primary account for access token
-        primary_account = await get_primary_account(user['id'])
-        access_token = primary_account.get('access_token') if primary_account else None
+        # Wrap database query in timeout to prevent hanging
+        try:
+            logger.debug(f'Fetching primary account for user {user["id"]}')
+            primary_account = await asyncio.wait_for(
+                get_primary_account(user['id']),
+                timeout=5.0
+            )
+            access_token = primary_account.get('access_token') if primary_account else None
+            logger.debug(f'Primary account fetched successfully, has access token: {access_token is not None}')
+        except asyncio.TimeoutError:
+            logger.warning(f'get_primary_account timed out for user {user["id"]} after 5 seconds')
+            # Continue without access token
+        except Exception as db_error:
+            logger.warning(f'Failed to get primary account for user {user["id"]}: {str(db_error)}', exc_info=True)
+            # Continue without access token
         
+        logger.info(f'GET /auth/me: Returning user info for {user.get("email")}')
         return {
-            'user': {
-                'id': user['id'],
-                'email': user['email'],
-                'name': user.get('name'),
-                'picture': user.get('picture_url')
-            },
+            'user': user_info,
             'accessToken': access_token
         }
     except Exception as e:
-        logger.error(f'Get current user error: {str(e)}')
-        raise HTTPException(status_code=500, detail=str(e))
+        # If something else fails, still try to return user info
+        logger.error(f'Get current user error: {str(e)}', exc_info=True)
+        # Return user info even if there's an error (better than failing completely)
+        return {
+            'user': user_info,
+            'accessToken': None
+        }
 
 
 @router.post('/logout')

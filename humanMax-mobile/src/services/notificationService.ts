@@ -2,11 +2,15 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
+import { apiClient } from './apiClient';
 import type { Meeting } from '../types';
+
+type NotificationTapCallback = (data: { type: string; meeting_id?: string; [key: string]: any }) => void;
 
 class NotificationService {
   private isInitialized = false;
   private deviceToken: string | null = null;
+  private notificationTapCallbacks: NotificationTapCallback[] = [];
 
   async initialize(): Promise<void> {
     if (this.isInitialized || !Capacitor.isNativePlatform()) {
@@ -30,10 +34,11 @@ class NotificationService {
       await PushNotifications.register();
 
       // Listen for registration
-      PushNotifications.addListener('registration', (token) => {
+      PushNotifications.addListener('registration', async (token) => {
         console.log('Push registration success, token: ' + token.value);
         this.deviceToken = token.value;
-        this.saveDeviceToken(token.value);
+        await this.saveDeviceToken(token.value);
+        await this.registerDeviceWithBackend(token.value);
       });
 
       // Listen for registration errors
@@ -46,9 +51,11 @@ class NotificationService {
         console.log('Push notification received: ', notification);
       });
 
-      // Listen for push notification actions
+      // Listen for push notification actions (when user taps notification)
       PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
         console.log('Push notification action performed', action);
+        const data = action.notification.data || {};
+        this.handleNotificationTap(data);
       });
 
       this.isInitialized = true;
@@ -61,6 +68,54 @@ class NotificationService {
     await Preferences.set({
       key: 'device_token',
       value: token,
+    });
+  }
+
+  private async registerDeviceWithBackend(token: string): Promise<void> {
+    try {
+      // Get user timezone
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      
+      // Get device info
+      const platform = Capacitor.getPlatform();
+      const deviceInfo = {
+        platform,
+        appVersion: '1.0.0', // TODO: Get from package.json or Capacitor config
+      };
+
+      await apiClient.registerDevice(token, platform, timezone, deviceInfo);
+      console.log('Device registered with backend');
+    } catch (error) {
+      console.error('Error registering device with backend:', error);
+      // Don't throw - device registration failure shouldn't break the app
+    }
+  }
+
+  /**
+   * Register a callback for notification taps
+   */
+  onNotificationTap(callback: NotificationTapCallback): () => void {
+    this.notificationTapCallbacks.push(callback);
+    // Return unsubscribe function
+    return () => {
+      const index = this.notificationTapCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.notificationTapCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  /**
+   * Handle notification tap and notify all callbacks
+   */
+  private handleNotificationTap(data: any): void {
+    console.log('Handling notification tap with data:', data);
+    this.notificationTapCallbacks.forEach((callback) => {
+      try {
+        callback(data);
+      } catch (error) {
+        console.error('Error in notification tap callback:', error);
+      }
     });
   }
 

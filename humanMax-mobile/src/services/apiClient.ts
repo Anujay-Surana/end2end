@@ -106,6 +106,9 @@ class ApiClient {
       statusText: error.response?.statusText,
       data: error.response?.data,
       message: error.message,
+      code: error.code,
+      url: error.config?.url,
+      baseURL: error.config?.baseURL,
     });
     
     if (error.response) {
@@ -114,6 +117,15 @@ class ApiClient {
       throw new Error(errorMessage);
     } else if (error.request) {
       // Request made but no response
+      // Check if it's a timeout
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        throw new Error('Request timed out. Please check your connection and try again.');
+      }
+      // Check if it's a network error
+      if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
+        const apiUrl = API_BASE_URL;
+        throw new Error(`Cannot connect to server at ${apiUrl}. Please check your connection and ensure the server is running.`);
+      }
       throw new Error('Network error. Please check your connection.');
     } else {
       // Something else happened
@@ -353,13 +365,63 @@ class ApiClient {
       if (error instanceof Error) {
         const axiosError = {
           response: {
-            status: error.status || 500,
-            data: error.details || { message: error.message },
+            status: (error as any).status || 500,
+            data: (error as any).details || { message: error.message },
           },
           message: error.message,
         } as AxiosError<ApiError>;
         return this.handleError(axiosError);
       }
+      return this.handleError(error as AxiosError<ApiError>);
+    }
+  }
+
+  // Chat endpoints
+  async getChatMessages(meetingId?: string, limit: number = 100): Promise<any> {
+    try {
+      const params: any = { limit };
+      if (meetingId) {
+        params.meeting_id = meetingId;
+      }
+      const response = await this.client.get('/api/chat/messages', { params });
+      return response.data;
+    } catch (error) {
+      return this.handleError(error as AxiosError<ApiError>);
+    }
+  }
+
+  async sendChatMessage(message: string, meetingId?: string): Promise<any> {
+    try {
+      const response = await this.client.post('/api/chat/messages', {
+        message,
+        meeting_id: meetingId,
+      });
+      return response.data;
+    } catch (error) {
+      return this.handleError(error as AxiosError<ApiError>);
+    }
+  }
+
+  async deleteChatMessage(messageId: string): Promise<any> {
+    try {
+      const response = await this.client.delete(`/api/chat/messages/${messageId}`);
+      return response.data;
+    } catch (error) {
+      return this.handleError(error as AxiosError<ApiError>);
+    }
+  }
+
+  // Device registration
+  async registerDevice(deviceToken: string, platform: string = 'ios', timezone: string = 'UTC', deviceInfo?: any): Promise<any> {
+    try {
+      const response = await this.client.post('/api/devices/register', {
+        device_token: deviceToken,
+        platform,
+        timezone,
+        device_info: deviceInfo,
+      });
+      return response.data;
+    } catch (error) {
       return this.handleError(error as AxiosError<ApiError>);
     }
   }

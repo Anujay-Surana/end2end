@@ -12,6 +12,7 @@ import { CalendarView } from './components/CalendarView';
 import { Settings } from './components/Settings';
 import { MeetingPrep } from './components/MeetingPrep';
 import { DayPrep } from './components/DayPrep';
+import { MeetingModal } from './components/MeetingModal';
 import type { User, Meeting } from './types';
 import './App.css';
 
@@ -20,6 +21,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [showDayPrep, setShowDayPrep] = useState(false);
+  const [notificationMeeting, setNotificationMeeting] = useState<Meeting | null>(null);
   const [currentDate] = useState(new Date());
 
   useEffect(() => {
@@ -30,6 +32,28 @@ function App() {
       // Don't await - let these initialize in background
       notificationService.initialize().catch(() => {});
       backgroundSyncService.initialize().catch(() => {});
+      
+      // Set up notification tap handler
+      const unsubscribe = notificationService.onNotificationTap((data) => {
+        if (data.type === 'meeting_reminder' && data.meeting_id) {
+          // Fetch meeting details and show modal
+          // TODO: Fetch meeting from API or use cached meetings
+          setNotificationMeeting({
+            id: data.meeting_id,
+            summary: data.meeting_title || 'Meeting',
+            start: { dateTime: data.start_time },
+          } as Meeting);
+        } else if (data.type === 'daily_summary') {
+          // Could show chat view or navigate to main screen
+          // For now, just log
+          console.log('Daily summary notification tapped');
+        }
+      });
+      
+      // Store unsubscribe for cleanup
+      return () => {
+        unsubscribe();
+      };
     }
 
     // Listen for sign-in events from OAuth callback
@@ -161,12 +185,14 @@ function App() {
         setShowDayPrep={setShowDayPrep}
         currentDate={currentDate}
         handleSignOut={handleSignOut}
+        notificationMeeting={notificationMeeting}
+        setNotificationMeeting={setNotificationMeeting}
       />
     </Router>
   );
 }
 
-function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowDayPrep, currentDate, handleSignOut }: any) {
+function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowDayPrep, currentDate, handleSignOut, notificationMeeting, setNotificationMeeting }: any) {
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -219,6 +245,13 @@ function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowD
           <DayPrep
             date={currentDate}
             onClose={() => setShowDayPrep(false)}
+          />
+        )}
+
+        {notificationMeeting && (
+          <MeetingModal
+            meeting={notificationMeeting}
+            onClose={() => setNotificationMeeting(null)}
           />
         )}
       </div>
