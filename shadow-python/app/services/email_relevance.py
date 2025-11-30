@@ -155,7 +155,8 @@ async def _filter_email_batch(
     meeting_context: Optional[Dict[str, Any]],
     user_context: Optional[Dict[str, Any]],
     attendees: List[Dict[str, Any]],
-    request_id: str
+    purpose_result: Optional[Dict[str, Any]] = None,
+    request_id: str = 'unknown'
 ) -> Dict[str, Any]:
     """Filter a batch of emails for relevance"""
     logger.info(
@@ -194,6 +195,22 @@ MEETING CONTEXT:
 - Is Specific Meeting: {"yes" if meeting_context.get("isSpecificMeeting") else "no"}
 - Confidence: {meeting_context.get("confidence", "unknown")}
 - Reasoning: {meeting_context.get("reasoning", "")}'''
+    
+    # Add purpose result section if available
+    purpose_section = ''
+    if purpose_result:
+        purpose = purpose_result.get('purpose')
+        agenda = purpose_result.get('agenda', [])
+        confidence = purpose_result.get('confidence', 'low')
+        source = purpose_result.get('source', 'unknown')
+        purpose_section = f'''
+
+DETECTED MEETING PURPOSE (HIGH PRIORITY - USE THIS TO GUIDE FILTERING):
+- Purpose: {purpose if purpose else "Not detected"}
+- Agenda Items: {", ".join(agenda[:5]) if agenda else "None"}
+- Confidence: {confidence}
+- Source: {source}
+- IMPORTANT: Prioritize emails that relate to this specific purpose and agenda items'''
 
     # Determine filtering strictness based on confidence
     confidence = meeting_context.get('confidence', 'low') if meeting_context else 'low'
@@ -242,21 +259,32 @@ FILTERING STRICTNESS (HIGH CONFIDENCE):
     if user_context:
         important_msg_email = f'IMPORTANT: {user_context["formattedName"]} is the user you are preparing this brief for. Filter emails that are relevant to {user_context["formattedName"]}\'s understanding of this meeting.\n\n'
     
+    # Build include criteria with purpose guidance
+    include_criteria = f'✅ INCLUDE IF:\n'
+    include_criteria += f'1. Email involves meeting attendees AND relates to understood purpose/entities/topics\n'
+    if purpose_result and purpose_result.get('purpose'):
+        include_criteria += f'2. Email relates to detected meeting purpose: "{purpose_result.get("purpose")}"\n'
+        if purpose_result.get('agenda'):
+            include_criteria += f'3. Email discusses agenda items: {", ".join(purpose_result.get("agenda", [])[:3])}\n'
+        include_criteria += f'4. Email provides context about the detected meeting purpose\n'
+    include_criteria += f'5. Email discusses meeting-specific entities/topics (not just company name)\n'
+    include_criteria += f'6. Email involves extracted key entities ({key_entities_str})\n'
+    
+    exclude_criteria = f'❌ EXCLUDE IF:\n'
+    exclude_criteria += f'1. Email only mentions company name without meeting context/entities/topics\n'
+    if purpose_result and purpose_result.get('purpose'):
+        exclude_criteria += f'2. Email is about different purpose than detected meeting purpose\n'
+    exclude_criteria += f'3. Email is about different entities/topics than meeting\n'
+    exclude_criteria += f'4. Email is general company operations unrelated to understood purpose\n'
+    exclude_criteria += f'5. Email doesn\'t involve meeting attendees or extracted entities\n'
+    
     relevance_check = await call_gpt([{
         'role': 'system',
         'content': (
-            f'{user_context_prefix}You are filtering emails for meeting prep. Meeting: "{meeting_title}"{meeting_date_context}{meeting_context_section}{company_filter_note}\n\n'
+            f'{user_context_prefix}You are filtering emails for meeting prep. Meeting: "{meeting_title}"{meeting_date_context}{meeting_context_section}{purpose_section}{company_filter_note}\n\n'
             + important_msg_email
-            + f'✅ INCLUDE IF:\n'
-            + f'1. Email involves meeting attendees AND relates to understood purpose/entities/topics\n'
-            + f'2. Email discusses meeting-specific entities/topics (not just company name)\n'
-            + f'3. Email provides context about the understood meeting purpose\n'
-            + f'4. Email involves extracted key entities ({key_entities_str})\n\n'
-            + f'❌ EXCLUDE IF:\n'
-            + f'1. Email only mentions company name without meeting context/entities/topics\n'
-            + f'2. Email is about different entities/topics than meeting\n'
-            + f'3. Email is general company operations unrelated to understood purpose\n'
-            + f'4. Email doesn\'t involve meeting attendees or extracted entities\n\n'
+            + include_criteria + '\n\n'
+            + exclude_criteria + '\n\n'
             + f'DATE PRIORITIZATION: Prioritize emails from the last 30 days, but include older emails if highly relevant.\n\n'
             + f'ATTENDEE PRIORITIZATION: Prioritize emails with multiple meeting attendees (higher attendee count = more relevant).\n\n'
             + f'{filtering_strictness}\n\n'
@@ -412,6 +440,7 @@ async def filter_relevant_emails(
     meeting_context: Optional[Dict[str, Any]],
     user_context: Optional[Dict[str, Any]],
     attendees: List[Dict[str, Any]],
+    purpose_result: Optional[Dict[str, Any]] = None,
     request_id: str = 'unknown'
 ) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
     """
@@ -424,6 +453,7 @@ async def filter_relevant_emails(
         meeting_context: Meeting context understanding (optional)
         user_context: User context object (optional)
         attendees: List of attendee objects
+        purpose_result: Detected meeting purpose result (optional)
         request_id: Request ID for logging
     
     Returns:
@@ -471,7 +501,7 @@ async def filter_relevant_emails(
     relevance_promises = [
         _filter_email_batch(
             batch, i, len(batches), meeting_title, meeting_date_context,
-            meeting_context, user_context, attendees, request_id
+            meeting_context, user_context, attendees, purpose_result, request_id
         )
         for i, batch in enumerate(batches)
     ]

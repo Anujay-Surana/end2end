@@ -61,7 +61,8 @@ async def _research_single_attendee(
     meeting_date_context: str,
     user_context: Optional[Dict[str, Any]],
     parallel_client: Optional[Any],
-    request_id: str
+    purpose_result: Optional[Dict[str, Any]] = None,
+    request_id: str = 'unknown'
 ) -> Optional[Dict[str, Any]]:
     """
     Research a single attendee
@@ -224,16 +225,28 @@ async def _research_single_attendee(
         important_note = ''
         if user_context:
             important_note = f"IMPORTANT: Extract information that {user_context['formattedName']} should know about {name}. Structure facts from {user_context['formattedName']}'s perspective.\n\n"
+        
+        # Add purpose context if available
+        purpose_context = ''
+        if purpose_result and purpose_result.get('purpose'):
+            purpose = purpose_result.get('purpose')
+            agenda = purpose_result.get('agenda', [])
+            purpose_context = f'\n\nMEETING PURPOSE CONTEXT (HIGH PRIORITY):\n'
+            purpose_context += f'- Detected Meeting Purpose: {purpose}\n'
+            if agenda:
+                purpose_context += f'- Agenda Items: {", ".join(agenda[:5])}\n'
+            purpose_context += f'- IMPORTANT: Prioritize facts about {name} that relate to this specific meeting purpose and agenda.\n'
+            purpose_context += f'- Focus on their role/expertise relevant to: {purpose}\n\n'
 
         local_synthesis = await synthesize_results(
-            f'{user_context_str}Analyze emails FROM {name} ({attendee_email}) to extract professional context for meeting "{meeting_title}".{meeting_date_context}\n\n'
+            f'{user_context_str}Analyze emails FROM {name} ({attendee_email}) to extract professional context for meeting "{meeting_title}".{meeting_date_context}{purpose_context}\n\n'
             f'{important_note}'
             f'CRITICAL SCOPE: These emails include both emails SENT BY {name} (FROM: {attendee_email}) AND emails SENT TO {name} (TO: {attendee_email}). This provides a complete view of their communication patterns.\n\n'
             f'Extract and prioritize:\n'
             f'1. **Working relationship**: {"How does " + name + " collaborate with " + user_context["formattedName"] + " and others?" if user_context else "How do they collaborate with others?"}\n'
             f'2. **Current projects/progress**: What are they working on?\n'
-            f'3. **Role and expertise**: Their position, responsibilities\n'
-            f'4. **Meeting-specific context**: References to this meeting\'s topic\n'
+            f'3. **Role and expertise**: Their position, responsibilities{" (especially relevant to meeting purpose)" if purpose_result and purpose_result.get("purpose") else ""}\n'
+            f'4. **Meeting-specific context**: References to this meeting\'s topic{" and detected purpose" if purpose_result and purpose_result.get("purpose") else ""}\n'
             f'5. **Communication style**: How they communicate\n\n'
             f'OUTPUT FORMAT: Return ONLY a valid JSON array. CRITICAL: Must be valid JSON, no markdown code blocks, no explanations.\n\n'
             f'REQUIREMENTS:\n'
@@ -384,8 +397,16 @@ async def _research_single_attendee(
                     if user_context:
                         user_context_str = f'You are preparing a brief for {user_context["formattedName"]} ({user_context["formattedEmail"]}). '
 
+                    # Add purpose context for web search
+                    web_purpose_context = ''
+                    if purpose_result and purpose_result.get('purpose'):
+                        web_purpose_context = f'\n\nMEETING PURPOSE: {purpose_result.get("purpose")}\n'
+                        if purpose_result.get('agenda'):
+                            web_purpose_context += f'AGENDA: {", ".join(purpose_result.get("agenda", [])[:3])}\n'
+                        web_purpose_context += f'Focus on information relevant to this meeting purpose.\n\n'
+                    
                     web_synthesis = await synthesize_results(
-                        f'{user_context_str}Extract professional information about {name} ({attendee_email}) for meeting "{meeting_title}"{meeting_date_context}. Focus on information that {"the user" if not user_context else user_context["formattedName"]} should know about this attendee\'s role and background.\n\n'
+                        f'{user_context_str}Extract professional information about {name} ({attendee_email}) for meeting "{meeting_title}"{meeting_date_context}.{web_purpose_context}Focus on information that {"the user" if not user_context else user_context["formattedName"]} should know about this attendee\'s role and background.\n\n'
                         f'CRITICAL OUTPUT FORMAT: Return ONLY a valid JSON array. No markdown code blocks, no explanations, no narrative text. Just the JSON array.\n\n'
                         f'EXAMPLE FORMAT:\n'
                         f'["Fact 1 about their role or background", "Fact 2 about their work or expertise", "Fact 3 about relevant experience"]\n\n'
@@ -526,6 +547,7 @@ async def research_attendees(
     meeting_date_context: str,
     user_context: Optional[Dict[str, Any]] = None,
     parallel_client: Optional[Any] = None,
+    purpose_result: Optional[Dict[str, Any]] = None,
     request_id: str = 'unknown'
 ) -> List[Dict[str, Any]]:
     """
@@ -539,6 +561,7 @@ async def research_attendees(
         meeting_date_context: Meeting date context string
         user_context: User context object
         parallel_client: Parallel AI client for web search
+        purpose_result: Detected meeting purpose result (optional)
         request_id: Request ID for logging
     Returns:
         List of researched attendee objects with keyFacts and extraction data
@@ -556,7 +579,7 @@ async def research_attendees(
     research_tasks = [
         _research_single_attendee(
             attendee, emails, calendar_events, meeting_title,
-            meeting_date_context, user_context, parallel_client, request_id
+            meeting_date_context, user_context, parallel_client, purpose_result, request_id
         )
         for attendee in attendees
     ]

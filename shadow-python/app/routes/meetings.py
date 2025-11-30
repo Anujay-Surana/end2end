@@ -327,8 +327,74 @@ async def _generate_prep_response(
 
             accounts = token_validation_result['validAccounts']
 
-            # Fetch context from ALL accounts in parallel
+            # ===== STEP 1: UNDERSTAND MEETING CONTEXT (from calendar event only) =====
+            logger.info(f'\n  🧠 Understanding meeting context from calendar event...', requestId=request_id)
+            meeting_context = None
+            try:
+                meeting_context = await understand_meeting_context(meeting, attendees, user_context)
+                logger.info(f'  ✓ Meeting context understood: {meeting_context["confidence"]} confidence', requestId=request_id)
+            except Exception as context_error:
+                logger.error(f'  ❌ Meeting context understanding failed: {str(context_error)}', requestId=request_id)
+                meeting_context = {
+                    'understoodPurpose': meeting_title,
+                    'keyEntities': [],
+                    'keyTopics': [],
+                    'isSpecificMeeting': False,
+                    'confidence': 'low',
+                    'reasoning': f'Context analysis failed: {str(context_error)}'
+                }
+            logger.info(f'     Purpose: {meeting_context["understoodPurpose"][:100]}...', requestId=request_id)
+            logger.info(f'     Key Entities: {", ".join(meeting_context["keyEntities"]) or "none"}', requestId=request_id)
+
+            # ===== STEP 2: DETECT MEETING PURPOSE (with minimal email fetch for Stage 2) =====
+            yield send_progress('detecting_purpose', {'message': 'Detecting meeting purpose...'})
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Detecting purpose...'})
+                last_keepalive = datetime.now()
+            
+            logger.info(f'\n  🧠 Detecting meeting purpose and agenda...', requestId=request_id)
+            purpose_result = None
+            
+            # For Stage 2 (attendee overlap), fetch minimal set of emails (50 emails)
+            minimal_emails = []
+            try:
+                from app.services.multi_account_fetcher import fetch_emails_from_all_accounts
+                minimal_email_result = await fetch_emails_from_all_accounts(accounts, attendees, meeting)
+                minimal_emails = minimal_email_result.get('emails', [])[:50]  # Limit to 50 for speed
+                logger.info(f'  ✓ Fetched {len(minimal_emails)} emails for purpose detection Stage 2', requestId=request_id)
+            except Exception as email_fetch_error:
+                logger.warn(f'  ⚠️  Minimal email fetch failed for purpose detection: {str(email_fetch_error)}', requestId=request_id)
+                minimal_emails = []
+            
+            try:
+                purpose_result = await detect_meeting_purpose(
+                    meeting,
+                    attendees,
+                    minimal_emails,  # Use minimal emails for Stage 2
+                    user_context,
+                    request_id
+                )
+                logger.info(
+                    f'  ✓ Purpose detected: {purpose_result.get("purpose", "unknown")}',
+                    requestId=request_id,
+                    confidence=purpose_result.get('confidence'),
+                    source=purpose_result.get('source'),
+                    hasAgenda=len(purpose_result.get('agenda', [])) > 0
+                )
+            except Exception as purpose_error:
+                logger.error(f'  ❌ Purpose detection failed: {str(purpose_error)}', requestId=request_id)
+                purpose_result = {
+                    'purpose': None,
+                    'agenda': [],
+                    'confidence': 'low',
+                    'source': 'error'
+                }
+
+            # ===== STEP 3: FETCH FULL CONTEXT FROM ALL ACCOUNTS =====
             yield send_progress('fetching_data', {'message': 'Fetching emails, files, and calendar events...'})
+            if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
+                yield send_progress('keepalive', {'message': 'Fetching data from accounts...'})
+                last_keepalive = datetime.now()
             
             context_result = await fetch_all_account_context(accounts, attendees, meeting)
             emails = context_result.get('emails', [])
@@ -509,6 +575,7 @@ async def _generate_prep_response(
                     meeting_date_context,
                     user_context,
                     parallel_client,
+                    purpose_result,  # Pass purpose_result to guide research
                     request_id
                 )
             except Exception as attendee_error:
@@ -566,52 +633,6 @@ async def _generate_prep_response(
                 requestId=request_id
             )
 
-            # ===== STEP 1.5: DETECT MEETING PURPOSE AND AGENDA =====
-            logger.info(f'\n  🧠 Detecting meeting purpose and agenda...', requestId=request_id)
-            purpose_result = None
-            try:
-                purpose_result = await detect_meeting_purpose(
-                    meeting,
-                    attendees,
-                    emails,
-                    user_context,
-                    request_id
-                )
-                logger.info(
-                    f'  ✓ Purpose detected: {purpose_result.get("purpose", "unknown")}',
-                    requestId=request_id,
-                    confidence=purpose_result.get('confidence'),
-                    source=purpose_result.get('source'),
-                    hasAgenda=len(purpose_result.get('agenda', [])) > 0
-                )
-            except Exception as purpose_error:
-                logger.error(f'  ❌ Purpose detection failed: {str(purpose_error)}', requestId=request_id)
-                purpose_result = {
-                    'purpose': None,
-                    'agenda': [],
-                    'confidence': 'low',
-                    'source': 'error'
-                }
-            
-            # Also run legacy context understanding for backward compatibility
-            logger.info(f'\n  🧠 Understanding meeting context...', requestId=request_id)
-            try:
-                meeting_context = await understand_meeting_context(meeting, attendees, user_context)
-                logger.info(f'  ✓ Meeting context understood: {meeting_context["confidence"]} confidence', requestId=request_id)
-            except Exception as context_error:
-                logger.error(f'  ❌ Meeting context understanding failed: {str(context_error)}', requestId=request_id)
-                # Fallback: basic meeting context
-                meeting_context = {
-                    'understoodPurpose': purpose_result.get('purpose') if purpose_result else meeting_title,
-                    'keyEntities': [],
-                    'keyTopics': [],
-                    'isSpecificMeeting': False,
-                    'confidence': 'low',
-                    'reasoning': f'Context analysis failed: {str(context_error)}'
-                }
-            logger.info(f'     Purpose: {meeting_context["understoodPurpose"][:100]}...', requestId=request_id)
-            logger.info(f'     Key Entities: {", ".join(meeting_context["keyEntities"]) or "none"}', requestId=request_id)
-
             # ===== STEP 2: EMAIL RELEVANCE FILTERING + BATCH EXTRACTION =====
             yield send_progress('analyzing_emails', {'message': 'Analyzing email threads...'})
             if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
@@ -626,6 +647,7 @@ async def _generate_prep_response(
                     meeting_context,
                     user_context,
                     attendees,
+                    purpose_result,  # Pass purpose_result to guide filtering
                     request_id
                 )
             except Exception as email_error:
