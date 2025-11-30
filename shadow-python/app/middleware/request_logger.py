@@ -9,6 +9,7 @@ import uuid
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.services.logger import logger
+from app.services.parallel_client import get_parallel_client
 
 
 class RequestLoggerMiddleware(BaseHTTPMiddleware):
@@ -18,6 +19,9 @@ class RequestLoggerMiddleware(BaseHTTPMiddleware):
         # Generate request ID
         request_id = str(uuid.uuid4())[:8]
         request.state.request_id = request_id
+        
+        # Initialize Parallel AI client if available
+        request.state.parallel_client = get_parallel_client()
 
         # Start timer
         start_time = time.time()

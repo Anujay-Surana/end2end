@@ -338,11 +338,21 @@ async def prep_meeting(
                                 )
                             ]
                             
+                            # Ensure user_context has emails list for multi-account support
+                            user_context_with_emails = {
+                                **user_context,
+                                'emails': user_emails  # Include all user emails
+                            }
+                            
+                            # Get parallel client for web search (same as used for attendee research)
+                            parallel_client = getattr(request.state, 'parallel_client', None) if request else None
+                            
                             full_profile = await build_user_profile(
-                                user_context,
+                                user_context_with_emails,
                                 emails,  # Pass all emails so function can extract both sent and received
                                 user_files,
                                 calendar_events,
+                                parallel_client,  # Pass parallel client for web search
                                 request_id
                             )
                             
@@ -396,19 +406,41 @@ async def prep_meeting(
 
             logger.info(f'  📊 Researching {len(attendees_to_research)} attendees', requestId=request_id)
 
-            # Get parallel client if available (from request state)
+            # Get parallel client if available (from request state, set by middleware)
             parallel_client = getattr(request.state, 'parallel_client', None) if request else None
+            
+            if parallel_client:
+                logger.info(f'  ✅ Parallel AI client available for web searches', requestId=request_id)
+            else:
+                logger.info(f'  ⚠️  Parallel AI client not available - web searches disabled', requestId=request_id)
 
-            brief['attendees'] = await research_attendees(
-                attendees_to_research,
-                emails,
-                calendar_events,
-                meeting_title,
-                meeting_date_context,
-                user_context,
-                parallel_client,
-                request_id
-            )
+            try:
+                brief['attendees'] = await research_attendees(
+                    attendees_to_research,
+                    emails,
+                    calendar_events,
+                    meeting_title,
+                    meeting_date_context,
+                    user_context,
+                    parallel_client,
+                    request_id
+                )
+            except Exception as attendee_error:
+                logger.error(f'  ❌ Attendee research failed: {str(attendee_error)}', requestId=request_id)
+                # Fallback: create basic attendee entries
+                brief['attendees'] = [
+                    {
+                        'name': att.get('displayName') or att.get('name') or (att.get('email') or att.get('emailAddress', '')).split('@')[0],
+                        'email': att.get('email') or att.get('emailAddress'),
+                        'company': None,
+                        'title': 'Unknown',
+                        'keyFacts': [],
+                        'dataSource': 'basic',
+                        'error': f'Research failed: {str(attendee_error)}'
+                    }
+                    for att in attendees_to_research
+                    if att.get('email') or att.get('emailAddress')
+                ]
 
             logger.info(f'  ✓ Research completed: {len(brief["attendees"])} attendees researched', requestId=request_id)
 
@@ -445,36 +477,69 @@ async def prep_meeting(
 
             # ===== STEP 1.5: UNDERSTAND MEETING CONTEXT BEFORE FILTERING =====
             logger.info(f'\n  🧠 Understanding meeting context...', requestId=request_id)
-            meeting_context = await understand_meeting_context(meeting, attendees, user_context)
-            logger.info(f'  ✓ Meeting context understood: {meeting_context["confidence"]} confidence', requestId=request_id)
+            try:
+                meeting_context = await understand_meeting_context(meeting, attendees, user_context)
+                logger.info(f'  ✓ Meeting context understood: {meeting_context["confidence"]} confidence', requestId=request_id)
+            except Exception as context_error:
+                logger.error(f'  ❌ Meeting context understanding failed: {str(context_error)}', requestId=request_id)
+                # Fallback: basic meeting context
+                meeting_context = {
+                    'understoodPurpose': meeting_title,
+                    'keyEntities': [],
+                    'keyTopics': [],
+                    'isSpecificMeeting': False,
+                    'confidence': 'low',
+                    'reasoning': f'Context analysis failed: {str(context_error)}'
+                }
             logger.info(f'     Purpose: {meeting_context["understoodPurpose"][:100]}...', requestId=request_id)
             logger.info(f'     Key Entities: {", ".join(meeting_context["keyEntities"]) or "none"}', requestId=request_id)
 
             # ===== STEP 2: EMAIL RELEVANCE FILTERING + BATCH EXTRACTION =====
-            relevant_emails, email_analysis, email_extraction_data = await filter_relevant_emails(
-                emails,
-                meeting_title,
-                meeting_date_context,
-                meeting_context,
-                user_context,
-                attendees,
-                request_id
-            )
+            try:
+                relevant_emails, email_analysis, email_extraction_data = await filter_relevant_emails(
+                    emails,
+                    meeting_title,
+                    meeting_date_context,
+                    meeting_context,
+                    user_context,
+                    attendees,
+                    request_id
+                )
+            except Exception as email_error:
+                logger.error(f'  ❌ Email filtering failed: {str(email_error)}', requestId=request_id)
+                # Fallback: use all emails
+                relevant_emails = emails[:50]  # Limit to first 50
+                email_analysis = 'Email filtering failed - showing all available emails.'
+                email_extraction_data = {
+                    'emailRelevanceReasoning': {},
+                    'relevantContent': {'emails': relevant_emails[:10]}
+                }
 
             brief['_extractionData']['emailRelevanceReasoning'] = email_extraction_data.get('emailRelevanceReasoning', {})
             brief['_extractionData']['meetingContext'] = meeting_context
             brief['_extractionData']['relevantContent']['emails'] = email_extraction_data.get('relevantContent', {}).get('emails', [])
 
             # ===== STEP 3: DOCUMENT ANALYSIS IN BATCHES OF 5 =====
-            document_analysis, files_with_content, document_extraction_data = await analyze_documents(
-                files,
-                meeting_title,
-                meeting_date_context,
-                meeting_context,
-                user_context,
-                attendees,
-                request_id
-            )
+            try:
+                document_analysis, files_with_content, document_extraction_data = await analyze_documents(
+                    files,
+                    meeting_title,
+                    meeting_date_context,
+                    meeting_context,
+                    user_context,
+                    attendees,
+                    request_id
+                )
+            except Exception as doc_error:
+                logger.error(f'  ❌ Document analysis failed: {str(doc_error)}', requestId=request_id)
+                # Fallback: use all files
+                files_with_content = [f for f in files if isinstance(f, dict) and f.get('content')][:10]
+                document_analysis = 'Document analysis failed - showing all available files.'
+                document_extraction_data = {
+                    'fileRelevanceReasoning': {},
+                    'documentStaleness': {},
+                    'relevantContent': {'documents': files_with_content[:5]}
+                }
 
             brief['_extractionData']['fileRelevanceReasoning'] = document_extraction_data.get('fileRelevanceReasoning', {})
             brief['_extractionData']['documentStaleness'] = document_extraction_data.get('documentStaleness', {})

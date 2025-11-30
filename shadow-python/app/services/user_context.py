@@ -28,18 +28,24 @@ async def get_user_context(user: Optional[Dict[str, Any]], request_id: str = Non
         user_email = user.get('email')
         user_name = user.get('name') or user_email.split('@')[0] if user_email else 'Unknown'
         
-        # Try to get primary account email (might be different from user email)
+        # Try to get all account emails (for multi-account support)
+        account_emails = []
         primary_account_email = user_email
         try:
             if user.get('id'):
-                primary_account = await get_primary_account(user['id'])
-                if primary_account and primary_account.get('account_email'):
-                    primary_account_email = primary_account['account_email']
+                from app.db.queries.accounts import get_accounts_by_user_id
+                accounts = await get_accounts_by_user_id(user['id'])
+                if accounts:
+                    account_emails = [acc.get('account_email') for acc in accounts if acc.get('account_email')]
+                    # Get primary account email
+                    primary_account = await get_primary_account(user['id'])
+                    if primary_account and primary_account.get('account_email'):
+                        primary_account_email = primary_account['account_email']
         except Exception as error:
-            logger.warn(f'Could not fetch primary account, using user email: {str(error)}', requestId=request_id)
+            logger.warn(f'Could not fetch accounts, using user email: {str(error)}', requestId=request_id)
 
-        # Get unique emails
-        emails = list(dict.fromkeys([user_email, primary_account_email])) if user_email else []
+        # Get unique emails (user email + all account emails)
+        emails = list(dict.fromkeys([user_email] + account_emails)) if user_email else account_emails
 
         return {
             'id': user.get('id'),

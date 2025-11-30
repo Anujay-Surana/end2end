@@ -9,7 +9,7 @@ import re
 import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-from app.services.gpt_service import call_gpt, safe_parse_json
+from app.services.gpt_service import call_gpt, safe_parse_json, synthesize_results
 from app.services.logger import logger
 def _get_duration_in_weeks(events: List[Dict[str, Any]]) -> float:
     """
@@ -589,15 +589,16 @@ def analyze_working_patterns(events: List[Dict[str, Any]], user_email: str) -> D
     }
 
 
-async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, Any]] = None, all_documents: List[Dict[str, Any]] = None, calendar_events: List[Dict[str, Any]] = None, request_id: str = None) -> Dict[str, Any]:
+async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, Any]] = None, all_documents: List[Dict[str, Any]] = None, calendar_events: List[Dict[str, Any]] = None, parallel_client: Optional[Any] = None, request_id: str = None) -> Dict[str, Any]:
     """
     Build comprehensive user profile from available data
     
     Args:
-        user: User object with basic info
+        user: User object with basic info (should include 'emails' list for multi-account support)
         all_emails: All emails (user's and others')
         all_documents: All documents
-        calendar_events: User's calendar events
+        calendar_events: User's calendar events (should be filtered by user email already)
+        parallel_client: Parallel AI client for web search (optional)
         request_id: Request ID for logging
     Returns:
         Comprehensive user profile
@@ -620,29 +621,70 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
         'relationships': []
     }
     
-    user_email_lower = user.get('email', '').lower()
+    # Get all user emails (for multi-account support)
+    user_emails = user.get('emails', [])
+    if not user_emails:
+        # Fallback to primary email if emails list not provided
+        primary_email = user.get('email') or user.get('primaryAccountEmail')
+        user_emails = [primary_email] if primary_email else []
+    user_emails_lower = [e.lower() for e in user_emails if e]
     
-    # Extract user's sent emails (FROM user)
-    user_sent_emails = [
-        e for e in all_emails
-        if isinstance(e, dict) and user_email_lower in (e.get('from', '') or '').lower()
-    ]
+    # Helper function to extract email from header (handles "Name <email>" format)
+    def extract_email_from_header(header: str) -> str:
+        """Extract email address from header like 'Name <email@domain.com>' or 'email@domain.com'"""
+        if not header:
+            return ''
+        # Try to find email in angle brackets
+        import re
+        match = re.search(r'<([^>]+)>', header)
+        if match:
+            return match.group(1).lower()
+        # If no brackets, check if it's already an email
+        if '@' in header:
+            return header.strip().lower()
+        return ''
     
-    # Extract user's received emails (TO user or user in recipients)
-    user_received_emails = [
-        e for e in all_emails
-        if isinstance(e, dict) and (
-            user_email_lower in (e.get('to', '') or '').lower() or
-            user_email_lower in (e.get('cc', '') or '').lower() or
-            user_email_lower in (e.get('bcc', '') or '').lower()
-        )
-    ]
+    # Extract user's sent emails (FROM user) - check against all user emails
+    user_sent_emails = []
+    for e in all_emails:
+        if not isinstance(e, dict):
+            continue
+        from_header = e.get('from', '') or ''
+        from_email = extract_email_from_header(from_header)
+        # Check if extracted email matches any of the user's emails
+        if from_email and from_email in user_emails_lower:
+            user_sent_emails.append(e)
     
-    # Extract user's documents
-    user_documents = [
-        d for d in all_documents
-        if isinstance(d, dict) and user_email_lower in (d.get('ownerEmail') or d.get('owner') or '').lower()
-    ]
+    # Extract user's received emails (TO user or user in recipients) - check against all user emails
+    user_received_emails = []
+    for e in all_emails:
+        if not isinstance(e, dict):
+            continue
+        # Check to, cc, bcc fields
+        to_header = e.get('to', '') or ''
+        cc_header = e.get('cc', '') or ''
+        bcc_header = e.get('bcc', '') or ''
+        
+        # Extract emails from headers
+        to_emails = [extract_email_from_header(h) for h in to_header.split(',')]
+        cc_emails = [extract_email_from_header(h) for h in cc_header.split(',')]
+        bcc_emails = [extract_email_from_header(h) for h in bcc_header.split(',')]
+        
+        # Check if any user email appears in recipients
+        if any(email in user_emails_lower for email in to_emails + cc_emails + bcc_emails if email):
+            user_received_emails.append(e)
+    
+    # Extract user's documents - check against all user emails
+    user_documents = []
+    for d in all_documents:
+        if not isinstance(d, dict):
+            continue
+        owner_email = d.get('ownerEmail') or d.get('owner') or ''
+        # Extract email from owner field if it's in "Name <email>" format
+        owner_email_clean = extract_email_from_header(owner_email) or owner_email.lower()
+        # Check if owner email matches any user email
+        if any(user_email in owner_email_clean or owner_email_clean in user_email for user_email in user_emails_lower):
+            user_documents.append(d)
     
     # Analyze communication style if enough data
     if len(user_sent_emails) >= 5:
@@ -655,8 +697,43 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
         profile['expertise'] = await infer_expertise(user_sent_emails, user_documents, request_id)
     
     # Analyze working patterns from calendar
-    if calendar_events and len(calendar_events) >= 10:
-        profile['workingPatterns'] = analyze_working_patterns(calendar_events, user.get('email', ''))
+    # Filter calendar events to only include those where user is an attendee or organizer
+    if calendar_events:
+        # Get all user emails for filtering
+        user_emails_for_filter = user_emails_lower if user_emails_lower else [user.get('email', '').lower()]
+        
+        # Filter calendar events where user is attendee or organizer
+        user_calendar_events = []
+        for event in calendar_events:
+            if not isinstance(event, dict):
+                continue
+            
+            # Check if user is organizer
+            organizer = event.get('organizer', '')
+            organizer_email = ''
+            if isinstance(organizer, str):
+                organizer_email = organizer.lower()
+            elif isinstance(organizer, dict):
+                organizer_email = (organizer.get('email') or '').lower()
+            
+            # Check if user is attendee
+            attendees = event.get('attendees', [])
+            is_attendee = False
+            if isinstance(attendees, list):
+                for att in attendees:
+                    if not isinstance(att, dict):
+                        continue
+                    att_email = (att.get('email') or att.get('emailAddress') or '').lower()
+                    if att_email in user_emails_for_filter:
+                        is_attendee = True
+                        break
+            
+            # Include event if user is organizer or attendee
+            if organizer_email in user_emails_for_filter or is_attendee:
+                user_calendar_events.append(event)
+        
+        if len(user_calendar_events) >= 10:
+            profile['workingPatterns'] = analyze_working_patterns(user_calendar_events, user.get('email', ''))
     
     # Extract biographical information
     logger.info(f"  📋 Extracting biographical info (sent: {len(user_sent_emails)}, received: {len(user_received_emails)})...", requestId=request_id)
@@ -673,6 +750,83 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
     # Extract location/travel from calendar
     location_and_travel = extract_location_and_travel_patterns(calendar_events)
     
+    # Web search for user's professional information (LinkedIn, etc.)
+    web_biographical_info = {}
+    if parallel_client:
+        user_name = user.get('name') or user.get('formattedName') or ''
+        user_email = user.get('email') or user_emails[0] if user_emails else ''
+        domain = user_email.split('@')[1] if '@' in user_email else None
+        company = company_from_domain.get('company') if company_from_domain else None
+        
+        if user_name and user_email:
+            logger.info(f"  🌐 Performing web search for user profile...", requestId=request_id)
+            try:
+                queries = [
+                    f'"{user_name}" site:linkedin.com {domain}' if domain else f'"{user_name}" site:linkedin.com',
+                    *([f'"{user_name}" {company} site:linkedin.com'] if company else []),
+                    f'"{user_name}" "{user_email}"'
+                ]
+                
+                search_result = await parallel_client.beta.search(
+                    objective=f'Find LinkedIn profile and professional information for {user_name}{" who works at " + company if company else ""} ({user_email})',
+                    search_queries=queries,
+                    mode='one-shot',
+                    max_results=8,
+                    max_chars_per_result=2500
+                )
+                
+                if search_result.get('results'):
+                    # Filter and validate results
+                    name_words = [w for w in user_name.split(' ') if len(w) > 2]
+                    validated_results = []
+                    for r in search_result['results']:
+                        text_to_search = f'{r.get("title", "")} {r.get("excerpt", "")} {r.get("url", "")}'.lower()
+                        # Check if name appears in result
+                        name_match = any(word.lower() in text_to_search for word in name_words) if name_words else False
+                        email_match = user_email.lower() in text_to_search
+                        company_match = company and company.lower() in text_to_search if company else False
+                        
+                        if name_match or email_match or company_match:
+                            validated_results.append(r)
+                    
+                    if validated_results:
+                        logger.info(f"  ✓ Found {len(validated_results)} relevant web results for user profile", requestId=request_id)
+                        
+                        # Synthesize web search results
+                        web_synthesis = await synthesize_results(
+                            f'Extract professional biographical information about {user_name} ({user_email}) from these web search results.\n\n'
+                            f'Return JSON:\n'
+                            f'{{\n'
+                            f'  "jobTitle": "Current job title" | null,\n'
+                            f'  "company": "Current company" | null,\n'
+                            f'  "location": {{\n'
+                            f'    "city": "City" | null,\n'
+                            f'    "state": "State/Province" | null,\n'
+                            f'    "country": "Country" | null\n'
+                            f'  }},\n'
+                            f'  "bio": "Brief professional bio or summary" | null,\n'
+                            f'  "expertise": ["area 1", "area 2"] | [],\n'
+                            f'  "education": "Education background" | null,\n'
+                            f'  "confidence": "high" | "medium" | "low"\n'
+                            f'}}\n\n'
+                            f'Focus on current role, company, location, and professional background.',
+                            validated_results[:5],
+                            800
+                        )
+                        
+                        if web_synthesis:
+                            try:
+                                web_parsed = safe_parse_json(web_synthesis)
+                                if isinstance(web_parsed, dict):
+                                    web_biographical_info = web_parsed
+                                    logger.info(f"  ✓ Extracted biographical info from web search", requestId=request_id)
+                            except Exception as e:
+                                logger.warn(f"  ⚠️  Failed to parse web search results: {str(e)}", requestId=request_id)
+                    else:
+                        logger.info(f"  ⚠️  No validated web results found for user profile", requestId=request_id)
+            except Exception as web_error:
+                logger.error(f"  ⚠️  Web search failed for user profile: {str(web_error)}", requestId=request_id)
+    
     # Merge location data (combine email and calendar sources)
     merged_location = None
     if biographical_from_emails.get('location') or location_and_travel.get('location'):
@@ -687,15 +841,22 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
         if not merged_location:
             merged_location = None
     
-    # Merge biographical information (prioritize email signatures, then content, then domain)
+    # Merge biographical information (prioritize web search, then email signatures, then content, then domain)
+    # Web search provides most accurate/current info, so prioritize it
+    web_location = web_biographical_info.get('location') if web_biographical_info else None
+    
     profile['biographicalInfo'] = {
-        'jobTitle': biographical_from_emails.get('jobTitle') or role_from_content.get('jobTitle'),
-        'company': biographical_from_emails.get('company') or role_from_content.get('company') or company_from_domain.get('company'),
-        'location': merged_location,
+        'jobTitle': web_biographical_info.get('jobTitle') or biographical_from_emails.get('jobTitle') or role_from_content.get('jobTitle'),
+        'company': web_biographical_info.get('company') or biographical_from_emails.get('company') or role_from_content.get('company') or company_from_domain.get('company'),
+        'location': web_location or merged_location,
         'phone': biographical_from_emails.get('phone'),
+        'bio': web_biographical_info.get('bio'),
+        'expertise': web_biographical_info.get('expertise', []),
+        'education': web_biographical_info.get('education'),
         'travelPatterns': location_and_travel.get('travelPatterns'),
-        'confidence': biographical_from_emails.get('confidence') or role_from_content.get('confidence', 'low'),
+        'confidence': web_biographical_info.get('confidence') or biographical_from_emails.get('confidence') or role_from_content.get('confidence', 'low'),
         'sources': {
+            'webSearch': 'web_search' if web_biographical_info else None,
             'emailDomain': 'email_domain' if company_from_domain.get('company') else None,
             'emailSignatures': 'email_signatures' if (biographical_from_emails.get('jobTitle') or biographical_from_emails.get('company')) else None,
             'emailContent': 'email_content' if (role_from_content.get('jobTitle') or role_from_content.get('company')) else None,
