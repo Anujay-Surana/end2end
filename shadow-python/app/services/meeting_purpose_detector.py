@@ -184,9 +184,9 @@ async def _find_context_email(
     """
     Stage 2: Find context email using attendee overlap
     
-    Uses 75%/50% overlap rule:
-    - <5 attendees: require ~75% overlap
-    - >=5 attendees: require at least 50% overlap
+    Uses strict overlap criteria:
+    - <=4 attendees: require 100% overlap (ALL attendees must match)
+    - >=5 attendees: require 75% overlap (at least 75% must match)
     """
     if not emails or not attendees:
         return {'purpose': None, 'agenda': [], 'confidence': 'low', 'contextEmail': None}
@@ -204,10 +204,10 @@ async def _find_context_email(
     
     # Calculate overlap threshold
     attendee_count = len(attendee_emails)
-    if attendee_count < 5:
-        overlap_threshold = 0.75  # 75% overlap
+    if attendee_count <= 4:
+        overlap_threshold = 1.0  # 100% - all attendees must match
     else:
-        overlap_threshold = 0.50  # 50% overlap
+        overlap_threshold = 0.75  # 75% - at least 75% must match
     
     # Find emails with matching attendees
     matching_emails = []
@@ -273,7 +273,9 @@ async def _find_context_email(
         if len(first_line) < 200:
             purpose = first_line
     
-    confidence = 'high' if matching_emails[0]['overlap'] >= 0.75 else 'medium'
+    # Confidence based on overlap ratio
+    best_overlap = matching_emails[0]['overlap']
+    confidence = 'high' if best_overlap >= 0.75 else 'medium'
     
     return {
         'purpose': purpose,

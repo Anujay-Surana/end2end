@@ -1356,8 +1356,8 @@ async def detect_meeting_purpose_endpoint(
     request: Request = None
 ):
     """
-    Detect meeting purpose from calendar event and attendees
-    Runs BEFORE email fetching - uses only calendar info and LLM inference
+    Detect meeting purpose from calendar event, attendees, and emails
+    Fetches emails first to use attendee overlap matching (Stage 2) for better accuracy
     """
     request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
     
@@ -1368,11 +1368,28 @@ async def detect_meeting_purpose_endpoint(
         # Get user context
         user_context = await get_user_context(user, request_id) if user else None
         
-        # Call detect_meeting_purpose with empty emails list (runs Stage 1 and Stage 3 only)
+        # Fetch emails first to enable Stage 2 (attendee overlap matching)
+        emails = []
+        if user and user.get('id'):
+            accounts = await get_accounts_by_user_id(user['id'])
+            if accounts:
+                # Validate tokens
+                token_validation_result = await ensure_all_tokens_valid(accounts)
+                if token_validation_result.get('validAccounts'):
+                    valid_accounts = token_validation_result['validAccounts']
+                    # Fetch emails using attendee overlap criteria
+                    context_result = await fetch_all_account_context(valid_accounts, attendees, meeting)
+                    emails = context_result.get('emails', [])
+                    logger.info(
+                        f'Fetched {len(emails)} emails for purpose detection',
+                        requestId=request_id
+                    )
+        
+        # Call detect_meeting_purpose with fetched emails (runs all 3 stages)
         purpose_result = await detect_meeting_purpose(
             meeting,
             attendees,
-            [],  # Empty emails list - purpose detection without email context
+            emails,  # Use fetched emails for Stage 2 (attendee overlap matching)
             user_context,
             request_id
         )

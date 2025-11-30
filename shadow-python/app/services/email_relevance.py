@@ -79,13 +79,12 @@ def filter_emails_by_attendee_overlap(
     attendees: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
-    Filter emails by attendee overlap using 75%/50% rule
+    Filter emails by attendee overlap using strict criteria
     
     Rules:
-    - <5 attendees: require ~75% overlap (for 3 people, all 3)
-    - >=5 attendees: require at least 50% overlap
-    - Also consider 1/3 of attendees in common
-    - Bidirectional matching (subset and superset)
+    - <=4 attendees: require 100% overlap (ALL attendees must match)
+    - >=5 attendees: require 75% overlap (at least 75% must match)
+    - This ensures the meeting is a subset of or same as the email participants
     
     Args:
         emails: List of email objects
@@ -111,13 +110,10 @@ def filter_emails_by_attendee_overlap(
     attendee_count = len(attendee_emails)
     
     # Calculate overlap threshold
-    if attendee_count < 5:
-        overlap_threshold = 0.75  # 75% overlap
+    if attendee_count <= 4:
+        overlap_threshold = 1.0  # 100% - all attendees must match
     else:
-        overlap_threshold = 0.50  # 50% overlap
-    
-    # Also accept if at least 1/3 of attendees match
-    min_attendee_match = max(1, int(attendee_count / 3))
+        overlap_threshold = 0.75  # 75% - at least 75% must match
     
     filtered_emails = []
     for email in emails:
@@ -134,12 +130,11 @@ def filter_emails_by_attendee_overlap(
         matching = [e for e in attendee_emails if e in email_participants]
         overlap_count = len(matching)
         
-        # Check if meets threshold
+        # Check if meets threshold (strict criteria only)
         overlap_ratio = overlap_count / attendee_count if attendee_count > 0 else 0
         meets_threshold = overlap_ratio >= overlap_threshold
-        meets_min_match = overlap_count >= min_attendee_match
         
-        if meets_threshold or meets_min_match:
+        if meets_threshold:
             email['_attendeeOverlap'] = {
                 'matching': overlap_count,
                 'total': attendee_count,
