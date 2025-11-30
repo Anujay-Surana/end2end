@@ -190,7 +190,6 @@ class BriefAnalyzer:
                                     result = await self.parallel_client.beta.search(
                                         objective=q,
                                         search_queries=[q],
-                                        mode='one-shot',
                                         max_results=8,
                                         max_chars_per_result=3000
                                     )
@@ -742,7 +741,6 @@ Focus on recent (last 6 months) verifiable information."""
                         result = await self.parallel_client.beta.search(
                             objective=q,
                             search_queries=[q],
-                            mode='one-shot',
                             max_results=4,
                             max_chars_per_result=2000
                         )

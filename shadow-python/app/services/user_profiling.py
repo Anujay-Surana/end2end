@@ -770,7 +770,6 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
                 search_result = await parallel_client.beta.search(
                     objective=f'Find LinkedIn profile and professional information for {user_name}{" who works at " + company if company else ""} ({user_email})',
                     search_queries=queries,
-                    mode='one-shot',
                     max_results=8,
                     max_chars_per_result=2500
                 )
