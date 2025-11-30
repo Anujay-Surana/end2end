@@ -10,30 +10,31 @@ import sys
 from typing import Dict, List, Any, Optional
 from app.services.logger import logger
 
-# Fix Python 3.12 compatibility for apns2 (collections classes moved to collections.abc)
+# compat-fork-apns2 should handle Python 3.12 compatibility, but keep this as fallback
 if sys.version_info >= (3, 9):
     import collections.abc
     import collections
-    # Add all missing collections classes for compatibility
+    # Add all missing collections classes for compatibility (if needed)
     for name in ['Iterable', 'Mapping', 'MutableSet', 'MutableMapping', 'Callable', 'Sequence']:
         if not hasattr(collections, name):
             setattr(collections, name, getattr(collections.abc, name))
 
-# Try to import APNs2 - handle gracefully if not available
+# Try to import compat-fork-apns2 (compatible with PyJWT 2.9+)
+# This is a drop-in replacement for apns2 with better dependency compatibility
 try:
     from apns2.client import APNsClient
     from apns2.payload import Payload
     from apns2.credentials import TokenCredentials
     APNS_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f'APNs2 library not available: {str(e)}. Push notifications will be disabled.')
+    logger.warning(f'APNs library (compat-fork-apns2) not available: {str(e)}. Push notifications will be disabled.')
     APNsClient = None
     Payload = None
     TokenCredentials = None
     APNS_AVAILABLE = False
 except Exception as e:
     # Handle any other compatibility issues
-    logger.warning(f'APNs2 library has compatibility issues: {str(e)}. Push notifications will be disabled.')
+    logger.warning(f'APNs library has compatibility issues: {str(e)}. Push notifications will be disabled.')
     APNsClient = None
     Payload = None
     TokenCredentials = None
