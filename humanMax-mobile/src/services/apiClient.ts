@@ -48,7 +48,9 @@ class ApiClient {
     
     this.client = axios.create({
       baseURL: API_BASE_URL,
-      withCredentials: true, // Important for session cookies
+      // Only use credentials for web (cookies work there)
+      // For mobile, we use Authorization header instead (set in interceptor)
+      withCredentials: !Capacitor.isNativePlatform(),
       timeout: 30000, // 30 second timeout for mobile networks which can be slower
       headers: {
         'Content-Type': 'application/json',
@@ -61,16 +63,26 @@ class ApiClient {
         // For Capacitor apps, cookies may not work reliably
         // Use Authorization header with session token instead
         if (Capacitor.isNativePlatform()) {
+          // Add platform header for backend to identify mobile requests
+          config.headers = config.headers || {};
+          config.headers['X-Capacitor-Platform'] = Capacitor.getPlatform();
+          
           try {
             const { Preferences } = await import('@capacitor/preferences');
             const { value: sessionToken } = await Preferences.get({ key: 'session_token' });
             if (sessionToken) {
-              config.headers = config.headers || {};
               config.headers['Authorization'] = `Bearer ${sessionToken}`;
             }
           } catch (error) {
             console.warn('Failed to get session token for request:', error);
           }
+          
+          // Log request details for debugging
+          console.log(`[API Client] Making ${config.method?.toUpperCase()} request to ${config.url}`, {
+            hasAuth: !!config.headers['Authorization'],
+            platform: Capacitor.getPlatform(),
+            baseURL: config.baseURL,
+          });
         }
         // Session cookies are handled automatically with withCredentials for web
         return config;
@@ -84,21 +96,40 @@ class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       async (error: AxiosError<ApiError>) => {
-        const config = error.config as AxiosRequestConfig & { _retry?: boolean };
+        const config = error.config as AxiosRequestConfig & { _retry?: boolean; _retryCount?: number };
+        
+        // Initialize retry count
+        const retryCount = config._retryCount || 0;
+        const maxRetries = 3;
 
-        // Don't retry if already retried or if it's a client error (4xx)
+        // Don't retry if:
+        // - Already retried max times
+        // - It's a client error (4xx) that's not 401/408/429
+        // - No config available
         if (
-          config._retry ||
           !config ||
-          (error.response && error.response.status && error.response.status < 500)
+          retryCount >= maxRetries ||
+          (error.response && error.response.status && error.response.status < 500 && 
+           ![401, 408, 429].includes(error.response.status))
         ) {
           return Promise.reject(error);
         }
 
-        // Retry logic for server errors
-        if (!config._retry && error.response?.status && error.response.status >= 500) {
-          config._retry = true;
-          await this.delay(this.retryDelay);
+        // Retry on:
+        // - Network errors (ERR_NETWORK) - common on mobile when network isn't ready
+        // - Server errors (5xx)
+        // - Specific client errors (408 timeout, 429 rate limit)
+        const shouldRetry = 
+          (!error.response && (error.code === 'ERR_NETWORK' || error.message.includes('Network Error'))) ||
+          (error.response?.status && error.response.status >= 500) ||
+          (error.response?.status && [408, 429].includes(error.response.status));
+
+        if (shouldRetry && retryCount < maxRetries) {
+          config._retryCount = retryCount + 1;
+          // Exponential backoff: 1s, 2s, 4s
+          const delayMs = this.retryDelay * Math.pow(2, retryCount);
+          console.log(`[API Client] Retrying request (attempt ${retryCount + 1}/${maxRetries}) after ${delayMs}ms...`);
+          await this.delay(delayMs);
           return this.client(config);
         }
 
@@ -135,7 +166,12 @@ class ApiClient {
       // Check if it's a network error
       if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
         const apiUrl = API_BASE_URL;
-        throw new Error(`Cannot connect to server at ${apiUrl}. Please check your connection and ensure the server is running.`);
+        // Provide more helpful error message for network issues
+        const isRailway = apiUrl.includes('railway.app');
+        const errorMsg = isRailway
+          ? `Cannot connect to Railway server. Please check:\n1. Your internet connection (try WiFi instead of cellular)\n2. Open ${apiUrl} in Safari to test connectivity\n3. Check if Railway is accessible from your network`
+          : `Cannot connect to server at ${apiUrl}. Please check your connection and ensure the server is running.`;
+        throw new Error(errorMsg);
       }
       throw new Error('Network error. Please check your connection.');
     } else {

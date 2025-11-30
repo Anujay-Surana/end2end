@@ -62,7 +62,7 @@ async def generate_briefs_for_user(user_id: str) -> Dict[str, Any]:
             return {'success': False, 'error': 'No accounts connected'}
         
         # Validate tokens
-        from app.services.google_api import ensure_all_tokens_valid
+        from app.services.token_refresh import ensure_all_tokens_valid
         token_result = await ensure_all_tokens_valid(accounts)
         if not token_result.get('validAccounts'):
             logger.error(f'No valid accounts for user {user_id}')

@@ -14,7 +14,8 @@ from app.db.queries.accounts import get_accounts_by_user_id
 from app.db.queries.devices import get_user_devices
 from app.db.queries.chat_messages import create_chat_message
 from app.db.queries.meeting_briefs import get_user_briefs
-from app.services.google_api import fetch_calendar_events, ensure_all_tokens_valid
+from app.services.google_api import fetch_calendar_events
+from app.services.token_refresh import ensure_all_tokens_valid
 from app.services.apns_service import get_apns_service
 from app.db.connection import supabase
 
