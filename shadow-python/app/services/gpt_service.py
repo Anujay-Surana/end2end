@@ -9,6 +9,7 @@ import json
 import asyncio
 import httpx
 from typing import List, Dict, Any, Optional
+from datetime import datetime, date
 from app.services.logger import logger
 
 # Timeout in milliseconds
@@ -277,17 +278,50 @@ async def call_gpt(
         raise
 
 
+def _json_serialize_datetime(obj: Any) -> Any:
+    """
+    Custom JSON serializer for datetime objects and other non-serializable types
+    """
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, set):
+        return list(obj)
+    elif hasattr(obj, '__dict__'):
+        return obj.__dict__
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
 async def synthesize_results(prompt: str, data: Dict[str, Any], max_tokens: int = 2000) -> Optional[str]:
     """
     Synthesize results with strict fact-checking
     Args:
         prompt: The synthesis prompt
-        data: Data to synthesize
+        data: Data to synthesize (may contain datetime objects)
         max_tokens: Maximum tokens (default: 2000)
     Returns:
         Synthesized result or None on error
     """
     try:
+        # Convert data to JSON-safe format (handle datetime objects)
+        try:
+            data_json = json.dumps(data, default=_json_serialize_datetime, ensure_ascii=False)[:12000]
+        except (TypeError, ValueError) as json_error:
+            logger.error(f'❌ Error serializing data for synthesis: {str(json_error)}')
+            # Fallback: try to clean data recursively
+            def clean_for_json(obj):
+                if isinstance(obj, (datetime, date)):
+                    return obj.isoformat()
+                elif isinstance(obj, dict):
+                    return {k: clean_for_json(v) for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [clean_for_json(item) for item in obj]
+                elif isinstance(obj, set):
+                    return list(obj)
+                else:
+                    return obj
+            cleaned_data = clean_for_json(data)
+            data_json = json.dumps(cleaned_data, ensure_ascii=False)[:12000]
+        
         result = await call_gpt([{
             'role': 'system',
             'content': """You are an executive briefing expert. Your task is to extract and synthesize information from data based on the specific prompt provided.
@@ -315,7 +349,7 @@ VALIDATION CHECKS:
 - Have I followed the prompt's specific instructions?"""
         }, {
             'role': 'user',
-            'content': f"{prompt}\n\nData:\n{json.dumps(data)[:12000]}"
+            'content': f"{prompt}\n\nData:\n{data_json}"
         }], max_tokens)
 
         if not result or result.strip() == '':
@@ -367,11 +401,23 @@ def safe_parse_json(text: str) -> Optional[Any]:
         return parsed
     except json.JSONDecodeError as error:
         logger.error(f"❌ Error parsing JSON: {str(error)}")
-        logger.error(f"   Text being parsed: {cleaned[:300]}")
+        logger.error(f"   Text being parsed: {cleaned[:500]}")
         
-        # Try to extract JSON array from narrative text
-        # Look for array-like patterns: [...]
+        # Try to fix common JSON issues
+        # 1. Remove trailing commas before closing braces/brackets
         import re
+        cleaned_fixed = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+        
+        # Try parsing again with fixed JSON
+        try:
+            parsed = json.loads(cleaned_fixed.strip())
+            logger.info(f"✅ JSON parsed successfully after fixing trailing commas: {'Array with ' + str(len(parsed)) + ' items' if isinstance(parsed, list) else type(parsed).__name__}")
+            return parsed
+        except json.JSONDecodeError:
+            pass
+        
+        # 2. Try to extract JSON array from narrative text
+        # Look for array-like patterns: [...]
         array_match = re.search(r'\[[\s\S]*?\]', cleaned)
         if array_match:
             try:
@@ -381,8 +427,12 @@ def safe_parse_json(text: str) -> Optional[Any]:
             except json.JSONDecodeError as e:
                 logger.error(f"   Failed to parse extracted array: {str(e)}")
         
-        # Try to find JSON object if array not found
-        object_match = re.search(r'\{[\s\S]*\}', cleaned)
+        # 3. Try to find JSON object if array not found
+        # Use non-greedy match first, then greedy if that fails
+        object_match = re.search(r'\{[\s\S]*?\}', cleaned)
+        if not object_match:
+            object_match = re.search(r'\{[\s\S]*\}', cleaned)
+        
         if object_match:
             try:
                 extracted = json.loads(object_match.group(0))
@@ -393,9 +443,33 @@ def safe_parse_json(text: str) -> Optional[Any]:
                         return extracted['facts']
                     if 'items' in extracted and isinstance(extracted['items'], list):
                         return extracted['items']
+                    # Try to find any array property
+                    for key, value in extracted.items():
+                        if isinstance(value, list):
+                            return value
                 return extracted
             except json.JSONDecodeError as e:
                 logger.error(f"   Failed to parse extracted object: {str(e)}")
+                logger.error(f"   Extracted text: {object_match.group(0)[:500]}")
+        
+        # 4. If all else fails, try to extract partial JSON (up to error position)
+        if hasattr(error, 'pos') and error.pos:
+            try:
+                partial_json = cleaned[:error.pos]
+                # Try to find the last complete JSON structure
+                last_brace = partial_json.rfind('}')
+                last_bracket = partial_json.rfind(']')
+                if last_brace > last_bracket:
+                    partial_json = partial_json[:last_brace + 1]
+                elif last_bracket > last_brace:
+                    partial_json = partial_json[:last_bracket + 1]
+                
+                if partial_json:
+                    extracted = json.loads(partial_json)
+                    logger.warn(f"⚠️  Extracted partial JSON (truncated at error position): {type(extracted).__name__}")
+                    return extracted
+            except:
+                pass
         
         return None
 

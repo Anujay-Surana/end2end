@@ -568,7 +568,7 @@ async def prep_meeting(
                     {
                         'name': f.get('name', ''),
                         'contentPreview': (f.get('content') or '')[:2000],
-                        'modifiedTime': f.get('modifiedTime')
+                        'modifiedTime': str(f.get('modifiedTime')) if f.get('modifiedTime') else None  # Convert datetime to string
                     }
                     for f in files_with_content[:3]
                 ]
@@ -600,12 +600,12 @@ async def prep_meeting(
                 relationship_prompt += f'{user_line_str}\n'
                 attendee_list = ", ".join([f"{a.get('name')} ({a.get('email')})" for a in brief["attendees"]])
                 relationship_prompt += f'Other Attendees: {attendee_list}{user_context_str}\n\n'
-                relationship_prompt += f'INTERACTION FREQUENCY METRICS:\n{json.dumps(interaction_frequency, indent=2)}\n\n'
+                relationship_prompt += f'INTERACTION FREQUENCY METRICS:\n{json.dumps(interaction_frequency, indent=2, default=str)}\n\n'
                 relationship_prompt += f'EMAIL ANALYSIS SUMMARY:\n{email_analysis}\n\n'
                 relationship_prompt += f'DOCUMENT ANALYSIS SUMMARY:\n{document_analysis}\n\n'
                 relationship_prompt += f'RAW DATA SAMPLES (use these for specific examples and quotes):\n\n'
-                relationship_prompt += f'Sample Emails ({len(sample_emails)}):\n{json.dumps(sample_emails, indent=2)}\n\n'
-                relationship_prompt += f'Sample Documents ({len(sample_docs)}):\n{json.dumps(sample_docs, indent=2)}\n\n'
+                relationship_prompt += f'Sample Emails ({len(sample_emails)}):\n{json.dumps(sample_emails, indent=2, default=str)}\n\n'
+                relationship_prompt += f'Sample Documents ({len(sample_docs)}):\n{json.dumps(sample_docs, indent=2, default=str)}\n\n'
                 relationship_prompt += f'Your task is to deeply analyze the WORKING RELATIONSHIPS{" between " + user_context["formattedName"] + " and the other attendees" if user_context else " between these people"}.\n'
                 relationship_prompt += f'Use the interaction frequency metrics to understand communication patterns.\n'
                 relationship_prompt += f'Use the raw data samples above for specific examples, quotes, and concrete details.\n'
@@ -646,7 +646,7 @@ async def prep_meeting(
                             'from': e.get('from', ''),
                             'to': e.get('to', ''),
                             'subject': e.get('subject', ''),
-                            'date': e.get('date', ''),
+                            'date': str(e.get('date', '')) if e.get('date') else '',  # Ensure string
                             'bodyPreview': (e.get('body') or e.get('snippet') or '')[:500],
                             'attachments': e.get('attachments', [])
                         }
@@ -656,7 +656,7 @@ async def prep_meeting(
                         {
                             'name': f.get('name', ''),
                             'owner': f.get('owner', ''),
-                            'modifiedTime': f.get('modifiedTime'),
+                            'modifiedTime': str(f.get('modifiedTime')) if f.get('modifiedTime') else None,  # Convert datetime to string
                             'contentPreview': (f.get('content') or '')[:1000],
                             'sharedWith': f.get('sharedWith', [])
                         }
@@ -666,7 +666,7 @@ async def prep_meeting(
                         {
                             'summary': e.get('summary', ''),
                             'attendees': e.get('attendees', []),
-                            'start': e.get('start'),
+                            'start': str(e.get('start')) if e.get('start') else None,  # Convert datetime to string
                             'description': e.get('description', '')
                         }
                         for e in calendar_events[:20]
@@ -714,9 +714,9 @@ async def prep_meeting(
                         f'Meeting Description: {meeting.get("description", "No description")}\n\n'
                         + (f'User: {user_context["formattedName"]} ({user_context["formattedEmail"]})\n' if user_context else '')
                         + f'Other Attendees: {", ".join([a.get("name") + " (" + a.get("email") + ")" for a in brief["attendees"]])}\n\n'
-                        f'Email Data:\n{json.dumps(contribution_data["emails"], indent=2)}\n\n'
-                        f'Document Data:\n{json.dumps(contribution_data["documents"], indent=2)}\n\n'
-                        f'Calendar Data:\n{json.dumps(contribution_data["calendarEvents"], indent=2)}\n\n'
+                        f'Email Data:\n{json.dumps(contribution_data["emails"], indent=2, default=str)}\n\n'
+                        f'Document Data:\n{json.dumps(contribution_data["documents"], indent=2, default=str)}\n\n'
+                        f'Calendar Data:\n{json.dumps(contribution_data["calendarEvents"], indent=2, default=str)}\n\n'
                         f'Analyze contributions deeply.'
                     )
                 }], 4000)
@@ -728,19 +728,31 @@ async def prep_meeting(
                         perspective_str = "the user's" if not user_context else user_context["formattedName"] + "'s"
                         refer_to_str = "the user" if not user_context else user_context["formattedName"]
                         
+                        # Ensure parsed dict is JSON-serializable (handle any datetime objects)
+                        try:
+                            parsed_json = json.dumps(parsed, default=str, ensure_ascii=False)
+                        except (TypeError, ValueError) as json_err:
+                            logger.warn(f'Failed to serialize contribution analysis JSON: {str(json_err)}', requestId=request_id)
+                            # Fallback: convert to string representation
+                            parsed_json = str(parsed)
+                        
                         contribution_analysis = await call_gpt([{
                             'role': 'system',
                             'content': f'{user_context_prefix2}Convert this contribution analysis into a comprehensive narrative paragraph (8-12 sentences) that explains who contributes what and how, structured from {perspective_str} perspective. Use "you" to refer to {refer_to_str}.'
                         }, {
                             'role': 'user',
-                            'content': f'Contribution Analysis:\n{json.dumps(parsed, indent=2)}\n\nCreate narrative explaining contributions and roles from {perspective_str} perspective.'
+                            'content': f'Contribution Analysis:\n{parsed_json}\n\nCreate narrative explaining contributions and roles from {perspective_str} perspective.'
                         }], 2000)
 
                         contribution_analysis = contribution_analysis.strip() if contribution_analysis else 'Contribution analysis completed.'
+                    elif parsed and isinstance(parsed, list):
+                        # If it's a list, try to convert to narrative
+                        contribution_analysis = 'Contribution analysis completed. (Received list format)'
                     else:
                         contribution_analysis = 'Contribution analysis completed.'
                 except Exception as e:
                     logger.error(f'Failed to parse contribution analysis: {str(e)}', requestId=request_id)
+                    logger.error(f'Raw response preview: {contribution_analysis_raw[:500] if contribution_analysis_raw else "None"}', requestId=request_id)
                     contribution_analysis = 'Contribution analysis completed.'
 
                 logger.info(f'  ✓ Contribution analysis: {len(contribution_analysis)} chars', requestId=request_id)
