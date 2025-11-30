@@ -5,6 +5,7 @@ Handles day prep requests - fetches all meetings for a day and prepares comprehe
 """
 
 import asyncio
+import json
 import os
 from datetime import datetime, timezone
 from typing import Optional
@@ -317,11 +318,12 @@ async def day_prep(
         if len(all_meetings) == 0:
             date_str = selected_date.strftime('%A, %B %d, %Y')
             return {
-                'date': date,
-                'meetings': [],
+                'success': True,
                 'dayPrep': {
+                    'date': date,
                     'summary': f'No meetings scheduled for {date_str}.',
-                    'narrative': 'You have no meetings scheduled for this day.'
+                    'meetings': [],
+                    'prep': []
                 }
             }
 
@@ -354,7 +356,9 @@ async def day_prep(
                     if cookies:
                         headers['Cookie'] = '; '.join([f"{k}={v}" for k, v in cookies.items()])
 
-                    response = await client.post(
+                    # Prep-meeting now returns streaming NDJSON, so we need to read it chunk by chunk
+                    async with client.stream(
+                        'POST',
                         f'{base_url}/api/prep-meeting',
                         json={
                             'meeting': meeting,
@@ -362,14 +366,32 @@ async def day_prep(
                         },
                         headers=headers,
                         timeout=300.0
-                    )
-
-                    if response.is_success:
-                        brief = response.json()
-                        return {'meeting': meeting, 'brief': brief, 'success': True}
-                    else:
-                        error_text = response.text[:200]
-                        raise Exception(f'Prep meeting failed: {response.status_code} - {error_text}')
+                    ) as response:
+                        if not response.is_success:
+                            error_text = await response.aread()
+                            raise Exception(f'Prep meeting failed: {response.status_code} - {error_text.decode()[:200]}')
+                        
+                        # Read streaming NDJSON response
+                        brief = None
+                        async for line in response.aiter_lines():
+                            if not line.strip():
+                                continue
+                            try:
+                                chunk = json.loads(line)
+                                if chunk.get('type') == 'complete':
+                                    # Remove 'type' field and use rest as brief
+                                    brief = {k: v for k, v in chunk.items() if k != 'type'}
+                                    break
+                                elif chunk.get('type') == 'error':
+                                    error_msg = chunk.get('message') or chunk.get('error', 'Unknown error')
+                                    raise Exception(f'Prep meeting error: {error_msg}')
+                            except json.JSONDecodeError:
+                                continue
+                        
+                        if brief:
+                            return {'meeting': meeting, 'brief': brief, 'success': True}
+                        else:
+                            raise Exception('No complete result received from prep-meeting')
             except Exception as error:
                 logger.error(
                     f'Error preparing meeting for day prep: {str(error)}',
@@ -397,26 +419,39 @@ async def day_prep(
             user
         )
 
+        # Format response to match mobile app expectations
+        # Mobile expects: { success: bool, dayPrep: { date, summary, meetings[], prep?[] } }
         return {
-            'date': date,
-            'meetings': [
-                {
-                    'id': m.get('id'),
-                    'summary': m.get('summary') or m.get('title'),
-                    'start': m.get('start'),
-                    'attendees': m.get('attendees', [])
-                }
-                for m in all_meetings
-            ],
-            'prepResults': [
-                {
-                    'meetingId': r['meeting'].get('id'),
-                    'success': r.get('success'),
-                    'error': r.get('error')
-                }
-                for r in prep_results
-            ],
-            'dayPrep': day_prep_result
+            'success': True,
+            'dayPrep': {
+                'date': date,
+                'summary': day_prep_result.get('summary', ''),
+                'meetings': [
+                    {
+                        'id': m.get('id'),
+                        'summary': m.get('summary') or m.get('title'),
+                        'title': m.get('title'),
+                        'description': m.get('description'),
+                        'start': m.get('start'),
+                        'end': m.get('end'),
+                        'attendees': m.get('attendees', []),
+                        'location': m.get('location'),
+                        'htmlLink': m.get('htmlLink'),
+                        'accountEmail': m.get('accountEmail')
+                    }
+                    for m in all_meetings
+                ],
+                'prep': [
+                    {
+                        'meetingTitle': r['meeting'].get('summary') or r['meeting'].get('title'),
+                        'meetingDate': r['meeting'].get('start', {}).get('dateTime') or r['meeting'].get('start', {}).get('date') if isinstance(r['meeting'].get('start'), dict) else r['meeting'].get('start'),
+                        'summary': r['brief'].get('summary') if r.get('brief') else '',
+                        'sections': []  # Can be populated if needed
+                    }
+                    for r in successful_preps
+                    if r.get('brief')
+                ]
+            }
         }
 
     except HTTPException:
