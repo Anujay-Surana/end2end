@@ -405,16 +405,41 @@ def safe_parse_json(text: str) -> Optional[Any]:
         logger.debug(f"   Text being parsed (first 500 chars): {cleaned[:500]}")
         
         # Try to fix common JSON issues
-        # 1. Remove trailing commas before closing braces/brackets
         import re
-        cleaned_fixed = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+        cleaned_fixed = cleaned
+        
+        # 1. Remove trailing commas before closing braces/brackets
+        cleaned_fixed = re.sub(r',(\s*[}\]])', r'\1', cleaned_fixed)
+        
+        # 2. Fix missing commas - use error position if available
+        if hasattr(error, 'pos') and error.pos and 'Expecting' in str(error) and ',' in str(error):
+            # Try to insert comma at error position or nearby
+            error_pos = error.pos
+            # Look backwards from error position to find where comma should be
+            # Check if we're between a closing quote/brace/bracket and opening quote
+            before_pos = max(0, error_pos - 50)
+            context = cleaned_fixed[before_pos:error_pos + 20]
+            
+            # Pattern: "value" "key" or "value" } or ] "key"
+            # Insert comma before the second quote/brace if missing
+            if re.search(r'"\s+"', context):
+                # Missing comma between string values
+                cleaned_fixed = re.sub(r'"\s+"', '", "', cleaned_fixed, count=1)
+            elif re.search(r'"\s+[}\]\s]*"', context):
+                # Missing comma before closing brace/bracket followed by quote
+                cleaned_fixed = re.sub(r'"\s+([}\]\s]*")', r'", \1', cleaned_fixed, count=1)
+        
+        # 3. Fix missing commas between object properties (newline-separated)
+        # Pattern: "key": "value"\n  "key2": -> "key": "value",\n  "key2":
+        cleaned_fixed = re.sub(r'"\s*\n\s*"([^",:\[\]{}]+)":', '",\n  "\1":', cleaned_fixed)
         
         # Try parsing again with fixed JSON
         try:
             parsed = json.loads(cleaned_fixed.strip())
             logger.info(f"✅ JSON parsed successfully after fixing syntax: {'Array with ' + str(len(parsed)) + ' items' if isinstance(parsed, list) else type(parsed).__name__}")
             return parsed
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as fix_error:
+            logger.debug(f"   Fix attempt failed: {str(fix_error)}")
             pass
         
         # 2. Try to extract JSON array from narrative text
@@ -435,8 +460,34 @@ def safe_parse_json(text: str) -> Optional[Any]:
             object_match = re.search(r'\{[\s\S]*\}', cleaned)
         
         if object_match:
+            extracted_text = object_match.group(0)
+            
+            # Check if JSON is balanced (has matching braces)
+            open_braces = extracted_text.count('{')
+            close_braces = extracted_text.count('}')
+            open_brackets = extracted_text.count('[')
+            close_brackets = extracted_text.count(']')
+            
+            # Try to repair incomplete JSON
+            if open_braces > close_braces:
+                # Missing closing braces - add them
+                missing_braces = open_braces - close_braces
+                # Remove any trailing content that might be after the last brace
+                last_brace_pos = extracted_text.rfind('}')
+                if last_brace_pos >= 0:
+                    # There's at least one closing brace, add missing ones after it
+                    extracted_text = extracted_text[:last_brace_pos + 1] + ('}' * missing_braces)
+                else:
+                    # No closing braces at all, add them at the end
+                    extracted_text = extracted_text.rstrip() + ('}' * missing_braces)
+            
+            if open_brackets > close_brackets:
+                # Missing closing brackets - add them
+                missing_brackets = open_brackets - close_brackets
+                extracted_text = extracted_text.rstrip() + (']' * missing_brackets)
+            
             try:
-                extracted = json.loads(object_match.group(0))
+                extracted = json.loads(extracted_text)
                 logger.info(f"✅ Extracted JSON object from text: {type(extracted).__name__}")
                 # If it's an object with an array property, return that
                 if isinstance(extracted, dict):
@@ -450,26 +501,91 @@ def safe_parse_json(text: str) -> Optional[Any]:
                             return value
                 return extracted
             except json.JSONDecodeError as e:
-                logger.error(f"   Failed to parse extracted object: {str(e)}")
-                logger.error(f"   Extracted text: {object_match.group(0)[:500]}")
+                logger.debug(f"   Failed to parse extracted object (even after repair): {str(e)}")
+                logger.debug(f"   Extracted text (first 500 chars): {extracted_text[:500]}")
+                
+                # Try one more time with the original match but try to find complete structure
+                # Look for the first complete JSON object by finding matching braces
+                brace_count = 0
+                complete_end = -1
+                for i, char in enumerate(extracted_text):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            complete_end = i + 1
+                            break
+                
+                if complete_end > 0:
+                    try:
+                        complete_json = extracted_text[:complete_end]
+                        extracted = json.loads(complete_json)
+                        logger.info(f"✅ Extracted complete JSON object (found matching braces): {type(extracted).__name__}")
+                        if isinstance(extracted, dict):
+                            if 'facts' in extracted and isinstance(extracted['facts'], list):
+                                return extracted['facts']
+                            if 'items' in extracted and isinstance(extracted['items'], list):
+                                return extracted['items']
+                            for key, value in extracted.items():
+                                if isinstance(value, list):
+                                    return value
+                        return extracted
+                    except json.JSONDecodeError:
+                        pass
         
         # 4. If all else fails, try to extract partial JSON (up to error position)
         if hasattr(error, 'pos') and error.pos:
             try:
                 partial_json = cleaned[:error.pos]
-                # Try to find the last complete JSON structure
-                last_brace = partial_json.rfind('}')
-                last_bracket = partial_json.rfind(']')
-                if last_brace > last_bracket:
-                    partial_json = partial_json[:last_brace + 1]
-                elif last_bracket > last_brace:
-                    partial_json = partial_json[:last_bracket + 1]
+                
+                # Count braces and brackets to find the last complete structure
+                brace_count = 0
+                bracket_count = 0
+                last_complete_pos = -1
+                
+                for i, char in enumerate(partial_json):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0 and bracket_count == 0:
+                            last_complete_pos = i
+                    elif char == '[':
+                        bracket_count += 1
+                    elif char == ']':
+                        bracket_count -= 1
+                        if brace_count == 0 and bracket_count == 0:
+                            last_complete_pos = i
+                
+                if last_complete_pos > 0:
+                    partial_json = partial_json[:last_complete_pos + 1]
+                else:
+                    # Fallback: find last closing brace or bracket
+                    last_brace = partial_json.rfind('}')
+                    last_bracket = partial_json.rfind(']')
+                    if last_brace > last_bracket:
+                        partial_json = partial_json[:last_brace + 1]
+                    elif last_bracket > last_brace:
+                        partial_json = partial_json[:last_bracket + 1]
+                    else:
+                        # Try to close incomplete structures
+                        open_braces = partial_json.count('{')
+                        close_braces = partial_json.count('}')
+                        open_brackets = partial_json.count('[')
+                        close_brackets = partial_json.count(']')
+                        
+                        if open_braces > close_braces:
+                            partial_json = partial_json.rstrip() + ('}' * (open_braces - close_braces))
+                        if open_brackets > close_brackets:
+                            partial_json = partial_json.rstrip() + (']' * (open_brackets - close_brackets))
                 
                 if partial_json:
                     extracted = json.loads(partial_json)
                     logger.warn(f"⚠️  Extracted partial JSON (truncated at error position): {type(extracted).__name__}")
                     return extracted
-            except:
+            except Exception as partial_error:
+                logger.debug(f"   Failed to extract partial JSON: {str(partial_error)}")
                 pass
         
         return None

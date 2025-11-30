@@ -165,6 +165,46 @@ async def prep_meeting(
     Supports both multi-account (authenticated) and single-account (token-based) modes
     """
     request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
+    
+    # Track start time for timeout detection (Railway has 60s timeout)
+    start_time = datetime.now()
+    RAILWAY_TIMEOUT_SECONDS = 50  # Return partial results at 50s to avoid timeout
+    request_timeout = timedelta(seconds=RAILWAY_TIMEOUT_SECONDS)
+    
+    def check_timeout() -> bool:
+        """Check if we're approaching Railway timeout"""
+        elapsed = datetime.now() - start_time
+        return elapsed >= request_timeout
+    
+    def get_partial_result(brief: Dict[str, Any], emails: List, files: List, calendar_events: List, 
+                          accounts: List, user: Optional[Dict], completed_steps: str) -> Dict[str, Any]:
+        """Return partial result when approaching timeout"""
+        elapsed_seconds = (datetime.now() - start_time).total_seconds()
+        logger.warn(
+            f'⚠️  Approaching Railway timeout ({elapsed_seconds:.1f}s), returning partial results',
+            requestId=request_id,
+            completedSteps=completed_steps
+        )
+        
+        # Ensure brief has required structure
+        if 'stats' not in brief:
+            brief['stats'] = {}
+        
+        brief['stats'].update({
+            'emailCount': len(emails),
+            'fileCount': len(files),
+            'calendarEventCount': len(calendar_events),
+            'attendeeCount': len(brief.get('attendees', [])),
+            'multiAccount': bool(user and user.get('id')),
+            'accountCount': len(accounts),
+            'multiAccountStats': brief.get('_multiAccountStats'),
+            'partialResult': True,
+            'elapsedSeconds': round(elapsed_seconds, 1),
+            'completedSteps': completed_steps
+        })
+        
+        brief['_timeoutWarning'] = f'Request took {elapsed_seconds:.1f}s. Some analysis may be incomplete.'
+        return brief
 
     try:
         meeting = request_body.meeting
@@ -290,6 +330,10 @@ async def prep_meeting(
             emails = context_result.get('emails', [])
             files = context_result.get('files', [])
             brief['_multiAccountStats'] = context_result.get('accountStats', {})
+            
+            # Check timeout after fetching context
+            if check_timeout():
+                return get_partial_result(brief, emails, files, calendar_events, accounts, user, 'context_fetched')
 
             # Fetch calendar events
             # Extract meeting date from meeting object (as datetime for calendar query)
@@ -473,6 +517,10 @@ async def prep_meeting(
                 ]
 
             logger.info(f'  ✓ Research completed: {len(brief["attendees"])} attendees researched', requestId=request_id)
+            
+            # Check timeout after attendee research
+            if check_timeout():
+                return get_partial_result(brief, emails, files, calendar_events, accounts, user, 'attendees_researched')
 
             # Store attendee extraction data for UI
             brief['_extractionData']['attendeeExtractions'] = []
@@ -601,6 +649,10 @@ async def prep_meeting(
             brief['_extractionData']['fileRelevanceReasoning'] = document_extraction_data.get('fileRelevanceReasoning', {})
             brief['_extractionData']['documentStaleness'] = document_extraction_data.get('documentStaleness', {})
             brief['_extractionData']['relevantContent']['documents'] = document_extraction_data.get('relevantContent', {}).get('documents', [])
+            
+            # Check timeout after document analysis
+            if check_timeout():
+                return get_partial_result(brief, emails, files, calendar_events, accounts, user, 'documents_analyzed')
 
             # ===== STEP 4: COMPANY RESEARCH (placeholder) =====
             company_research = 'Company context available from emails and documents.'
@@ -1131,6 +1183,10 @@ async def prep_meeting(
             )
 
             # ===== ASSEMBLE FINAL BRIEF =====
+            # Check timeout before final synthesis steps
+            if check_timeout():
+                return get_partial_result(brief, emails, files, calendar_events, accounts, user, 'analysis_complete')
+            
             brief['emailAnalysis'] = email_analysis
             brief['documentAnalysis'] = document_analysis
             brief['companyResearch'] = company_research
