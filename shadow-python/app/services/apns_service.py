@@ -2,68 +2,60 @@
 APNs Service
 
 Handles sending push notifications to iOS devices via Apple Push Notification service
+Uses aioapns library (async, compatible with PyJWT 2.9+)
 """
 
 import os
 import json
-import sys
 from typing import Dict, List, Any, Optional
 from app.services.logger import logger
 
-# compat-fork-apns2 should handle Python 3.12 compatibility, but keep this as fallback
-if sys.version_info >= (3, 9):
-    import collections.abc
-    import collections
-    # Add all missing collections classes for compatibility (if needed)
-    for name in ['Iterable', 'Mapping', 'MutableSet', 'MutableMapping', 'Callable', 'Sequence']:
-        if not hasattr(collections, name):
-            setattr(collections, name, getattr(collections.abc, name))
-
-# Try to import compat-fork-apns2 (compatible with PyJWT 2.9+)
-# This is a drop-in replacement for apns2 with better dependency compatibility
+# Try to import aioapns (compatible with PyJWT 2.9+)
 try:
-    from apns2.client import APNsClient
-    from apns2.payload import Payload
-    from apns2.credentials import TokenCredentials
+    from aioapns import APNs, NotificationRequest, PushType
     APNS_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f'APNs library (compat-fork-apns2) not available: {str(e)}. Push notifications will be disabled.')
-    APNsClient = None
-    Payload = None
-    TokenCredentials = None
+    logger.warning(f'APNs library (aioapns) not available: {str(e)}. Push notifications will be disabled.')
+    APNs = None
+    NotificationRequest = None
+    PushType = None
     APNS_AVAILABLE = False
 except Exception as e:
     # Handle any other compatibility issues
     logger.warning(f'APNs library has compatibility issues: {str(e)}. Push notifications will be disabled.')
-    APNsClient = None
-    Payload = None
-    TokenCredentials = None
+    APNs = None
+    NotificationRequest = None
+    PushType = None
     APNS_AVAILABLE = False
 
 
 class APNsService:
     def __init__(self):
-        self.client: Optional[APNsClient] = None
-        self.credentials: Optional[TokenCredentials] = None
+        self.client: Optional[APNs] = None
+        self.auth_key_path: Optional[str] = None
+        self.auth_key_id: Optional[str] = None
+        self.team_id: Optional[str] = None
+        self.bundle_id: Optional[str] = None
+        self.use_sandbox: bool = True
         self._initialize()
     
     def _initialize(self):
         """Initialize APNs client with credentials"""
         if not APNS_AVAILABLE:
-            logger.warn('APNs2 library not available - push notifications disabled')
+            logger.warn('APNs library (aioapns) not available - push notifications disabled')
             return
             
         try:
-            key_id = os.getenv('APNS_KEY_ID')
-            team_id = os.getenv('APNS_TEAM_ID')
-            bundle_id = os.getenv('APNS_BUNDLE_ID', 'com.kordn8.shadow')
-            use_sandbox = os.getenv('APNS_USE_SANDBOX', 'true').lower() == 'true'
+            self.auth_key_id = os.getenv('APNS_KEY_ID')
+            self.team_id = os.getenv('APNS_TEAM_ID')
+            self.bundle_id = os.getenv('APNS_BUNDLE_ID', 'com.kordn8.shadow')
+            self.use_sandbox = os.getenv('APNS_USE_SANDBOX', 'true').lower() == 'true'
             
             # Get key content (either from file or environment variable)
             key_path = os.getenv('APNS_KEY_PATH')
             key_content = os.getenv('APNS_KEY_CONTENT')
             
-            if not key_id or not team_id:
+            if not self.auth_key_id or not self.team_id:
                 logger.warn('APNs credentials not configured (APNS_KEY_ID, APNS_TEAM_ID)')
                 return
             
@@ -72,37 +64,29 @@ class APNsService:
                 return
             
             # Determine key path - use file path or create temp file from content
-            actual_key_path = None
             if key_path and os.path.exists(key_path):
-                actual_key_path = key_path
+                self.auth_key_path = key_path
             elif key_content:
                 # Create temporary file from key content
                 import tempfile
                 temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.p8', delete=False)
                 temp_file.write(key_content)
                 temp_file.close()
-                actual_key_path = temp_file.name
+                self.auth_key_path = temp_file.name
             else:
                 logger.warn('APNs key not found (neither APNS_KEY_PATH nor APNS_KEY_CONTENT provided)')
                 return
             
-            # Create credentials - PyAPNs2 requires file path
-            self.credentials = TokenCredentials(
-                auth_key_path=actual_key_path,
-                auth_key_id=key_id,
-                team_id=team_id
+            # Create aioapns client
+            self.client = APNs(
+                key=self.auth_key_path,
+                key_id=self.auth_key_id,
+                team_id=self.team_id,
+                topic=self.bundle_id,
+                use_sandbox=self.use_sandbox
             )
             
-            # Create client
-            topic = bundle_id
-            use_sandbox = use_sandbox
-            self.client = APNsClient(
-                credentials=self.credentials,
-                use_sandbox=use_sandbox,
-                use_alternative_port=False
-            )
-            
-            logger.info(f'APNs service initialized (sandbox: {use_sandbox}, bundle: {bundle_id})')
+            logger.info(f'APNs service initialized (sandbox: {self.use_sandbox}, bundle: {self.bundle_id})')
             
         except Exception as e:
             logger.error(f'Error initializing APNs service: {str(e)}')
@@ -141,7 +125,7 @@ class APNsService:
         
         try:
             # Build payload
-            payload_data = {
+            message = {
                 'aps': {
                     'alert': {
                         'title': title,
@@ -152,52 +136,32 @@ class APNsService:
             }
             
             if badge is not None:
-                payload_data['aps']['badge'] = badge
-            
-            # Add custom data
-            if data:
-                # Merge custom data at root level (not under 'aps')
-                for key, value in data.items():
-                    if key != 'aps':
-                        payload_data[key] = value
-            
-            # Build payload - PyAPNs2 Payload expects dict format
-            payload_dict = {
-                'aps': payload_data['aps']
-            }
+                message['aps']['badge'] = badge
             
             # Add custom data at root level
             if data:
                 for key, value in data.items():
                     if key != 'aps':
-                        payload_dict[key] = value
+                        message[key] = value
             
-            payload = Payload(**payload_dict)
-            
-            # Send notification (PyAPNs2 is synchronous, run in thread pool)
-            import asyncio
-            topic = os.getenv('APNS_BUNDLE_ID', 'com.kordn8.shadow')
-            
-            # Run synchronous APNs call in executor
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.send_notification(
-                    device_token,
-                    payload,
-                    topic=topic
-                )
+            # Create notification request
+            request = NotificationRequest(
+                device_token=device_token,
+                message=message
             )
             
-            # PyAPNs2 send_notification returns a response object
-            if hasattr(response, 'is_successful') and response.is_successful:
+            # Send notification (aioapns is async)
+            response = await self.client.send_notification(request)
+            
+            # Check response
+            if response.is_successful:
                 logger.info(f'Push notification sent successfully to device {device_token[:20]}...')
                 return {
                     'success': True,
                     'status': 'sent'
                 }
             else:
-                status = getattr(response, 'status', 'unknown')
+                status = response.status
                 error_msg = f'APNs error: {status}'
                 logger.error(f'Failed to send push notification: {error_msg}')
                 return {
@@ -240,6 +204,11 @@ class APNsService:
                 **result
             })
         return results
+    
+    async def close(self):
+        """Close the APNs client"""
+        if self.client:
+            await self.client.close()
 
 
 # Global APNs service instance
@@ -252,4 +221,3 @@ def get_apns_service() -> APNsService:
     if _apns_instance is None:
         _apns_instance = APNsService()
     return _apns_instance
-

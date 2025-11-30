@@ -25,5 +25,5 @@ pytest-cov>=5.0.0
 PyJWT>=2.9.0
 apscheduler>=3.10.0
 pytz>=2024.1
-compat-fork-apns2>=1.0.0  # Fork of apns2 compatible with PyJWT 2.9+ and Python 3.12
+aioapns>=2.0.0  # Async APNs client compatible with PyJWT 2.9+ and Python 3.12
 
