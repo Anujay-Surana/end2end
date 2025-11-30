@@ -466,9 +466,10 @@ async def analyze_documents(
                 ]
                 staleness_warning = f'\n\nWARNING - POTENTIALLY OUTDATED CONTENT: {len(stale_documents)} documents contain temporal references that may be outdated:\n' + '\n'.join(warning_lines) + '\n\nWhen synthesizing, FLAG any information that may be outdated and note the document\'s last modified date.'
 
+            perspective_owner = "the user's" if not user_context else f"{user_context['formattedName']}'s"
             doc_narrative = await call_gpt([{
                 'role': 'system',
-                'content': f'{user_context_prefix}You are creating a comprehensive document analysis for meeting prep. Synthesize these document insights into a detailed paragraph (6-12 sentences) from {"the user\'s" if not user_context else user_context["formattedName"] + "\'s"} perspective.{staleness_warning}\n\n'
+                'content': f'{user_context_prefix}You are creating a comprehensive document analysis for meeting prep. Synthesize these document insights into a detailed paragraph (6-12 sentences) from {perspective_owner} perspective.{staleness_warning}\n\n'
                 f'Document Insights:\n'
                 f'{json.dumps(all_insights, indent=2)}\n\n'
                 f'Guidelines:\n'

@@ -191,7 +191,7 @@ Focus on explicit information in signatures. If uncertain, return null or low co
         try:
             web_synthesis = await call_gpt([{
                 'role': 'system',
-                'content': f'Extract professional information about {user_name} ({user_email}) from web search results. Return JSON:
+                'content': f"""Extract professional information about {user_name} ({user_email}) from web search results. Return JSON:
 {{
   "role": "Current job title" | null,
   "company": "Current company" | null,
@@ -199,7 +199,7 @@ Focus on explicit information in signatures. If uncertain, return null or low co
   "responsibilities": ["responsibility 1"] | [],
   "specialization": "Domain/expertise" | null,
   "confidence": "high" | "medium" | "low"
-}}'
+}}"""
             }, {
                 'role': 'user',
                 'content': f'Web search results:\n{str(web_result)[:2000]}'

@@ -221,9 +221,13 @@ async def _research_single_attendee(
         if user_context:
             user_context_str = f'You are preparing a brief for {user_context["formattedName"]} ({user_context["formattedEmail"]}). '
 
+        important_note = ''
+        if user_context:
+            important_note = f"IMPORTANT: Extract information that {user_context['formattedName']} should know about {name}. Structure facts from {user_context['formattedName']}'s perspective.\n\n"
+
         local_synthesis = await synthesize_results(
             f'{user_context_str}Analyze emails FROM {name} ({attendee_email}) to extract professional context for meeting "{meeting_title}".{meeting_date_context}\n\n'
-            f'{"IMPORTANT: Extract information that " + user_context["formattedName"] + " should know about " + name + ". Structure facts from " + user_context["formattedName"] + "\'s perspective.\n\n" if user_context else ""}'
+            f'{important_note}'
             f'CRITICAL SCOPE: These emails include both emails SENT BY {name} (FROM: {attendee_email}) AND emails SENT TO {name} (TO: {attendee_email}). This provides a complete view of their communication patterns.\n\n'
             f'Extract and prioritize:\n'
             f'1. **Working relationship**: {"How does " + name + " collaborate with " + user_context["formattedName"] + " and others?" if user_context else "How do they collaborate with others?"}\n'
