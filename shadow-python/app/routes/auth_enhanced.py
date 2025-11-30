@@ -8,6 +8,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Cookie, Response, Query
+from fastapi import Request as FastAPIRequest
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
@@ -74,6 +75,7 @@ async def initiate_google_oauth(
 async def google_callback(
     request: OAuthCallbackRequest,
     response: Response,
+    http_request: FastAPIRequest = None,
     session: Optional[str] = Cookie(None, alias='session'),
     authorization: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
@@ -90,13 +92,11 @@ async def google_callback(
         
         # Determine redirect URI based on request origin
         # For web, use postmessage; for mobile, use Railway URL
-        capacitor_platform = None
-        if hasattr(Request, 'headers'):
-            # This is a simplified check - in real implementation, check request headers
-            capacitor_platform = None  # TODO: Extract from request headers
-        
+        # Extract platform from request header (mobile app sends X-Capacitor-Platform)
+        capacitor_platform = http_request.headers.get('X-Capacitor-Platform') if http_request else None
         is_mobile_request = capacitor_platform in ['ios', 'android']
         
+        # Use mobile callback URI for mobile, postmessage for web
         redirect_uri = 'https://end2end-production.up.railway.app/auth/google/mobile-callback' if is_mobile_request else 'postmessage'
         
         # Exchange code for tokens using OAuth manager
