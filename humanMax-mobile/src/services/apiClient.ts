@@ -16,29 +16,40 @@ import type {
 const getApiBaseUrl = () => {
   // Use environment variable if set, otherwise fallback to Railway production URL
   if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
+    const url = import.meta.env.VITE_API_URL;
+    console.log(`[API Client] Using API URL from env: ${url}`);
+    return url;
   }
   
   if (Capacitor.isNativePlatform()) {
     // For production, use Railway HTTPS URL
-    return 'https://end2end-production.up.railway.app';
+    const url = 'https://end2end-production.up.railway.app';
+    console.log(`[API Client] Using Railway production URL: ${url}`);
+    return url;
   }
   
   // For local development
-  return 'http://localhost:8080';
+  const url = 'http://localhost:8080';
+  console.log(`[API Client] Using localhost URL: ${url}`);
+  return url;
 };
 
 const API_BASE_URL = getApiBaseUrl();
+console.log(`[API Client] Final API Base URL: ${API_BASE_URL}`);
 
 class ApiClient {
   private client: AxiosInstance;
   private retryDelay = 1000;
 
   constructor() {
+    console.log(`[API Client] Initializing with baseURL: ${API_BASE_URL}`);
+    console.log(`[API Client] Platform: ${Capacitor.getPlatform()}`);
+    console.log(`[API Client] Is Native: ${Capacitor.isNativePlatform()}`);
+    
     this.client = axios.create({
       baseURL: API_BASE_URL,
       withCredentials: true, // Important for session cookies
-      timeout: 10000, // 10 second timeout to prevent indefinite waiting
+      timeout: 30000, // 30 second timeout for mobile networks which can be slower
       headers: {
         'Content-Type': 'application/json',
       },

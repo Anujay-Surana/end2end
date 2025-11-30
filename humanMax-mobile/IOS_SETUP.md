@@ -146,6 +146,111 @@ You can test push notifications using:
 
 ## Troubleshooting
 
+### Device Connection Issues (Xcode Stuck on "Waiting for device" or "Device Offline")
+
+**If your device shows as "Offline" in Xcode but appears in Finder:**
+
+This is a pairing/trust issue. Follow these steps in order:
+
+1. **Unpair Device in Xcode**
+   - Open Xcode → **Window** → **Devices and Simulators** (Shift + Cmd + 2)
+   - Find your device in the left sidebar
+   - **Right-click** on it → **Unpair Device**
+   - Confirm unpairing
+
+2. **Clean Device Trust Settings**
+   - On iPhone: **Settings** → **General** → **VPN & Device Management**
+   - If you see any developer certificates, remove them
+   - Disconnect USB cable
+   - **Restart your iPhone** (hold power + volume down, slide to power off)
+
+3. **Restart Mac Services** (Optional but recommended)
+   ```bash
+   # Quit Xcode completely first (Cmd + Q)
+   # Then in Terminal:
+   sudo killall -9 usbmuxd
+   # Enter your Mac password when prompted
+   # usbmuxd will restart automatically
+   ```
+
+4. **Reconnect Everything**
+   - Connect iPhone via USB cable
+   - **Unlock your iPhone**
+   - You should see **"Trust This Computer?"** popup
+   - Tap **"Trust"**
+   - Enter iPhone passcode if prompted
+
+5. **Reopen Xcode**
+   - Open Xcode
+   - **Window** → **Devices and Simulators** (Shift + Cmd + 2)
+   - Your iPhone should appear (may take 10-30 seconds)
+   - If it shows **"Preparing device..."** wait for it to finish
+   - Device should now show as connected (not offline)
+
+**If device still shows as offline:**
+
+1. **Use USB Cable (Most Reliable)**
+   - Disconnect wireless debugging
+   - Connect device via USB cable
+   - Unlock your device
+   - Trust the computer if prompted
+
+2. **Restart Everything**
+   ```bash
+   # Close Xcode completely
+   # Then restart:
+   - Your Mac
+   - Your iPhone/iPad
+   ```
+
+3. **Reset Device Connection**
+   - On Mac: **Xcode** → **Window** → **Devices and Simulators**
+   - Right-click your device → **Unpair Device**
+   - Disconnect USB cable
+   - Restart device
+   - Reconnect USB cable
+   - Trust computer again on device
+   - Device should appear in Xcode
+
+4. **Check Developer Mode**
+   - Settings → Privacy & Security → Developer Mode
+   - Toggle OFF, restart device
+   - Toggle ON, restart device again
+   - Confirm when prompted
+
+5. **Clear Xcode Derived Data**
+   ```bash
+   rm -rf ~/Library/Developer/Xcode/DerivedData/*
+   ```
+   Then restart Xcode
+
+6. **Check USB Connection**
+   - Try a different USB cable
+   - Try a different USB port
+   - Make sure cable supports data (not just charging)
+
+7. **For Wireless Debugging**
+   - Device and Mac must be on same Wi-Fi network
+   - Connect via USB first, then enable wireless
+   - In Xcode: **Window** → **Devices and Simulators**
+   - Select device → Check **"Connect via network"**
+   - After first successful connection, you can disconnect USB
+
+8. **Trust Developer Certificate**
+   - On device: Settings → General → VPN & Device Management
+   - Tap your developer certificate
+   - Tap **"Trust"**
+
+9. **Check Xcode Console**
+   - **Window** → **Devices and Simulators**
+   - Select your device
+   - Click **"Open Console"**
+   - Look for error messages
+
+10. **Reset Network Settings (Last Resort)**
+    - On device: Settings → General → Transfer or Reset iPhone → Reset → Reset Network Settings
+    - This will require re-entering Wi-Fi passwords
+
 ### Build Errors
 
 - **"No such module 'Capacitor'"**: Run `npx cap sync` again
