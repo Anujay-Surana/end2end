@@ -231,87 +231,18 @@ async def mobile_google_callback(
                 headers={'Location': deep_link}
             )
         
-        # Check if client wants JSON response (for testing/debugging)
-        accept_header = request.headers.get('accept', '') if request else ''
-        wants_json = 'application/json' in accept_header
+        # Mobile OAuth flow:
+        # 1. Google redirects here with code and state
+        # 2. We redirect to mobile app deep link with code and state
+        # 3. Mobile app validates state client-side, then calls /auth/google/callback to exchange code
+        # So this endpoint just passes through the code and state to the mobile app
         
-        # Exchange code for tokens using OAuth manager
-        redirect_uri = 'https://end2end-production.up.railway.app/auth/google/mobile-callback'
-        tokens = await oauth_manager.exchange_code(
-            provider_name='google',
-            code=code,
-            redirect_uri=redirect_uri,
-            state=state
-        )
-        
-        access_token = tokens['access_token']
-        refresh_token = tokens.get('refresh_token')
-        expires_in = tokens.get('expires_in', 3600)
-        scope = tokens.get('scope', '')
-        
-        # Validate access_token
-        if not access_token:
-            raise HTTPException(status_code=400, detail='No access token received from Google')
-        
-        # Get user profile
-        profile = await fetch_user_profile(access_token)
-        
-        # Create or update user
-        user = await create_user({
-            'email': profile['email'],
-            'name': profile.get('name'),
-            'picture_url': profile.get('picture')
-        })
-        
-        logger.info(f'Mobile user signed in: {user["email"]}')
-        
-        # Calculate token expiration
-        token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
-        
-        # Create or update account (mark as primary if first account)
-        existing_primary = await get_primary_account(user['id'])
-        is_primary = not existing_primary
-        
-        await create_or_update_account({
-            'user_id': user['id'],
-            'provider': 'google',
-            'account_email': profile['email'],
-            'account_name': profile.get('name'),
-            'access_token': access_token,
-            'refresh_token': refresh_token,
-            'token_expires_at': token_expires_at.isoformat(),
-            'scopes': scope.split(' ') if scope else [],
-            'is_primary': is_primary
-        })
-        
-        logger.info(f'Mobile account saved: {profile["email"]} (primary: {is_primary})')
-        
-        # Create session
-        session_obj = await create_session(user['id'], 30)  # 30 days
-        session_token = session_obj['session_token']
-        
-        logger.info(f'Mobile session created for {user["email"]}')
-        
-        # If client wants JSON, return JSON (for testing)
-        if wants_json:
-            return {
-                'success': True,
-                'user': {
-                    'id': user['id'],
-                    'email': user['email'],
-                    'name': user.get('name'),
-                    'picture': user.get('picture_url')
-                },
-                'session': {
-                    'token': session_token,
-                    'expires_at': session_obj['expires_at']
-                },
-                'access_token': access_token,
-                'token_expires_at': token_expires_at.isoformat()
-            }
-        
-        # Redirect to mobile app deep link with session token
-        deep_link = f'com.kordn8.shadow://callback?code={code}&session={session_token}&success=true'
+        # Build deep link with code and state (mobile app will validate state and exchange code)
+        deep_link_params = {'code': code}
+        if state:
+            deep_link_params['state'] = state
+        deep_link_query = '&'.join([f'{k}={v}' for k, v in deep_link_params.items()])
+        deep_link = f'com.kordn8.shadow://callback?{deep_link_query}'
         return Response(
             content=f'<html><head><meta http-equiv="refresh" content="0;url={deep_link}"></head><body>Redirecting to app...</body></html>',
             media_type='text/html',

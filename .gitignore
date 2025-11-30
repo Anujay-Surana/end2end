@@ -25,7 +25,7 @@ Thumbs.db
 
 # Archived old JavaScript version
 oldJSVersion/
-
+RetrievalService/
 # Python
 __pycache__/
 *.py[cod]
