@@ -14,6 +14,8 @@ from app.db.queries.accounts import get_accounts_by_user_id
 from app.services.token_refresh import ensure_all_tokens_valid
 from app.services.google_api import fetch_calendar_events
 from app.services.day_prep_synthesizer import synthesize_day_prep
+from app.services.calendar_event_classifier import classify_calendar_event, should_prep_event
+from app.services.user_context import get_user_context
 from app.services.logger import logger
 import httpx
 
@@ -148,6 +150,17 @@ async def get_meetings_for_day(
             )
             all_meetings = events
 
+        # Classify events and add classification metadata
+        user_context = await get_user_context(user, request_id) if user else None
+        user_email = user_context.get('email') if user_context else (user.get('email') if user else '')
+        user_emails = user_context.get('emails', []) if user_context else []
+        
+        classified_meetings = []
+        for meeting in all_meetings:
+            classification = classify_calendar_event(meeting, user_email, user_emails)
+            meeting['_classification'] = classification
+            classified_meetings.append(meeting)
+        
         # Sort by start time
         def get_start_time(meeting):
             start = meeting.get('start', {})
@@ -158,11 +171,22 @@ async def get_meetings_for_day(
                 return start
             return ''
 
-        all_meetings.sort(key=lambda m: get_start_time(m) or '0')
+        classified_meetings.sort(key=lambda m: get_start_time(m) or '0')
+        
+        # Count meetings vs non-meetings
+        meetings_count = sum(1 for m in classified_meetings if m['_classification']['type'] == 'meeting')
+        non_meetings_count = len(classified_meetings) - meetings_count
 
-        logger.info('Meetings fetched for day', requestId=request_id, date=date, meetingCount=len(all_meetings))
+        logger.info(
+            'Meetings fetched for day',
+            requestId=request_id,
+            date=date,
+            meetingCount=meetings_count,
+            totalEvents=len(classified_meetings),
+            nonMeetings=non_meetings_count
+        )
 
-        return {'meetings': all_meetings}
+        return {'meetings': classified_meetings}
 
     except HTTPException:
         raise

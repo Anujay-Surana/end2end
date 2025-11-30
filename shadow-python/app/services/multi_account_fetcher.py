@@ -80,9 +80,20 @@ async def fetch_emails_from_all_accounts(
     meeting_cutoff = meeting_date.replace(hour=23, minute=59, second=59, microsecond=999999)
     before_date = meeting_cutoff.strftime('%Y/%m/%d')
     
-    # CRITICAL: 2-YEAR lookback FROM MEETING DATE (not from today)
-    two_years_ago = meeting_date - timedelta(days=730)
-    after_date = two_years_ago.strftime('%Y/%m/%d')
+    # TIME-BOUNDED CONTEXT SEARCH: Cascade 60 → 120 → 180 days
+    # Start with 60 days, extend if no hits
+    time_windows = [
+        {'days': 60, 'label': '60 days'},
+        {'days': 120, 'label': '120 days'},
+        {'days': 180, 'label': '180 days (max)'}
+    ]
+    
+    # Use 60 days as initial window
+    initial_window = time_windows[0]
+    after_date_obj = meeting_date - timedelta(days=initial_window['days'])
+    after_date = after_date_obj.strftime('%Y/%m/%d')
+    
+    logger.info(f'   📅 Using {initial_window["label"]} lookback window', requestId=None)
 
     async def fetch_account_emails(account: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -102,7 +113,8 @@ async def fetch_emails_from_all_accounts(
                     return {
                         'accountEmail': account_email,
                         'emails': [],
-                        'success': True
+                        'success': True,
+                        'timeWindow': initial_window['label']
                     }
                 keyword_parts = ' OR '.join([f'subject:"{k}" OR "{k}"' for k in keywords[:3]])
                 query = f'({keyword_parts}) after:{after_date} before:{before_date}'
@@ -119,10 +131,37 @@ async def fetch_emails_from_all_accounts(
                         filtered_emails.append(e)
                 emails = filtered_emails
                 
+                # Cascade search if no results and not at max window
+                if len(emails) == 0 and initial_window['days'] < 180:
+                    logger.info(f'   ⚠️  No emails found in {initial_window["label"]}, extending search window...')
+                    # Try next window
+                    for window in time_windows[1:]:
+                        if window['days'] <= initial_window['days']:
+                            continue
+                        extended_after = (meeting_date - timedelta(days=window['days'])).strftime('%Y/%m/%d')
+                        extended_query = f'({keyword_parts}) after:{extended_after} before:{before_date}'
+                        extended_emails = await fetch_gmail_messages(account, extended_query, 100)
+                        
+                        # Filter by date
+                        filtered_extended = []
+                        for e in extended_emails:
+                            if not e.get('date'):
+                                continue
+                            email_date = parse_email_date(e['date'])
+                            if email_date and email_date <= meeting_date:
+                                filtered_extended.append(e)
+                        
+                        if filtered_extended:
+                            logger.info(f'   ✓ Found {len(filtered_extended)} emails in {window["label"]} window')
+                            emails = filtered_extended
+                            initial_window = window
+                            break
+                
                 return {
                     'accountEmail': account_email,
                     'emails': emails,
-                    'success': True
+                    'success': True,
+                    'timeWindow': initial_window['label']
                 }
 
             domains = list(set([e.split('@')[1] for e in attendee_emails if '@' in e]))
@@ -168,13 +207,40 @@ async def fetch_emails_from_all_accounts(
                 if email_date and email_date <= meeting_date:
                     filtered_emails.append(e)
             emails = filtered_emails
+            
+            # Cascade search if no results and not at max window
+            if len(emails) == 0 and initial_window['days'] < 180:
+                logger.info(f'   ⚠️  No emails found in {initial_window["label"]}, extending search window...')
+                # Try next windows
+                for window in time_windows[1:]:
+                    if window['days'] <= initial_window['days']:
+                        continue
+                    extended_after = (meeting_date - timedelta(days=window['days'])).strftime('%Y/%m/%d')
+                    extended_query = f'{" OR ".join(query_parts)} after:{extended_after} before:{before_date}'
+                    extended_emails = await fetch_gmail_messages(account, extended_query, 100)
+                    
+                    # Filter by date
+                    filtered_extended = []
+                    for e in extended_emails:
+                        if not e.get('date'):
+                            continue
+                        email_date = parse_email_date(e['date'])
+                        if email_date and email_date <= meeting_date:
+                            filtered_extended.append(e)
+                    
+                    if filtered_extended:
+                        logger.info(f'   ✓ Found {len(filtered_extended)} emails in {window["label"]} window')
+                        emails = filtered_extended
+                        initial_window = window
+                        break
 
-            logger.debug(f'   ✅ Fetched {len(emails)} emails from {account_email}')
+            logger.debug(f'   ✅ Fetched {len(emails)} emails from {account_email} (window: {initial_window["label"]})')
 
             return {
                 'accountEmail': account_email,
                 'emails': emails,
-                'success': True
+                'success': True,
+                'timeWindow': initial_window['label']
             }
         except Exception as error:
             logger.error(f'   ❌ Error fetching emails for {account.get("account_email", "unknown")}: {str(error)}')

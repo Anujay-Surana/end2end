@@ -54,10 +54,17 @@ ONBOARDING_STEPS = [
         'required': False
     },
     {
+        'name': 'build_profile',
+        'title': 'Build Your Profile',
+        'description': 'Quick profile setup from your emails and web',
+        'order': 7,
+        'required': False
+    },
+    {
         'name': 'setup_preferences',
         'title': 'Setup Preferences',
         'description': 'Configure your meeting prep preferences',
-        'order': 7,
+        'order': 8,
         'required': False
     }
 ]

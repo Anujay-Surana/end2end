@@ -62,7 +62,8 @@ def _count_attendees_in_email(email: Dict[str, Any], attendees: List[Dict[str, A
     """Count how many meeting attendees are in this email"""
     from_email = (email.get('from') or '').lower()
     to_emails = [(e.strip().lower()) for e in (email.get('to') or '').split(',') if e.strip()]
-    all_emails_in_message = [from_email] + to_emails
+    cc_emails = [(e.strip().lower()) for e in (email.get('cc') or '').split(',') if e.strip()]
+    all_emails_in_message = [from_email] + to_emails + cc_emails
     
     attendee_emails = [
         (a.get('email') or a.get('emailAddress') or '').lower()
@@ -71,6 +72,83 @@ def _count_attendees_in_email(email: Dict[str, Any], attendees: List[Dict[str, A
     ]
     
     return sum(1 for email_addr in all_emails_in_message if any(att_email in email_addr for att_email in attendee_emails))
+
+
+def filter_emails_by_attendee_overlap(
+    emails: List[Dict[str, Any]],
+    attendees: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Filter emails by attendee overlap using 75%/50% rule
+    
+    Rules:
+    - <5 attendees: require ~75% overlap (for 3 people, all 3)
+    - >=5 attendees: require at least 50% overlap
+    - Also consider 1/3 of attendees in common
+    - Bidirectional matching (subset and superset)
+    
+    Args:
+        emails: List of email objects
+        attendees: List of attendee objects
+    
+    Returns:
+        Filtered list of emails that meet overlap criteria
+    """
+    if not emails or not attendees:
+        return emails
+    
+    # Extract attendee emails
+    attendee_emails = []
+    for att in attendees:
+        if isinstance(att, dict):
+            email = att.get('email') or att.get('emailAddress')
+            if email:
+                attendee_emails.append(email.lower())
+    
+    if not attendee_emails:
+        return emails
+    
+    attendee_count = len(attendee_emails)
+    
+    # Calculate overlap threshold
+    if attendee_count < 5:
+        overlap_threshold = 0.75  # 75% overlap
+    else:
+        overlap_threshold = 0.50  # 50% overlap
+    
+    # Also accept if at least 1/3 of attendees match
+    min_attendee_match = max(1, int(attendee_count / 3))
+    
+    filtered_emails = []
+    for email in emails:
+        if not isinstance(email, dict):
+            continue
+        
+        # Extract email participants
+        from_email = (email.get('from') or '').lower()
+        to_emails = [e.strip().lower() for e in (email.get('to') or '').split(',') if e.strip()]
+        cc_emails = [e.strip().lower() for e in (email.get('cc') or '').split(',') if e.strip()]
+        email_participants = set([from_email] + to_emails + cc_emails)
+        
+        # Calculate overlap
+        matching = [e for e in attendee_emails if e in email_participants]
+        overlap_count = len(matching)
+        
+        # Check if meets threshold
+        overlap_ratio = overlap_count / attendee_count if attendee_count > 0 else 0
+        meets_threshold = overlap_ratio >= overlap_threshold
+        meets_min_match = overlap_count >= min_attendee_match
+        
+        if meets_threshold or meets_min_match:
+            email['_attendeeOverlap'] = {
+                'matching': overlap_count,
+                'total': attendee_count,
+                'ratio': overlap_ratio,
+                'matchedEmails': matching
+            }
+            filtered_emails.append(email)
+    
+    return filtered_emails
 
 
 async def _filter_email_batch(
@@ -371,16 +449,26 @@ async def filter_relevant_emails(
         email_analysis = 'No email activity found.'
         return relevant_emails, email_analysis, extraction_data
 
-    logger.info(f'  🔍 Filtering {len(emails)} emails for meeting relevance...', requestId=request_id)
+    # PRE-FILTER: Attendee overlap filtering (75%/50% rule)
+    logger.info(f'  🔍 Pre-filtering {len(emails)} emails by attendee overlap...', requestId=request_id)
+    attendee_filtered_emails = filter_emails_by_attendee_overlap(emails, attendees)
+    logger.info(f'  ✓ Attendee overlap filter: {len(attendee_filtered_emails)}/{len(emails)} emails passed', requestId=request_id)
+    
+    # If no emails pass attendee filter, still proceed with all emails (fallback)
+    if not attendee_filtered_emails and len(emails) > 0:
+        logger.warn(f'  ⚠️  No emails passed attendee overlap filter, proceeding with all emails', requestId=request_id)
+        attendee_filtered_emails = emails
+
+    logger.info(f'  🔍 Filtering {len(attendee_filtered_emails)} emails for meeting relevance...', requestId=request_id)
 
     # PASS 1: Relevance filtering in PARALLEL batches of 25
     batch_size = 25
     batches = []
-    for batch_start in range(0, len(emails), batch_size):
+    for batch_start in range(0, len(attendee_filtered_emails), batch_size):
         batches.append({
             'start': batch_start,
-            'end': min(batch_start + batch_size, len(emails)),
-            'emails': emails[batch_start:min(batch_start + batch_size, len(emails))]
+            'end': min(batch_start + batch_size, len(attendee_filtered_emails)),
+            'emails': attendee_filtered_emails[batch_start:min(batch_start + batch_size, len(attendee_filtered_emails))]
         })
 
     logger.info(f'  🚀 Processing {len(batches)} email batches...', requestId=request_id)
@@ -404,17 +492,17 @@ async def filter_relevant_emails(
 
     extraction_data['emailRelevanceReasoning'] = all_relevance_reasoning
 
-    logger.info(f'  ✓ Total relevant emails: {len(all_relevant_indices)}/{len(emails)}', requestId=request_id)
+    logger.info(f'  ✓ Total relevant emails: {len(all_relevant_indices)}/{len(attendee_filtered_emails)}', requestId=request_id)
 
     if not all_relevant_indices:
         email_analysis = f'No email threads found directly related to "{meeting_title}".'
         return relevant_emails, email_analysis, extraction_data
 
-    # Get relevant emails
+    # Get relevant emails (use attendee_filtered_emails as source)
     relevant_emails = []
     for idx in all_relevant_indices:
-        if idx < len(emails):
-            email = emails[idx].copy()
+        if idx < len(attendee_filtered_emails):
+            email = attendee_filtered_emails[idx].copy()
             email['_relevanceReasoning'] = all_relevance_reasoning.get(idx, 'Included based on meeting relevance')
             email['_relevanceIndex'] = idx
             relevant_emails.append(email)

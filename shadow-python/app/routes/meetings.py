@@ -28,6 +28,8 @@ from app.services.multi_account_fetcher import (
 )
 from app.services.attendee_research import research_attendees
 from app.services.email_relevance import filter_relevant_emails
+from app.services.calendar_event_classifier import classify_calendar_event, should_prep_event, get_prep_depth
+from app.services.meeting_purpose_detector import detect_meeting_purpose
 from app.services.document_analyzer import analyze_documents
 from app.services.executive_summary import generate_executive_summary
 from app.services.temporal_scoring import analyze_trend
@@ -182,6 +184,32 @@ async def prep_meeting(
 
         # Get user context
         user_context = await get_user_context(user, request_id) if user else None
+        
+        # Classify the meeting event
+        user_email = user_context.get('email') if user_context else (user.get('email') if user else '')
+        user_emails = user_context.get('emails', []) if user_context else []
+        classification = classify_calendar_event(meeting, user_email, user_emails)
+        
+        # Skip full prep for non-meeting events
+        if not should_prep_event(classification):
+            prep_depth = get_prep_depth(classification)
+            logger.info(
+                f'Event classified as {classification["type"]}, skipping full prep',
+                requestId=request_id,
+                prepDepth=prep_depth,
+                reason=classification.get('reason')
+            )
+            
+            # Return minimal brief for non-meeting events
+            return {
+                'success': True,
+                'summary': f'{meeting_title} - {classification.get("reason", "Non-meeting event")}',
+                'attendees': attendees,
+                'meeting': meeting,
+                'classification': classification,
+                'prepDepth': prep_depth,
+                'note': 'This event was classified as a non-meeting. Full prep skipped.'
+            }
 
         logger.info(
             f'Starting meeting prep request',
@@ -191,7 +219,9 @@ async def prep_meeting(
             attendeeCount=len(attendees),
             hasAccessToken=bool(access_token),
             userId=user.get('id') if user else 'anonymous',
-            userName=user_context.get('name') if user_context else 'unknown'
+            userName=user_context.get('name') if user_context else 'unknown',
+            eventType=classification.get('type'),
+            prepDepth=classification.get('prepDepth')
         )
 
         user_info = f' (User: {user_context["name"]})' if user_context else ''
@@ -475,7 +505,34 @@ async def prep_meeting(
                 requestId=request_id
             )
 
-            # ===== STEP 1.5: UNDERSTAND MEETING CONTEXT BEFORE FILTERING =====
+            # ===== STEP 1.5: DETECT MEETING PURPOSE AND AGENDA =====
+            logger.info(f'\n  🧠 Detecting meeting purpose and agenda...', requestId=request_id)
+            purpose_result = None
+            try:
+                purpose_result = await detect_meeting_purpose(
+                    meeting,
+                    attendees,
+                    emails,
+                    user_context,
+                    request_id
+                )
+                logger.info(
+                    f'  ✓ Purpose detected: {purpose_result.get("purpose", "unknown")}',
+                    requestId=request_id,
+                    confidence=purpose_result.get('confidence'),
+                    source=purpose_result.get('source'),
+                    hasAgenda=len(purpose_result.get('agenda', [])) > 0
+                )
+            except Exception as purpose_error:
+                logger.error(f'  ❌ Purpose detection failed: {str(purpose_error)}', requestId=request_id)
+                purpose_result = {
+                    'purpose': None,
+                    'agenda': [],
+                    'confidence': 'low',
+                    'source': 'error'
+                }
+            
+            # Also run legacy context understanding for backward compatibility
             logger.info(f'\n  🧠 Understanding meeting context...', requestId=request_id)
             try:
                 meeting_context = await understand_meeting_context(meeting, attendees, user_context)
@@ -484,7 +541,7 @@ async def prep_meeting(
                 logger.error(f'  ❌ Meeting context understanding failed: {str(context_error)}', requestId=request_id)
                 # Fallback: basic meeting context
                 meeting_context = {
-                    'understoodPurpose': meeting_title,
+                    'understoodPurpose': purpose_result.get('purpose') if purpose_result else meeting_title,
                     'keyEntities': [],
                     'keyTopics': [],
                     'isSpecificMeeting': False,
@@ -1084,6 +1141,14 @@ async def prep_meeting(
             brief['recommendations'] = parsed_recommendations
             brief['actionItems'] = parsed_action_items
 
+            # Add purpose and agenda if detected
+            if purpose_result:
+                brief['purpose'] = purpose_result.get('purpose')
+                brief['agenda'] = purpose_result.get('agenda', [])
+                brief['purposeConfidence'] = purpose_result.get('confidence')
+                brief['purposeSource'] = purpose_result.get('source')
+                brief['contextEmail'] = purpose_result.get('contextEmail')
+            
             # Add stats
             brief['stats'] = {
                 'emailCount': len(emails),

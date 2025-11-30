@@ -144,6 +144,14 @@ class OnboardingManager:
                 'optional': True
             }
         
+        elif step_name == 'build_profile':
+            return {
+                'type': 'api_call',
+                'endpoint': '/onboarding/build-profile',
+                'method': 'POST',
+                'description': 'Automatically build your profile from emails and web'
+            }
+        
         elif step_name == 'setup_preferences':
             return {
                 'type': 'form',
