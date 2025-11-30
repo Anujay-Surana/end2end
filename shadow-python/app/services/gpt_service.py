@@ -400,8 +400,9 @@ def safe_parse_json(text: str) -> Optional[Any]:
         logger.info(f"✅ JSON parsed successfully: {'Array with ' + str(len(parsed)) + ' items' if isinstance(parsed, list) else type(parsed).__name__}")
         return parsed
     except json.JSONDecodeError as error:
-        logger.error(f"❌ Error parsing JSON: {str(error)}")
-        logger.error(f"   Text being parsed: {cleaned[:500]}")
+        # Log as warning since we have fallback logic that might recover
+        logger.warn(f"⚠️  Initial JSON parse failed: {str(error)}")
+        logger.debug(f"   Text being parsed (first 500 chars): {cleaned[:500]}")
         
         # Try to fix common JSON issues
         # 1. Remove trailing commas before closing braces/brackets
@@ -411,7 +412,7 @@ def safe_parse_json(text: str) -> Optional[Any]:
         # Try parsing again with fixed JSON
         try:
             parsed = json.loads(cleaned_fixed.strip())
-            logger.info(f"✅ JSON parsed successfully after fixing trailing commas: {'Array with ' + str(len(parsed)) + ' items' if isinstance(parsed, list) else type(parsed).__name__}")
+            logger.info(f"✅ JSON parsed successfully after fixing syntax: {'Array with ' + str(len(parsed)) + ' items' if isinstance(parsed, list) else type(parsed).__name__}")
             return parsed
         except json.JSONDecodeError:
             pass
@@ -425,7 +426,7 @@ def safe_parse_json(text: str) -> Optional[Any]:
                 logger.info(f"✅ Extracted JSON array from text: {'Array with ' + str(len(extracted)) + ' items' if isinstance(extracted, list) else type(extracted).__name__}")
                 return extracted
             except json.JSONDecodeError as e:
-                logger.error(f"   Failed to parse extracted array: {str(e)}")
+                logger.debug(f"   Failed to parse extracted array: {str(e)}")
         
         # 3. Try to find JSON object if array not found
         # Use non-greedy match first, then greedy if that fails

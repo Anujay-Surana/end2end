@@ -1174,6 +1174,14 @@ async def prep_meeting(
             logger.error(f'Stack trace: {str(analysis_error.__traceback__)}', requestId=request_id)
 
             # FALLBACK: Return raw context if analysis fails
+            # Safely get multiAccountStats if brief exists
+            multi_account_stats = {}
+            try:
+                multi_account_stats = brief.get('_multiAccountStats', {}) if isinstance(brief, dict) else {}
+            except (NameError, AttributeError):
+                # brief might not be initialized yet, use empty dict
+                multi_account_stats = {}
+            
             return {
                 'success': True,
                 'context': {
@@ -1190,7 +1198,7 @@ async def prep_meeting(
                     'attendeeCount': len(attendees),
                     'multiAccount': bool(user and user.get('id')),
                     'accountCount': len(accounts),
-                    'multiAccountStats': brief.get('_multiAccountStats')
+                    'multiAccountStats': multi_account_stats
                 },
                 'error': 'AI analysis failed, showing raw data',
                 'analysisError': str(analysis_error)
