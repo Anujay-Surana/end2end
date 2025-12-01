@@ -33,7 +33,7 @@ async def create_meeting_brief(user_id: str, meeting_id: str, brief_data: Dict[s
     # Query to get the created/updated record
     result = supabase.table('meeting_briefs').select('*').eq('user_id', user_id).eq('meeting_id', meeting_id).maybe_single().execute()
     
-    if result.data:
+    if result and hasattr(result, 'data') and result.data:
         return result.data
     raise Exception('Failed to create meeting brief')
 

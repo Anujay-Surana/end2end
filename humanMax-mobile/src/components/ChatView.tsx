@@ -120,9 +120,9 @@ export const ChatView: React.FC<ChatViewProps> = ({ meetingId }) => {
     try {
       // Generate brief using prepMeeting
       const attendees = meeting.attendees || [];
-      const brief = await apiClient.prepMeeting(meeting, attendees);
+      await apiClient.prepMeeting(meeting, attendees);
       
-      // Show meeting modal with brief
+      // Show meeting modal (brief will be loaded by MeetingModal component)
       setSelectedMeeting({
         ...meeting,
         summary: meeting.summary || 'Meeting',
