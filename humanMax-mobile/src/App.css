@@ -9,8 +9,9 @@
 html, body {
   width: 100%;
   height: 100%;
+  height: 100dvh;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   overscroll-behavior-x: none;
@@ -30,16 +31,18 @@ body {
 
 #root {
   width: 100%;
-  min-height: 100vh;
-  min-height: 100dvh; /* Dynamic viewport height for iOS */
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .app {
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background-color: var(--color-white);
+  overflow: hidden;
 }
 
 .app-loading {
@@ -84,11 +87,24 @@ body {
   color: var(--color-black);
   margin: 0;
   letter-spacing: -0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
 }
 
 .nav-actions {
   display: flex;
   gap: var(--spacing-sm);
+  flex-shrink: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.nav-actions::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-button {
@@ -100,9 +116,14 @@ body {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   min-height: var(--touch-target-min);
+  min-width: fit-content;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   transition: opacity 0.2s;
   -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
 }
 
 .nav-button:active {
@@ -117,14 +138,13 @@ body {
 .app-main {
   flex: 1;
   padding: 0;
-  padding-bottom: 0;
   max-width: 100%;
   margin: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  height: 100%;
+  min-height: 0;
 }
 
 /* Responsive adjustments */

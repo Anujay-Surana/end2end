@@ -8,11 +8,9 @@ import { authService } from './services/authService';
 import { notificationService } from './services/notificationService';
 import { backgroundSyncService } from './services/backgroundSync';
 import { AuthView } from './components/AuthView';
-import { CalendarView } from './components/CalendarView';
 import { ChatView } from './components/ChatView';
 import { Settings } from './components/Settings';
 import { MeetingPrep } from './components/MeetingPrep';
-import { DayPrep } from './components/DayPrep';
 import { MeetingModal } from './components/MeetingModal';
 import type { User, Meeting } from './types';
 import './App.css';
@@ -21,9 +19,7 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
-  const [showDayPrep, setShowDayPrep] = useState(false);
   const [notificationMeeting, setNotificationMeeting] = useState<Meeting | null>(null);
-  const [currentDate] = useState(new Date());
 
   useEffect(() => {
     initializeApp();
@@ -162,7 +158,6 @@ function App() {
   const handleSignOut = () => {
     setUser(null);
     setSelectedMeeting(null);
-    setShowDayPrep(false);
   };
 
   if (loading) {
@@ -182,9 +177,6 @@ function App() {
       <AppContent 
         selectedMeeting={selectedMeeting}
         setSelectedMeeting={setSelectedMeeting}
-        showDayPrep={showDayPrep}
-        setShowDayPrep={setShowDayPrep}
-        currentDate={currentDate}
         handleSignOut={handleSignOut}
         notificationMeeting={notificationMeeting}
         setNotificationMeeting={setNotificationMeeting}
@@ -193,7 +185,7 @@ function App() {
   );
 }
 
-function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowDayPrep, currentDate, handleSignOut, notificationMeeting, setNotificationMeeting }: any) {
+function AppContent({ selectedMeeting, setSelectedMeeting, handleSignOut, notificationMeeting, setNotificationMeeting }: any) {
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -208,18 +200,6 @@ function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowD
               onClick={() => navigate('/chat')}
             >
               💬 Chat
-            </button>
-            <button
-              className={`nav-button ${location.pathname === '/calendar' ? 'active' : ''}`}
-              onClick={() => navigate('/calendar')}
-            >
-              📅 Calendar
-            </button>
-            <button
-              className="nav-button"
-              onClick={() => setShowDayPrep(true)}
-            >
-              Day Prep
             </button>
             <button
               className={`nav-button ${location.pathname === '/settings' ? 'active' : ''}`}
@@ -242,10 +222,6 @@ function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowD
               element={<ChatView />}
             />
             <Route
-              path="/calendar"
-              element={<CalendarView />}
-            />
-            <Route
               path="/settings"
               element={<Settings onSignOut={handleSignOut} />}
             />
@@ -257,13 +233,6 @@ function AppContent({ selectedMeeting, setSelectedMeeting, showDayPrep, setShowD
           <MeetingPrep
             meeting={selectedMeeting}
             onClose={() => setSelectedMeeting(null)}
-          />
-        )}
-
-        {showDayPrep && (
-          <DayPrep
-            date={currentDate}
-            onClose={() => setShowDayPrep(false)}
           />
         )}
 

@@ -1,35 +1,93 @@
 """
 Chat Panel Service
 
-Handles OpenAI chat integration for the chat panel interface
+Handles OpenAI chat integration for the chat panel interface with function calling support
 """
 
 import re
 import httpx
 import os
+import json
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 from app.services.logger import logger
 
 
 class ChatPanelService:
     def __init__(self, openai_api_key: str):
         self.openai_api_key = openai_api_key
+        self.function_handlers: Dict[str, Callable] = {}
+    
+    def register_function_handler(self, function_name: str, handler: Callable):
+        """Register a function handler for tool calling"""
+        self.function_handlers[function_name] = handler
+    
+    def get_tools_definition(self) -> List[Dict[str, Any]]:
+        """Get OpenAI tools definition for function calling"""
+        return [
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'get_calendar_by_date',
+                    'description': 'Get calendar events/meetings for a specific date. Use this when the user asks about their calendar, meetings, or schedule for a particular date.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'date': {
+                                'type': 'string',
+                                'description': 'Date in YYYY-MM-DD format (e.g., "2024-01-15")'
+                            }
+                        },
+                        'required': ['date']
+                    }
+                }
+            },
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'generate_meeting_brief',
+                    'description': 'Generate a detailed meeting brief/preparation document for a specific meeting. Use this when the user asks to prepare for a meeting, generate a brief, or get meeting prep.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'meeting_id': {
+                                'type': 'string',
+                                'description': 'The ID of the meeting to generate a brief for'
+                            },
+                            'meeting': {
+                                'type': 'object',
+                                'description': 'Meeting object with id, summary, start, end, attendees, etc. Use this if meeting_id is not available.',
+                                'properties': {
+                                    'id': {'type': 'string'},
+                                    'summary': {'type': 'string'},
+                                    'start': {'type': 'object'},
+                                    'end': {'type': 'object'},
+                                    'attendees': {'type': 'array'}
+                                }
+                            }
+                        },
+                        'required': []
+                    }
+                }
+            }
+        ]
 
     async def generate_response(
         self,
         message: str,
         conversation_history: List[Dict[str, str]] = None,
-        meetings: List[Dict[str, Any]] = None
-    ) -> str:
+        meetings: List[Dict[str, Any]] = None,
+        function_results: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
-        Generate chat response using OpenAI
+        Generate chat response using OpenAI with function calling support
         Args:
             message: User message
             conversation_history: Previous messages in conversation
             meetings: Today's meetings for context
+            function_results: Results from previous function calls (for follow-up)
         Returns:
-            AI response
+            Dict with 'content' (response text) and optionally 'function_calls' (list of function calls to execute)
         """
         if conversation_history is None:
             conversation_history = []
@@ -44,22 +102,37 @@ class ChatPanelService:
             messages = [
                 {'role': 'system', 'content': system_prompt},
                 *conversation_history,
-                {'role': 'user', 'content': message}
             ]
+            
+            # Add function results if provided (from previous function calls)
+            if function_results:
+                messages.append({
+                    'role': 'function',
+                    'name': function_results.get('function_name'),
+                    'content': json.dumps(function_results.get('result', {}))
+                })
+            
+            # Add user message
+            messages.append({'role': 'user', 'content': message})
 
-            async with httpx.AsyncClient() as client:
+            # Prepare request with tools
+            request_data = {
+                'model': 'gpt-4o-mini',  # Using gpt-4o-mini for function calling support
+                'messages': messages,
+                'max_tokens': 500,
+                'temperature': 0.7,
+                'tools': self.get_tools_definition(),
+                'tool_choice': 'auto'  # Let model decide when to use tools
+            }
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     'https://api.openai.com/v1/chat/completions',
                     headers={
                         'Content-Type': 'application/json',
                         'Authorization': f'Bearer {self.openai_api_key}'
                     },
-                    json={
-                        'model': 'gpt-4.1-mini',
-                        'messages': messages,
-                        'max_tokens': 300,
-                        'temperature': 0.7
-                    }
+                    json=request_data
                 )
 
             if not response.is_success:
@@ -68,9 +141,27 @@ class ChatPanelService:
                 raise Exception(f'OpenAI API error: {response.status_code}')
 
             data = response.json()
-            response_text = data['choices'][0]['message']['content'].strip()
-            # Strip markdown formatting for clean display
-            return self.strip_markdown(response_text)
+            message_obj = data['choices'][0]['message']
+            
+            # Check if model wants to call functions
+            function_calls = []
+            if 'tool_calls' in message_obj and message_obj['tool_calls']:
+                for tool_call in message_obj['tool_calls']:
+                    function_calls.append({
+                        'id': tool_call['id'],
+                        'name': tool_call['function']['name'],
+                        'arguments': json.loads(tool_call['function']['arguments'])
+                    })
+            
+            # Get response content (may be None if only function calls)
+            response_text = message_obj.get('content', '').strip() if message_obj.get('content') else None
+            
+            result = {
+                'content': self.strip_markdown(response_text) if response_text else None,
+                'function_calls': function_calls if function_calls else None
+            }
+            
+            return result
         except Exception as error:
             logger.error(f'Error generating chat response: {str(error)}')
             raise
@@ -177,6 +268,13 @@ Your role:
 - Answer questions about meeting attendees, times, and topics
 - Help users prepare for upcoming meetings
 - Be friendly, professional, and efficient
+
+You have access to tools that let you:
+- Get calendar events for any date (use get_calendar_by_date)
+- Generate meeting briefs on demand (use generate_meeting_brief)
+
+When users ask about their calendar or schedule, use get_calendar_by_date to fetch the data.
+When users ask to prepare for a meeting or generate a brief, use generate_meeting_brief.
 
 Keep responses brief and actionable. Maximum 100 words per response unless the user asks for more detail."""
 
