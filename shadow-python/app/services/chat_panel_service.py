@@ -46,17 +46,17 @@ class ChatPanelService:
                 'type': 'function',
                 'function': {
                     'name': 'generate_meeting_brief',
-                    'description': 'Generate a detailed meeting brief/preparation document for a specific meeting. Use this when the user asks to prepare for a meeting, generate a brief, or get meeting prep.',
+                    'description': 'Generate a detailed meeting brief/preparation document for a specific meeting. Use this when the user asks to prepare for a meeting, generate a brief, or get meeting prep. IMPORTANT: If the user mentions a meeting but you don\'t have the full meeting object, first call get_calendar_by_date to get the list of meetings, then use one of those meeting objects to generate the brief. You can provide either meeting_id (if you know it) or the full meeting object.',
                     'parameters': {
                         'type': 'object',
                         'properties': {
                             'meeting_id': {
                                 'type': 'string',
-                                'description': 'The ID of the meeting to generate a brief for'
+                                'description': 'The ID of the meeting to generate a brief for. If provided, the system will fetch the meeting details automatically.'
                             },
                             'meeting': {
                                 'type': 'object',
-                                'description': 'Meeting object with id, summary, start, end, attendees, etc. Use this if meeting_id is not available.',
+                                'description': 'Full meeting object with id, summary, start, end, attendees, etc. Use this when you have the meeting from get_calendar_by_date or when meeting_id is not available.',
                                 'properties': {
                                     'id': {'type': 'string'},
                                     'summary': {'type': 'string'},

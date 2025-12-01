@@ -61,6 +61,7 @@ export interface Meeting {
   location?: string;
   htmlLink?: string;
   accountEmail?: string;
+  brief?: any; // Optional brief data from server
 }
 
 export interface MeetingsResponse {

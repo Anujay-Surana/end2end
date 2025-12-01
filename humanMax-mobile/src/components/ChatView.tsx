@@ -92,8 +92,22 @@ export const ChatView: React.FC<ChatViewProps> = ({ meetingId }) => {
           const funcName = functionResults.function_name;
           
           if (funcName === 'generate_meeting_brief' && functionResults.meeting) {
-            // Generate brief and show in modal
-            handleGenerateBrief(functionResults.meeting);
+            // If brief is already generated server-side, show it directly
+            if (functionResults.brief) {
+              const meetingWithBrief: Meeting = {
+                ...functionResults.meeting,
+                summary: functionResults.meeting.summary || 'Meeting',
+                start: functionResults.meeting.start || { dateTime: new Date().toISOString() },
+                end: functionResults.meeting.end || { dateTime: new Date().toISOString() },
+                attendees: functionResults.meeting.attendees || [],
+              } as Meeting;
+              // Attach brief to meeting object
+              (meetingWithBrief as any).brief = functionResults.brief;
+              setSelectedMeeting(meetingWithBrief);
+            } else {
+              // Generate brief client-side if not provided
+              handleGenerateBrief(functionResults.meeting);
+            }
           }
           // Calendar results are already included in the assistant message content
         }
@@ -290,6 +304,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ meetingId }) => {
       {selectedMeeting && (
         <MeetingModal
           meeting={selectedMeeting}
+          brief={selectedMeeting.brief}
           onClose={() => setSelectedMeeting(null)}
         />
       )}

@@ -18,20 +18,22 @@ export const MeetingModal: React.FC<MeetingModalProps> = ({
 }) => {
   const [showChat, setShowChat] = useState(false);
   const [loadingBrief, setLoadingBrief] = useState(false);
-  const [storedBrief] = useState<any>(brief);
+  const [storedBrief, setStoredBrief] = useState<any>(brief);
 
   useEffect(() => {
     // If brief not provided, try to load from stored briefs
     if (!brief && meeting.id) {
       loadStoredBrief();
+    } else if (brief) {
+      setStoredBrief(brief);
     }
-  }, [meeting.id]);
+  }, [meeting.id, brief]);
 
   const loadStoredBrief = async () => {
     try {
       setLoadingBrief(true);
-      // TODO: Add endpoint to fetch stored brief by meeting_id
-      // For now, we'll use the meeting prep endpoint if needed
+      // Try to fetch stored brief from database
+      // For now, if no brief is provided, user can click "Prepare Now" to generate
       setLoadingBrief(false);
     } catch (error) {
       console.error('Error loading brief:', error);
