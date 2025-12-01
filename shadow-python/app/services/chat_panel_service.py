@@ -87,7 +87,8 @@ class ChatPanelService:
         conversation_history: List[Dict[str, str]] = None,
         meetings: List[Dict[str, Any]] = None,
         function_results: Optional[Dict[str, Any]] = None,
-        tool_call_id: Optional[str] = None
+        tool_call_id: Optional[str] = None,
+        user_timezone: str = 'UTC'
     ) -> Dict[str, Any]:
         """
         Generate chat response using OpenAI with function calling support
@@ -106,8 +107,8 @@ class ChatPanelService:
             meetings = []
 
         try:
-            # Build system prompt
-            system_prompt = self.build_system_prompt(meetings)
+            # Build system prompt with current date/time
+            system_prompt = self.build_system_prompt(meetings, user_timezone)
 
             # Build messages array
             messages = [
@@ -272,15 +273,35 @@ class ChatPanelService:
         # Remove markdown formatting: **bold**, *italic*, `code`, etc.
         return re.sub(r'\*\*([^*]+)\*\*', r'\1', text).replace('*', '').replace('`', '').replace(r'#{1,6}\s+', '').replace(r'\[([^\]]+)\]\([^\)]+\)', r'\1').strip()
 
-    def build_system_prompt(self, meetings: List[Dict[str, Any]] = None) -> str:
+    def build_system_prompt(self, meetings: List[Dict[str, Any]] = None, user_timezone: str = 'UTC') -> str:
         """
-        Build system prompt with meeting context
+        Build system prompt with meeting context and current date/time
         Args:
             meetings: Today's meetings
+            user_timezone: User's timezone (e.g., 'America/New_York', 'UTC')
         Returns:
             System prompt
         """
-        prompt = """You are Shadow, an executive assistant. You help users prepare for meetings and manage their day.
+        # Get current date/time in user's timezone
+        from datetime import datetime
+        import pytz
+        try:
+            user_tz = pytz.timezone(user_timezone)
+        except:
+            user_tz = pytz.UTC
+        
+        now_utc = datetime.now(pytz.UTC)
+        now_user_tz = now_utc.astimezone(user_tz)
+        current_date = now_user_tz.strftime('%Y-%m-%d')
+        current_time = now_user_tz.strftime('%I:%M %p %Z')
+        current_day = now_user_tz.strftime('%A')
+        
+        prompt = f"""You are Shadow, an executive assistant. You help users prepare for meetings and manage their day.
+
+CURRENT DATE AND TIME (User's timezone: {user_timezone}):
+- Today is {current_day}, {current_date}
+- Current time: {current_time}
+- When users say "today", "tomorrow", "yesterday", etc., use this date context.
 
 Your role:
 - Provide quick, concise updates about meetings

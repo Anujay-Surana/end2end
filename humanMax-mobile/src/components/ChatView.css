@@ -2,7 +2,10 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  height: -webkit-fill-available; /* iOS Safari */
   background-color: var(--color-white);
+  position: relative;
+  overflow: hidden;
 }
 
 .chat-messages {
@@ -57,12 +60,14 @@
 
 .chat-message-bubble {
   max-width: 75%;
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
   border-radius: var(--border-radius-lg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   overflow: hidden;
   word-wrap: break-word;
   overflow-wrap: break-word;
+  /* Improved spacing and readability */
+  line-height: 1.5;
 }
 
 .chat-message--user .chat-message-bubble {
@@ -132,9 +137,13 @@
 
 .chat-input-container {
   padding: var(--spacing-md);
-  padding-bottom: calc(var(--spacing-md) + var(--safe-area-bottom));
+  padding-bottom: max(var(--spacing-md), env(safe-area-inset-bottom));
   background-color: var(--color-white);
   border-top: 1px solid var(--color-gray-200);
+  flex-shrink: 0;
+  /* Ensure input stays at bottom */
+  position: relative;
+  z-index: 10;
 }
 
 .chat-input-wrapper {
@@ -144,6 +153,8 @@
   background-color: var(--color-gray-100);
   border-radius: var(--border-radius-lg);
   padding: var(--spacing-xs) var(--spacing-sm);
+  /* Improved touch targets */
+  min-height: 52px;
 }
 
 .chat-input {

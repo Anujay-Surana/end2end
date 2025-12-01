@@ -11,8 +11,9 @@ const config: CapacitorConfig = {
   //   cleartext: true
   // },
   ios: {
-    contentInset: 'automatic',
-    scheme: 'com.kordn8.shadow'
+    contentInset: 'never', // Full screen, no insets
+    scheme: 'com.kordn8.shadow',
+    scrollEnabled: false // Prevent bounce scrolling
   }
 };
 

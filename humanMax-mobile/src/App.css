@@ -39,10 +39,16 @@ body {
 .app {
   height: 100vh;
   height: 100dvh;
+  height: -webkit-fill-available; /* iOS Safari */
   display: flex;
   flex-direction: column;
   background-color: var(--color-white);
   overflow: hidden;
+  position: relative;
+  /* Full screen on iOS */
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .app-loading {
@@ -65,12 +71,16 @@ body {
   background-color: var(--color-white);
   border-bottom: var(--border-width) solid var(--color-gray-200);
   padding: var(--spacing-md);
-  padding-top: calc(var(--spacing-md) + var(--safe-area-top));
+  padding-top: max(var(--spacing-md), env(safe-area-inset-top));
+  padding-bottom: var(--spacing-md);
   position: sticky;
   top: 0;
   z-index: 100;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background-color: rgba(255, 255, 255, 0.95);
+  /* Ensure nav stays at top */
+  flex-shrink: 0;
 }
 
 .nav-content {

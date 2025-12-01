@@ -98,6 +98,7 @@ function App() {
     if (Capacitor.isNativePlatform()) {
       StatusBar.setStyle({ style: Style.Light }).catch(() => {});
       StatusBar.setBackgroundColor({ color: '#ffffff' }).catch(() => {});
+      StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {}); // Full screen
     }
 
     // Load cached user and verify session in background (completely non-blocking)

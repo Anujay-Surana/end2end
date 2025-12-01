@@ -100,12 +100,18 @@ async def send_message(
                 if msg['id'] != user_msg['id']
             ]
         
+        # Get user timezone for context
+        from app.db.queries.users import find_user_by_id
+        user_obj = await find_user_by_id(user_id)
+        user_timezone = user_obj.get('timezone', 'UTC') if user_obj else 'UTC'
+        
         # Generate AI response with function calling support
         service = ChatPanelService(openai_api_key)
         response = await service.generate_response(
             message=request.message,
             conversation_history=conversation_history,
-            meetings=request.meetings or []
+            meetings=request.meetings or [],
+            user_timezone=user_timezone
         )
         
         # Handle function calls if any
@@ -181,12 +187,29 @@ async def send_message(
                             # Format meetings for response
                             formatted_meetings = []
                             for m in all_meetings[:20]:  # Limit to 20
-                                start = m.get('start', {}).get('dateTime') or m.get('start', {}).get('date', '')
+                                # Handle start time - can be dict or string
+                                start_obj = m.get('start', {})
+                                if isinstance(start_obj, str):
+                                    start = start_obj
+                                elif isinstance(start_obj, dict):
+                                    start = start_obj.get('dateTime') or start_obj.get('date', '')
+                                else:
+                                    start = ''
+                                
+                                # Handle attendees - ensure they're dicts
+                                attendees_list = m.get('attendees', [])
+                                attendee_emails = []
+                                for a in attendees_list:
+                                    if isinstance(a, dict):
+                                        attendee_emails.append(a.get('email', ''))
+                                    elif isinstance(a, str):
+                                        attendee_emails.append(a)
+                                
                                 formatted_meetings.append({
                                     'id': m.get('id'),
                                     'summary': m.get('summary', 'Untitled'),
                                     'start': start,
-                                    'attendees': [a.get('email', '') for a in m.get('attendees', [])]
+                                    'attendees': attendee_emails
                                 })
                             
                             function_results = {
@@ -263,7 +286,8 @@ async def send_message(
                     conversation_history=updated_history,
                     meetings=request.meetings or [],
                     function_results=function_results,
-                    tool_call_id=tool_call_id
+                    tool_call_id=tool_call_id,
+                    user_timezone=user_timezone
                 )
                 response_text = final_response.get('content') or 'I\'ve retrieved the information you requested.'
             else:
