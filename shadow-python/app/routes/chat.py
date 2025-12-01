@@ -345,7 +345,6 @@ async def send_message(
                                     brief_data = None
                                     async for chunk in _generate_prep_response(prep_request, user, None, f'chat-{tool_call_id}'):
                                         try:
-                                            import json
                                             chunk_data = json.loads(chunk)
                                             if chunk_data.get('type') == 'complete':
                                                 brief_data = {k: v for k, v in chunk_data.items() if k != 'type'}
