@@ -86,7 +86,8 @@ class ChatPanelService:
         message: str,
         conversation_history: List[Dict[str, str]] = None,
         meetings: List[Dict[str, Any]] = None,
-        function_results: Optional[Dict[str, Any]] = None
+        function_results: Optional[Dict[str, Any]] = None,
+        tool_call_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate chat response using OpenAI with function calling support
@@ -95,6 +96,7 @@ class ChatPanelService:
             conversation_history: Previous messages in conversation
             meetings: Today's meetings for context
             function_results: Results from previous function calls (for follow-up)
+            tool_call_id: The tool_call_id from the original function call
         Returns:
             Dict with 'content' (response text) and optionally 'function_calls' (list of function calls to execute)
         """
@@ -114,25 +116,33 @@ class ChatPanelService:
             ]
             
             # Add function results if provided (from previous function calls)
+            # OpenAI expects function results to include the tool_call_id
             if function_results:
-                messages.append({
-                    'role': 'function',
+                function_message = {
+                    'role': 'tool',
+                    'tool_call_id': tool_call_id or function_results.get('tool_call_id'),
                     'name': function_results.get('function_name'),
                     'content': json.dumps(function_results.get('result', {}))
-                })
+                }
+                messages.append(function_message)
             
-            # Add user message
-            messages.append({'role': 'user', 'content': message})
+            # Add user message (only if not already in conversation_history)
+            if not function_results:  # Only add user message if this is the first call
+                messages.append({'role': 'user', 'content': message})
 
-            # Prepare request with tools
+            # Prepare request - if we're sending function results, don't include tools
+            # (model should generate text response based on function results)
             request_data = {
                 'model': 'gpt-4o-mini',  # Using gpt-4o-mini for function calling support
                 'messages': messages,
                 'max_tokens': 500,
                 'temperature': 0.7,
-                'tools': self.get_tools_definition(),
-                'tool_choice': 'auto'  # Let model decide when to use tools
             }
+            
+            # Only include tools if we're not sending function results (first call)
+            if not function_results:
+                request_data['tools'] = self.get_tools_definition()
+                request_data['tool_choice'] = 'auto'
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(

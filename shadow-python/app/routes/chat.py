@@ -110,14 +110,35 @@ async def send_message(
         
         # Handle function calls if any
         function_results = None
+        tool_call_id = None
+        assistant_message_with_tool_calls = None
+        
         if response.get('function_calls'):
             function_calls = response['function_calls']
             logger.info(f'Function calls requested: {[fc["name"] for fc in function_calls]}', userId=user_id)
+            
+            # Store the assistant message with tool calls for conversation history
+            assistant_message_with_tool_calls = {
+                'role': 'assistant',
+                'content': response.get('content'),  # May be None if only tool calls
+                'tool_calls': [
+                    {
+                        'id': fc['id'],
+                        'type': 'function',
+                        'function': {
+                            'name': fc['name'],
+                            'arguments': json.dumps(fc['arguments'])
+                        }
+                    }
+                    for fc in function_calls
+                ]
+            }
             
             # Execute function calls
             for func_call in function_calls:
                 func_name = func_call['name']
                 func_args = func_call['arguments']
+                tool_call_id = func_call['id']  # Store tool_call_id for response
                 
                 try:
                     if func_name == 'get_calendar_by_date':
@@ -170,6 +191,7 @@ async def send_message(
                             
                             function_results = {
                                 'function_name': func_name,
+                                'tool_call_id': tool_call_id,
                                 'result': {
                                     'date': date,
                                     'meetings': formatted_meetings,
@@ -192,6 +214,7 @@ async def send_message(
                                 # Frontend will call prep-meeting endpoint directly
                                 function_results = {
                                     'function_name': func_name,
+                                    'tool_call_id': tool_call_id,
                                     'result': {
                                         'meeting_id': meeting_id or meeting_obj.get('id'),
                                         'status': 'requested',
@@ -204,6 +227,7 @@ async def send_message(
                                 # For now, return error asking for meeting object
                                 function_results = {
                                     'function_name': func_name,
+                                    'tool_call_id': tool_call_id,
                                     'result': {
                                         'error': 'Meeting object required to generate brief. Please provide meeting details.'
                                     }
@@ -211,6 +235,7 @@ async def send_message(
                         else:
                             function_results = {
                                 'function_name': func_name,
+                                'tool_call_id': tool_call_id,
                                 'result': {
                                     'error': 'Meeting ID or meeting object required'
                                 }
@@ -224,22 +249,31 @@ async def send_message(
                     logger.error(f'Error executing function {func_name}: {str(e)}', userId=user_id)
                     function_results = {
                         'function_name': func_name,
+                        'tool_call_id': tool_call_id,
                         'result': {'error': f'Error executing function: {str(e)}'}
                     }
             
             # If we executed functions, get final response from OpenAI
+            # Add assistant message with tool calls to conversation history
+            updated_history = conversation_history + [assistant_message_with_tool_calls] if assistant_message_with_tool_calls else conversation_history
+            
             if function_results:
                 final_response = await service.generate_response(
                     message=request.message,
-                    conversation_history=conversation_history,
+                    conversation_history=updated_history,
                     meetings=request.meetings or [],
-                    function_results=function_results
+                    function_results=function_results,
+                    tool_call_id=tool_call_id
                 )
-                response_text = final_response.get('content', 'I\'ve retrieved the information you requested.')
+                response_text = final_response.get('content') or 'I\'ve retrieved the information you requested.'
             else:
-                response_text = response.get('content', 'I encountered an error processing your request.')
+                response_text = response.get('content') or 'I encountered an error processing your request.'
         else:
-            response_text = response.get('content', 'Sorry, I couldn\'t process that request.')
+            response_text = response.get('content') or 'Sorry, I couldn\'t process that request.'
+        
+        # Ensure response_text is not None or empty
+        if not response_text or not response_text.strip():
+            response_text = 'I\'ve processed your request.'
         
         # Store AI response
         assistant_msg = await create_chat_message(
