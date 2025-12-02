@@ -12,6 +12,13 @@ const SCOPES = 'openid https://www.googleapis.com/auth/userinfo.email https://ww
 // Use HTTPS for Railway (Railway uses HTTPS by default)
 const API_URL = import.meta.env.VITE_API_URL || 'https://end2end-production.up.railway.app';
 
+// Validate CLIENT_ID is configured
+if (!CLIENT_ID || CLIENT_ID.trim() === '') {
+  console.error('❌ VITE_GOOGLE_CLIENT_ID is not configured!');
+  console.error('Please set VITE_GOOGLE_CLIENT_ID in your environment variables or .env file');
+  console.error('Example: VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com');
+}
+
 declare global {
   interface Window {
     google?: {
@@ -107,6 +114,13 @@ class AuthService {
   private setupWebTokenClient() {
     if (!window.google?.accounts?.oauth2) {
       console.error('Google Identity Services not loaded');
+      return;
+    }
+
+    // Validate CLIENT_ID before setting up OAuth client
+    if (!CLIENT_ID || CLIENT_ID.trim() === '') {
+      console.error('❌ Cannot setup OAuth: CLIENT_ID is missing');
+      console.error('Please configure VITE_GOOGLE_CLIENT_ID in your environment variables');
       return;
     }
 
@@ -388,6 +402,13 @@ class AuthService {
   }
 
   async signIn(): Promise<User> {
+    // Validate CLIENT_ID before attempting sign-in
+    if (!CLIENT_ID || CLIENT_ID.trim() === '') {
+      const errorMsg = 'Google OAuth Client ID is not configured. Please set VITE_GOOGLE_CLIENT_ID in your environment variables or .env file.';
+      console.error('❌', errorMsg);
+      throw new Error(errorMsg);
+    }
+
     if (Capacitor.isNativePlatform()) {
       // Use Browser plugin for native apps (iOS/Android)
       return this.signInWithBrowser();
@@ -399,6 +420,20 @@ class AuthService {
 
   private async signInWithBrowser(): Promise<User> {
     console.log('Starting Browser OAuth flow...');
+    
+    // Validate CLIENT_ID before starting OAuth flow
+    if (!CLIENT_ID || CLIENT_ID.trim() === '') {
+      const errorMsg = 'Google OAuth Client ID is not configured. Please set VITE_GOOGLE_CLIENT_ID in your environment variables.';
+      console.error('❌', errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    // Validate API_URL
+    if (!API_URL || API_URL.trim() === '') {
+      const errorMsg = 'API URL is not configured. Please set VITE_API_URL in your environment variables.';
+      console.error('❌', errorMsg);
+      throw new Error(errorMsg);
+    }
     
     // Generate a state token for security
     const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -417,7 +452,10 @@ class AuthService {
       `&state=${encodeURIComponent(state)}`;
 
     console.log('Opening OAuth URL in browser...');
-    console.log('OAuth URL:', oauthUrl);
+    console.log('OAuth URL:', oauthUrl.replace(CLIENT_ID, 'CLIENT_ID_HIDDEN')); // Don't log actual client_id
+    console.log('Redirect URI:', redirectUri);
+    console.log('Scopes:', SCOPES);
+    
     // Open in system browser
     await Browser.open({ url: oauthUrl });
 
@@ -459,6 +497,13 @@ class AuthService {
   }
 
   private async signInWithWeb(): Promise<User> {
+    // Validate CLIENT_ID before starting OAuth flow
+    if (!CLIENT_ID || CLIENT_ID.trim() === '') {
+      const errorMsg = 'Google OAuth Client ID is not configured. Please set VITE_GOOGLE_CLIENT_ID in your environment variables.';
+      console.error('❌', errorMsg);
+      throw new Error(errorMsg);
+    }
+
     // Ensure Google Identity Services is loaded
     if (!window.google?.accounts?.oauth2) {
       await this.initializeWebGoogleSignIn();
@@ -476,6 +521,14 @@ class AuthService {
     // Setup token client if not already set
     if (!this.tokenClient) {
       this.setupWebTokenClient();
+    }
+
+    // Verify token client was set up successfully
+    if (!this.tokenClient) {
+      throw new Error(
+        'Failed to initialize Google OAuth client. ' +
+        'Please check that VITE_GOOGLE_CLIENT_ID is correctly configured.'
+      );
     }
 
     const tokenClient = this.tokenClient;
