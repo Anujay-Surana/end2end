@@ -27,8 +27,11 @@ class FunctionExecutor:
         # Get timezone object
         try:
             self.tz = pytz.timezone(user_timezone)
-        except:
+            logger.info(f'FunctionExecutor initialized with timezone: {user_timezone}', userId=user_id)
+        except Exception as e:
+            logger.warning(f'Invalid timezone {user_timezone}, using UTC: {str(e)}', userId=user_id)
             self.tz = pytz.UTC
+            self.user_timezone = 'UTC'
     
     async def execute(self, function_name: str, arguments: Dict[str, Any], tool_call_id: str) -> Dict[str, Any]:
         """
@@ -152,6 +155,14 @@ class FunctionExecutor:
                             # Convert to user's timezone
                             dt_user = dt_utc.astimezone(self.tz)
                             start_formatted = dt_user.strftime('%I:%M %p %Z')
+                            logger.debug(
+                                f'Converted meeting time',
+                                userId=self.user_id,
+                                meeting_id=m.get('id'),
+                                utc_time=start_iso,
+                                user_timezone=self.user_timezone,
+                                converted_time=start_formatted
+                            )
                         except Exception as e:
                             logger.warning(f'Error converting start time: {str(e)}', meeting_id=m.get('id'))
                             start_formatted = start_iso

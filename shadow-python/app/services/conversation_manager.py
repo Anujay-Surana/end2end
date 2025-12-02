@@ -59,8 +59,23 @@ class ConversationManager:
                     tool_call_id = metadata.get('tool_call_id')
                     if tool_call_id:
                         tool_results_map[tool_call_id] = msg
+                        logger.debug(
+                            f'Found tool result message',
+                            userId=user_id,
+                            tool_call_id=tool_call_id,
+                            function_name=metadata.get('function_name'),
+                            has_result=bool(metadata.get('function_result'))
+                        )
                 else:
                     regular_messages.append(msg)
+            
+            logger.info(
+                f'Separated messages: {len(regular_messages)} regular, {len(tool_results_map)} tool results',
+                userId=user_id,
+                regular_count=len(regular_messages),
+                tool_results_count=len(tool_results_map),
+                tool_call_ids=list(tool_results_map.keys())
+            )
             
             # Convert to OpenAI format and apply sliding window
             # We want the most recent N messages, but keep them in chronological order (oldest first) for OpenAI
@@ -105,6 +120,14 @@ class ConversationManager:
                             function_name = tool_metadata.get('function_name', 'unknown')
                             function_result = tool_metadata.get('function_result', {})
                             
+                            logger.debug(
+                                f'Adding tool result to conversation history',
+                                userId=user_id,
+                                tool_call_id=tool_call_id,
+                                function_name=function_name,
+                                result_keys=list(function_result.keys()) if isinstance(function_result, dict) else None
+                            )
+                            
                             # Format as OpenAI tool message
                             tool_msg = {
                                 'role': 'tool',
@@ -113,12 +136,29 @@ class ConversationManager:
                                 'content': json.dumps(function_result) if isinstance(function_result, dict) else str(function_result)
                             }
                             all_formatted_messages.append(tool_msg)
+                        else:
+                            logger.warning(
+                                f'Tool result not found for tool_call_id',
+                                userId=user_id,
+                                tool_call_id=tool_call_id,
+                                available_tool_call_ids=list(tool_results_map.keys())
+                            )
             
             # Take the last N messages (most recent) but keep them in chronological order
             # OpenAI expects chronological order (oldest first), so we take the tail of the list
             conversation_history = all_formatted_messages[-self.window_size:] if len(all_formatted_messages) > self.window_size else all_formatted_messages
             
-            logger.debug(f'Loaded {len(conversation_history)} messages for conversation history', userId=user_id)
+            # Log conversation history details for debugging
+            tool_results_count = sum(1 for m in conversation_history if m.get('role') == 'tool')
+            assistant_with_tools_count = sum(1 for m in conversation_history if m.get('tool_calls'))
+            logger.info(
+                f'Loaded {len(conversation_history)} messages for conversation history',
+                userId=user_id,
+                total_messages=len(conversation_history),
+                tool_results_count=tool_results_count,
+                assistant_with_tools_count=assistant_with_tools_count,
+                message_types={m.get('role'): sum(1 for msg in conversation_history if msg.get('role') == m.get('role')) for m in conversation_history}
+            )
             
             return conversation_history
             

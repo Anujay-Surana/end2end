@@ -101,6 +101,14 @@ async def send_message(
             # Exclude the message we just created
             conversation_history = [msg for msg in conversation_history if msg.get('content') != request.message]
         
+        # Log conversation history for debugging
+        logger.info(
+            f'Conversation history loaded: {len(conversation_history)} messages',
+            userId=user_id,
+            message_count=len(conversation_history),
+            history_summary=[{'role': m.get('role'), 'has_tool_calls': bool(m.get('tool_calls')), 'is_tool': m.get('role') == 'tool'} for m in conversation_history[-5:]]
+        )
+        
         # Get user timezone for context
         from app.db.queries.users import find_user_by_id
         user_obj = await find_user_by_id(user_id)
@@ -234,6 +242,16 @@ async def send_message(
                 # Note: We store as 'assistant' role in DB (for compatibility) but mark as tool result
                 # The conversation_manager will convert it to 'tool' role when loading for OpenAI
                 tool_result_content = json.dumps(function_results.get('result', {}))
+                
+                logger.info(
+                    f'Storing tool result for function call',
+                    userId=user_id,
+                    function_name=function_results.get('function_name'),
+                    tool_call_id=tool_call_id,
+                    result_keys=list(function_results.get('result', {}).keys()) if isinstance(function_results.get('result'), dict) else None,
+                    result_preview=str(function_results.get('result', {}))[:200]
+                )
+                
                 await conversation_manager.add_message_to_history(
                     user_id=user_id,
                     role='assistant',  # DB stores as assistant, but we'll convert to 'tool' when loading
