@@ -25,14 +25,12 @@ router = APIRouter()
 
 class ChatMessageRequest(BaseModel):
     message: str
-    meeting_id: Optional[str] = None
     conversation_history: Optional[List[Dict[str, str]]] = None
     meetings: Optional[List[Dict[str, Any]]] = None
 
 
 @router.get('/chat/messages')
 async def get_messages(
-    meeting_id: Optional[str] = Query(None, description='Filter by meeting ID'),
     limit: int = Query(100, ge=1, le=500, description='Maximum number of messages'),
     user: Dict[str, Any] = Depends(require_auth)
 ):
@@ -46,7 +44,6 @@ async def get_messages(
         
         messages = await get_chat_messages(
             user_id=user_id,
-            meeting_id=meeting_id,
             limit=limit
         )
         
@@ -86,8 +83,7 @@ async def send_message(
         user_msg = await conversation_manager.add_message_to_history(
             user_id=user_id,
             role='user',
-            content=request.message,
-            meeting_id=request.meeting_id
+            content=request.message
         )
         
         # Get conversation history with sliding window (if not provided)
@@ -95,7 +91,6 @@ async def send_message(
         if not conversation_history:
             conversation_history = await conversation_manager.get_conversation_history(
                 user_id=user_id,
-                meeting_id=request.meeting_id,
                 include_tool_calls=True
             )
             # Exclude the message we just created
@@ -126,36 +121,42 @@ async def send_message(
         
         # Generate AI response with function calling support
         service = ChatPanelService(openai_api_key)
-        response = await service.generate_response(
-            message=request.message,
-            conversation_history=conversation_history,
-            meetings=request.meetings or [],
-            user_timezone=user_timezone,
-            memory_context=memory_context
-        )
+        current_history = conversation_history
+        executed_calls = []
+        max_iterations = 5  # Prevent infinite loops
+        iteration = 0
         
-        # Handle function calls if any
-        function_results = None
-        tool_call_id = None
-        assistant_message_with_tool_calls = None
-        
-        if response.get('function_calls'):
+        while iteration < max_iterations:
+            iteration += 1
+            
+            # Get response from OpenAI
+            # Only include user message on first iteration, subsequent iterations use conversation history
+            response = await service.generate_response(
+                message=request.message if iteration == 1 else '',
+                conversation_history=current_history,
+                meetings=request.meetings or [],
+                user_timezone=user_timezone,
+                memory_context=memory_context
+            )
+            
+            # If no function calls, we're done
+            if not response.get('function_calls'):
+                response_text = response.get('content') or 'Sorry, I couldn\'t process that request.'
+                break
+            
             function_calls = response['function_calls']
-            
-            # Validate function calls
             if not isinstance(function_calls, list) or len(function_calls) == 0:
-                function_calls = []
+                response_text = response.get('content') or 'I encountered an error processing your request.'
+                break
             
-            # Store the assistant message with tool calls for conversation history
+            # Store the assistant message with tool calls
             tool_calls_content = f"[Function calls: {', '.join([fc.get('name', 'unknown') for fc in function_calls])}]"
             assistant_msg_with_tools = await conversation_manager.add_message_to_history(
                 user_id=user_id,
                 role='assistant',
                 content=response.get('content') or tool_calls_content,
-                meeting_id=request.meeting_id,
                 metadata={
-                    'function_calls': function_calls,
-                    'has_tool_calls': True
+                    'tool_calls': function_calls
                 }
             )
             
@@ -175,8 +176,13 @@ async def send_message(
                 ]
             }
             
-            # Execute function calls (handle multiple calls sequentially)
-            executed_calls = []
+            # Add assistant message to history
+            current_history = current_history + [assistant_message_with_tool_calls]
+            
+            # Track starting point for this iteration's results
+            results_start_index = len(executed_calls)
+            
+            # Execute all function calls sequentially
             for func_call in function_calls:
                 func_name = func_call.get('name')
                 func_args = func_call.get('arguments', {})
@@ -201,7 +207,7 @@ async def send_message(
                     continue
                                     
                 try:
-                    # Use FunctionExecutor to execute the function (pass timezone)
+                    # Execute function sequentially
                     executor = FunctionExecutor(user_id, user, user_timezone)
                     result = await executor.execute(func_name, func_args, current_tool_call_id)
                     executed_calls.append(result)
@@ -214,76 +220,55 @@ async def send_message(
                         'result': {'error': f'Error executing function: {str(e)}'}
                     })
             
-            # Use the first successful function result (or first result if all failed)
-            # For multiple tool calls, we'll need to handle them properly in the response
-            if executed_calls:
-                function_results = executed_calls[0]  # Use first result for now
-                tool_call_id = function_results.get('tool_call_id')
-            
-            # If we executed functions, get final response from OpenAI
-            # Add assistant message with tool calls to conversation history
-            updated_history = conversation_history + [assistant_message_with_tool_calls] if assistant_message_with_tool_calls else conversation_history
-            
-            # Also add tool result message to conversation history for proper context
-            if function_results:
-                # Store tool result message in database for conversation history
-                # Note: We store as 'assistant' role in DB (for compatibility) but mark as tool result
-                # The conversation_manager will convert it to 'tool' role when loading for OpenAI
-                tool_result_content = json.dumps(function_results.get('result', {}))
+            # Store all tool results and add to history
+            tool_result_messages = []
+            iteration_results = executed_calls[results_start_index:]  # Only new results from this iteration
+            for executed_call in iteration_results:
+                tool_call_id = executed_call.get('tool_call_id')
+                function_name = executed_call.get('function_name')
+                result_data = executed_call.get('result', {})
                 
+                # Store tool result message in database
+                # Note: DB only allows 'user', 'assistant', 'system' - store as 'assistant' with tool metadata
+                tool_result_content = json.dumps(result_data)
                 await conversation_manager.add_message_to_history(
                     user_id=user_id,
-                    role='assistant',  # DB stores as assistant, but we'll convert to 'tool' when loading
-                    content=tool_result_content,  # Store actual JSON result as content
-                    meeting_id=request.meeting_id,
+                    role='assistant',  # DB constraint - stored as assistant but marked as tool result
+                    content=tool_result_content,
                     metadata={
                         'tool_call_id': tool_call_id,
-                        'function_name': function_results.get('function_name'),
-                        'function_result': function_results.get('result'),
+                        'function_name': function_name,
                         'is_tool_result': True
                     }
                 )
                 
-                final_response = await service.generate_response(
-                    message=request.message,
-                    conversation_history=updated_history,
-                    meetings=request.meetings or [],
-                    function_results=function_results,
-                    tool_call_id=tool_call_id,
-                    user_timezone=user_timezone
-                )
-                response_text = final_response.get('content') or 'I\'ve retrieved the information you requested.'
-            else:
-                response_text = response.get('content') or 'I encountered an error processing your request.'
-        else:
-            response_text = response.get('content') or 'Sorry, I couldn\'t process that request.'
+                # Format for OpenAI (as 'tool' role)
+                tool_result_messages.append({
+                    'role': 'tool',
+                    'tool_call_id': tool_call_id,
+                    'name': function_name,
+                    'content': tool_result_content
+                })
+            
+            # Add tool results to history for next iteration
+            current_history = current_history + tool_result_messages
+            
+            # Continue loop - GPT will see tool results and may make another tool call
+            # If GPT doesn't make another tool call, the loop will exit on next iteration
+        
+        # If we exhausted iterations without getting a final response
+        if iteration >= max_iterations and response.get('function_calls'):
+            response_text = 'I\'ve processed your request, but reached the maximum number of tool call iterations.'
         
         # Ensure response_text is not None or empty
         if not response_text or not response_text.strip():
             response_text = 'I\'ve processed your request.'
         
         # Store AI response
-        # If we already stored a message with tool calls, update it or create final response
-        if assistant_message_with_tool_calls:
-            # Store final response as a new message (or update existing)
-            assistant_msg = await conversation_manager.add_message_to_history(
+        assistant_msg = await conversation_manager.add_message_to_history(
                 user_id=user_id,
                 role='assistant',
-                content=response_text,
-                meeting_id=request.meeting_id,
-                metadata={
-                    'function_results': function_results.get('result') if function_results else None,
-                    'function_name': function_results.get('function_name') if function_results else None,
-                    'is_function_response': True
-                }
-            )
-        else:
-            # Normal response without function calls
-            assistant_msg = await conversation_manager.add_message_to_history(
-                user_id=user_id,
-                role='assistant',
-                content=response_text,
-                meeting_id=request.meeting_id
+            content=response_text
             )
         
         result = {
@@ -294,8 +279,8 @@ async def send_message(
         }
         
         # Include function results if any (for frontend to handle)
-        if function_results:
-            result['function_results'] = function_results
+        if executed_calls:
+            result['function_results'] = executed_calls
         
         # Store conversation summary in mem0.ai for long-term memory (async, don't block response)
         if memory_service.enabled:
@@ -304,9 +289,9 @@ async def send_message(
                 summary_parts = [f"User asked: {request.message}"]
                 if response_text:
                     summary_parts.append(f"Assistant responded: {response_text[:200]}")
-                if function_results:
-                    func_name = function_results.get('function_name', 'unknown')
-                    summary_parts.append(f"Used function: {func_name}")
+                if executed_calls:
+                    func_names = [fc.get('function_name', 'unknown') for fc in executed_calls]
+                    summary_parts.append(f"Used functions: {', '.join(func_names)}")
                 
                 summary = " ".join(summary_parts)
                 
@@ -317,9 +302,8 @@ async def send_message(
                         user_id=user_id,
                         content=summary,
                         metadata={
-                            'meeting_id': request.meeting_id,
-                            'has_function_calls': bool(function_results),
-                            'function_name': function_results.get('function_name') if function_results else None
+                            'has_function_calls': bool(executed_calls),
+                            'function_names': [fc.get('function_name') for fc in executed_calls] if executed_calls else None
                         }
                     )
                 )

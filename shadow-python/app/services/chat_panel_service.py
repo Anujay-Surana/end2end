@@ -123,8 +123,6 @@ class ChatPanelService:
         message: str,
         conversation_history: List[Dict[str, str]] = None,
         meetings: List[Dict[str, Any]] = None,
-        function_results: Optional[Dict[str, Any]] = None,
-        tool_call_id: Optional[str] = None,
         user_timezone: str = 'UTC',
         memory_context: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -132,10 +130,10 @@ class ChatPanelService:
         Generate chat response using OpenAI with function calling support
         Args:
             message: User message
-            conversation_history: Previous messages in conversation
+            conversation_history: Previous messages in conversation (includes tool results if any)
             meetings: Today's meetings for context
-            function_results: Results from previous function calls (for follow-up)
-            tool_call_id: The tool_call_id from the original function call
+            user_timezone: User's timezone
+            memory_context: Memory context from mem0.ai
         Returns:
             Dict with 'content' (response text) and optionally 'function_calls' (list of function calls to execute)
         """
@@ -148,49 +146,30 @@ class ChatPanelService:
             # Build system prompt with current date/time and memory context
             system_prompt = self.build_system_prompt(meetings, user_timezone, memory_context)
 
-            # Build messages array
+            # Build messages array - conversation_history already includes tool results
             messages = [
                 {'role': 'system', 'content': system_prompt},
                 *conversation_history,
             ]
             
-            # Add function results if provided (from previous function calls)
-            # OpenAI expects function results to include the tool_call_id
-            if function_results:
-                tool_call_id_to_use = tool_call_id or function_results.get('tool_call_id')
-                function_name = function_results.get('function_name', 'unknown')
-                result_data = function_results.get('result', {})
-                
-                # Format result as JSON string (OpenAI requirement)
-                try:
-                    result_content = json.dumps(result_data) if isinstance(result_data, dict) else str(result_data)
-                except (TypeError, ValueError) as e:
-                    logger.warning(f'Error serializing function result: {str(e)}')
-                    result_content = json.dumps({'error': 'Failed to serialize function result'})
-                
-                function_message = {
-                    'role': 'tool',
-                    'tool_call_id': tool_call_id_to_use,
-                    'name': function_name,
-                    'content': result_content
-                }
-                messages.append(function_message)
-            
-            # Add user message (only if not already in conversation_history)
-            if not function_results:  # Only add user message if this is the first call
+            # Add user message if provided and not already in conversation_history
+            # Check if last message is user message to avoid duplicates
+            if message and (not conversation_history or conversation_history[-1].get('role') != 'user'):
                 messages.append({'role': 'user', 'content': message})
 
-            # Prepare request - if we're sending function results, don't include tools
-            # (model should generate text response based on function results)
+            # Check if last message in history is a tool result - if so, don't include tools
+            # (model should generate text response based on tool results)
+            last_message_is_tool = conversation_history and conversation_history[-1].get('role') == 'tool'
+            
             request_data = {
-                'model': 'gpt-4o-mini',  # Using gpt-4o-mini for function calling support
+                'model': 'gpt-4o-mini',
                 'messages': messages,
                 'max_tokens': 500,
                 'temperature': 0.7,
             }
             
-            # Only include tools if we're not sending function results (first call)
-            if not function_results:
+            # Include tools if we're not responding to tool results
+            if not last_message_is_tool:
                 request_data['tools'] = self.get_tools_definition()
                 request_data['tool_choice'] = 'auto'
 

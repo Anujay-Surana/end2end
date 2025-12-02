@@ -26,7 +26,6 @@ class ConversationManager:
     async def get_conversation_history(
         self,
         user_id: str,
-        meeting_id: Optional[str] = None,
         include_tool_calls: bool = True
     ) -> List[Dict[str, Any]]:
         """
@@ -34,7 +33,6 @@ class ConversationManager:
         
         Args:
             user_id: User ID
-            meeting_id: Optional meeting ID filter
             include_tool_calls: Whether to include tool calls in history
             
         Returns:
@@ -44,7 +42,6 @@ class ConversationManager:
             # Load messages from database (we'll get more than window_size to ensure we have enough)
             db_messages = await get_chat_messages(
                 user_id=user_id,
-                meeting_id=meeting_id,
                 limit=self.window_size * 2  # Get more than needed for filtering
             )
             
@@ -58,7 +55,7 @@ class ConversationManager:
                 if not isinstance(metadata, dict):
                     metadata = {}
                 
-                # Check if this is a tool result message
+                # Tool results are stored with role='assistant' but marked with is_tool_result=True
                 if metadata.get('is_tool_result'):
                     tool_call_id = metadata.get('tool_call_id')
                     if tool_call_id:
@@ -82,8 +79,8 @@ class ConversationManager:
                 }
                 
                 # Include tool calls if present and requested
-                if include_tool_calls and metadata.get('has_tool_calls'):
-                    tool_calls = metadata.get('function_calls', [])
+                if include_tool_calls:
+                    tool_calls = metadata.get('tool_calls', [])
                     if tool_calls:
                         msg_dict['tool_calls'] = [
                             {
@@ -107,14 +104,13 @@ class ConversationManager:
                             tool_result_msg = tool_results_map[tool_call_id]
                             tool_metadata = tool_result_msg.get('metadata', {})
                             function_name = tool_metadata.get('function_name', 'unknown')
-                            function_result = tool_metadata.get('function_result', {})
                             
-                            # Format as OpenAI tool message
+                            # Format as OpenAI tool message - content is already JSON string
                             tool_msg = {
                                 'role': 'tool',
                                 'tool_call_id': tool_call_id,
                                 'name': function_name,
-                                'content': json.dumps(function_result) if isinstance(function_result, dict) else str(function_result)
+                                'content': tool_result_msg.get('content', '{}')
                             }
                             all_formatted_messages.append(tool_msg)
             
@@ -133,7 +129,6 @@ class ConversationManager:
         user_id: str,
         role: str,
         content: str,
-        meeting_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
@@ -141,9 +136,8 @@ class ConversationManager:
         
         Args:
             user_id: User ID
-            role: Message role ('user', 'assistant', 'system')
+            role: Message role ('user', 'assistant', 'system', 'tool')
             content: Message content
-            meeting_id: Optional meeting ID
             metadata: Optional metadata
             
         Returns:
@@ -154,7 +148,6 @@ class ConversationManager:
                 user_id=user_id,
                 role=role,
                 content=content,
-                meeting_id=meeting_id,
                 metadata=metadata
             )
             
