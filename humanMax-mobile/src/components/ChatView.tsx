@@ -159,30 +159,43 @@ export const ChatView: React.FC<ChatViewProps> = ({ meetingId }) => {
   };
 
   const handleVoiceStart = async () => {
+    console.log('🎤 Voice button clicked');
+    console.log('📱 Is native platform:', Capacitor.isNativePlatform());
+    console.log('🔌 Voice service available:', !!voiceService);
+    
     if (!Capacitor.isNativePlatform()) {
-      alert('Voice recording is only available on native iOS app');
+      const platform = Capacitor.getPlatform();
+      alert(`Voice recording is only available on native iOS app. Current platform: ${platform}`);
       return;
     }
 
     try {
+      console.log('▶️ Starting voice recording...');
       setIsRecording(true);
       await voiceService.start();
+      console.log('✅ Voice recording started');
       
       // Set up transcript callbacks
       voiceService.onPartialTranscript((text) => {
         // Show partial transcript in UI (could add a temporary message)
-        console.log('Partial transcript:', text);
+        console.log('📝 Partial transcript:', text);
       });
       
       voiceService.onFinalTranscript((text) => {
         // Send final transcript as a message
+        console.log('✅ Final transcript:', text);
         setInputValue(text);
         setIsRecording(false);
         sendMessage();
       });
     } catch (error: any) {
-      console.error('Error starting voice recording:', error);
-      alert(error.message || 'Failed to start voice recording');
+      console.error('❌ Error starting voice recording:', error);
+      console.error('Error details:', {
+        message: error?.message,
+        name: error?.name,
+        stack: error?.stack
+      });
+      alert(`Failed to start voice recording: ${error?.message || 'Unknown error'}\n\nCheck console for details.`);
       setIsRecording(false);
     }
   };

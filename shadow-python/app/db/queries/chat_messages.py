@@ -6,6 +6,8 @@ CRUD operations for chat_messages table
 
 from app.db.connection import supabase
 from typing import Dict, List, Any, Optional
+import json
+from app.services.logger import logger
 
 
 async def create_chat_message(
@@ -35,7 +37,16 @@ async def create_chat_message(
     if meeting_id:
         message_data['meeting_id'] = meeting_id
     if metadata:
-        message_data['metadata'] = metadata
+        # Ensure metadata is properly formatted as a dict
+        if isinstance(metadata, dict):
+            message_data['metadata'] = metadata
+        elif isinstance(metadata, str):
+            try:
+                message_data['metadata'] = json.loads(metadata)
+            except json.JSONDecodeError:
+                message_data['metadata'] = {}
+        else:
+            message_data['metadata'] = {}
     
     response = supabase.table('chat_messages').insert(message_data).execute()
     
@@ -61,7 +72,9 @@ async def get_chat_messages(
     Returns:
         List of messages
     """
-    query = supabase.table('chat_messages').select('*').eq('user_id', user_id)
+    # Use explicit column selection to ensure JSONB metadata is properly retrieved
+    # PostgREST may not properly serialize JSONB with select('*')
+    query = supabase.table('chat_messages').select('id, user_id, meeting_id, role, content, metadata, created_at').eq('user_id', user_id)
     
     if meeting_id:
         query = query.eq('meeting_id', meeting_id)
@@ -71,7 +84,30 @@ async def get_chat_messages(
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')
     if response.data:
-        return response.data
+        processed_messages = []
+        for msg in response.data:
+            raw_metadata = msg.get('metadata')
+            
+            # Handle metadata deserialization
+            if raw_metadata is None:
+                msg['metadata'] = {}
+            elif isinstance(raw_metadata, str):
+                # Metadata came back as JSON string - parse it
+                try:
+                    parsed = json.loads(raw_metadata)
+                    msg['metadata'] = parsed if isinstance(parsed, dict) else {}
+                except (json.JSONDecodeError, TypeError):
+                    msg['metadata'] = {}
+            elif isinstance(raw_metadata, dict):
+                # Already a dict - use as-is
+                msg['metadata'] = raw_metadata
+            else:
+                # Unexpected type - default to empty dict
+                msg['metadata'] = {}
+            
+            processed_messages.append(msg)
+        
+        return processed_messages
     return []
 
 

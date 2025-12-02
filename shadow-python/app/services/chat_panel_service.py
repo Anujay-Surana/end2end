@@ -154,15 +154,6 @@ class ChatPanelService:
                 *conversation_history,
             ]
             
-            # Log messages being sent to OpenAI for debugging
-            logger.info(
-                f'Sending {len(messages)} messages to OpenAI',
-                message_count=len(messages),
-                has_tool_results=any(m.get('role') == 'tool' for m in messages),
-                tool_results_count=sum(1 for m in messages if m.get('role') == 'tool'),
-                messages_summary=[{'role': m.get('role'), 'has_tool_calls': bool(m.get('tool_calls')), 'content_preview': str(m.get('content', ''))[:50]} for m in messages[-5:]]
-            )
-            
             # Add function results if provided (from previous function calls)
             # OpenAI expects function results to include the tool_call_id
             if function_results:
@@ -226,16 +217,6 @@ class ChatPanelService:
                 raise Exception('Invalid OpenAI API response: no choices')
             
             message_obj = data['choices'][0]['message']
-            
-            # Log OpenAI response for debugging
-            logger.info(
-                f'OpenAI response received',
-                has_content=bool(message_obj.get('content')),
-                content_preview=message_obj.get('content', '')[:100] if message_obj.get('content') else None,
-                has_tool_calls=bool(message_obj.get('tool_calls')),
-                tool_calls_count=len(message_obj.get('tool_calls', [])),
-                tool_calls_names=[tc.get('function', {}).get('name') for tc in message_obj.get('tool_calls', [])]
-            )
             
             # Check if model wants to call functions
             function_calls = []

@@ -52,120 +52,19 @@ class ConversationManager:
             tool_results_map = {}
             regular_messages = []
             
-            # Debug: Inspect metadata from database
-            metadata_samples = []
-            messages_with_metadata = 0
-            messages_with_empty_metadata = 0
-            messages_with_none_metadata = 0
-            
             # First pass: separate tool results from regular messages
-            for idx, msg in enumerate(db_messages):
-                # Inspect metadata structure
-                raw_metadata = msg.get('metadata')
-                if raw_metadata is None:
-                    messages_with_none_metadata += 1
-                    metadata = {}
-                elif isinstance(raw_metadata, dict):
-                    if raw_metadata:
-                        messages_with_metadata += 1
-                        metadata = raw_metadata
-                        # Sample first few messages with metadata
-                        if len(metadata_samples) < 3:
-                            metadata_samples.append({
-                                'index': idx,
-                                'role': msg.get('role'),
-                                'content_preview': str(msg.get('content', ''))[:50],
-                                'metadata': raw_metadata,
-                                'has_is_tool_result': raw_metadata.get('is_tool_result', False)
-                            })
-                    else:
-                        messages_with_empty_metadata += 1
-                        metadata = {}
-                else:
-                    # Metadata is not a dict (could be string, etc.)
-                    logger.warning(
-                        f'Unexpected metadata type: {type(raw_metadata)}',
-                        userId=user_id,
-                        message_index=idx,
-                        metadata_type=str(type(raw_metadata)),
-                        metadata_value=str(raw_metadata)[:100]
-                    )
+            for msg in db_messages:
+                metadata = msg.get('metadata', {})
+                if not isinstance(metadata, dict):
                     metadata = {}
                 
-                # Check for tool result - multiple detection methods
-                is_tool_result = False
-                tool_call_id = None
-                
-                # Method 1: Check metadata flag
+                # Check if this is a tool result message
                 if metadata.get('is_tool_result'):
-                    is_tool_result = True
                     tool_call_id = metadata.get('tool_call_id')
-                
-                # Method 2: Fallback - check if content is JSON and matches tool result pattern
-                # Tool results have JSON content with keys like 'date', 'meetings', 'count', etc.
-                if not is_tool_result and msg.get('content'):
-                    try:
-                        content_str = msg.get('content', '')
-                        if content_str.startswith('{') and content_str.endswith('}'):
-                            parsed_content = json.loads(content_str)
-                            # Check if it looks like a tool result (has common tool result keys)
-                            if isinstance(parsed_content, dict):
-                                tool_result_indicators = ['date', 'meetings', 'count', 'error', 'brief', 'summary']
-                                if any(key in parsed_content for key in tool_result_indicators):
-                                    # Try to find tool_call_id in metadata or content
-                                    is_tool_result = True
-                                    tool_call_id = metadata.get('tool_call_id') or parsed_content.get('tool_call_id')
-                                    logger.info(
-                                        f'Detected tool result via content pattern',
-                                        userId=user_id,
-                                        message_index=idx,
-                                        content_keys=list(parsed_content.keys())[:5],
-                                        tool_call_id=tool_call_id
-                                    )
-                    except (json.JSONDecodeError, TypeError):
-                        pass  # Not JSON, skip
-                
-                if is_tool_result:
                     if tool_call_id:
                         tool_results_map[tool_call_id] = msg
-                        logger.debug(
-                            f'Found tool result message',
-                            userId=user_id,
-                            tool_call_id=tool_call_id,
-                            function_name=metadata.get('function_name'),
-                            has_result=bool(metadata.get('function_result')),
-                            detection_method='metadata' if metadata.get('is_tool_result') else 'content_pattern'
-                        )
-                    else:
-                        logger.warning(
-                            f'Tool result message missing tool_call_id',
-                            userId=user_id,
-                            message_index=idx,
-                            metadata_keys=list(metadata.keys()),
-                            content_preview=str(msg.get('content', ''))[:100]
-                        )
                 else:
                     regular_messages.append(msg)
-            
-            # Log metadata inspection results
-            logger.info(
-                f'Metadata inspection complete',
-                userId=user_id,
-                total_messages=len(db_messages),
-                messages_with_metadata=messages_with_metadata,
-                messages_with_empty_metadata=messages_with_empty_metadata,
-                messages_with_none_metadata=messages_with_none_metadata,
-                metadata_samples=metadata_samples,
-                tool_results_found=len(tool_results_map)
-            )
-            
-            logger.info(
-                f'Separated messages: {len(regular_messages)} regular, {len(tool_results_map)} tool results',
-                userId=user_id,
-                regular_count=len(regular_messages),
-                tool_results_count=len(tool_results_map),
-                tool_call_ids=list(tool_results_map.keys())
-            )
             
             # Convert to OpenAI format and apply sliding window
             # We want the most recent N messages, but keep them in chronological order (oldest first) for OpenAI
@@ -210,14 +109,6 @@ class ConversationManager:
                             function_name = tool_metadata.get('function_name', 'unknown')
                             function_result = tool_metadata.get('function_result', {})
                             
-                            logger.debug(
-                                f'Adding tool result to conversation history',
-                                userId=user_id,
-                                tool_call_id=tool_call_id,
-                                function_name=function_name,
-                                result_keys=list(function_result.keys()) if isinstance(function_result, dict) else None
-                            )
-                            
                             # Format as OpenAI tool message
                             tool_msg = {
                                 'role': 'tool',
@@ -226,29 +117,10 @@ class ConversationManager:
                                 'content': json.dumps(function_result) if isinstance(function_result, dict) else str(function_result)
                             }
                             all_formatted_messages.append(tool_msg)
-                        else:
-                            logger.warning(
-                                f'Tool result not found for tool_call_id',
-                                userId=user_id,
-                                tool_call_id=tool_call_id,
-                                available_tool_call_ids=list(tool_results_map.keys())
-                            )
             
             # Take the last N messages (most recent) but keep them in chronological order
             # OpenAI expects chronological order (oldest first), so we take the tail of the list
             conversation_history = all_formatted_messages[-self.window_size:] if len(all_formatted_messages) > self.window_size else all_formatted_messages
-            
-            # Log conversation history details for debugging
-            tool_results_count = sum(1 for m in conversation_history if m.get('role') == 'tool')
-            assistant_with_tools_count = sum(1 for m in conversation_history if m.get('tool_calls'))
-            logger.info(
-                f'Loaded {len(conversation_history)} messages for conversation history',
-                userId=user_id,
-                total_messages=len(conversation_history),
-                tool_results_count=tool_results_count,
-                assistant_with_tools_count=assistant_with_tools_count,
-                message_types={m.get('role'): sum(1 for msg in conversation_history if msg.get('role') == m.get('role')) for m in conversation_history}
-            )
             
             return conversation_history
             
@@ -285,8 +157,6 @@ class ConversationManager:
                 meeting_id=meeting_id,
                 metadata=metadata
             )
-            
-            logger.debug(f'Added {role} message to conversation history', userId=user_id)
             
             return message
             

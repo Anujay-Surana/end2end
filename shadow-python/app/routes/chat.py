@@ -101,35 +101,10 @@ async def send_message(
             # Exclude the message we just created
             conversation_history = [msg for msg in conversation_history if msg.get('content') != request.message]
         
-        # Log conversation history for debugging
-        logger.info(
-            f'Conversation history loaded: {len(conversation_history)} messages',
-            userId=user_id,
-            message_count=len(conversation_history),
-            history_summary=[{'role': m.get('role'), 'has_tool_calls': bool(m.get('tool_calls')), 'is_tool': m.get('role') == 'tool'} for m in conversation_history[-5:]]
-        )
-        
         # Get user timezone for context
         from app.db.queries.users import find_user_by_id
         user_obj = await find_user_by_id(user_id)
-        
-        # Debug timezone retrieval
-        if user_obj:
-            user_timezone = user_obj.get('timezone', 'UTC')
-            logger.info(
-                f'User timezone retrieval',
-                userId=user_id,
-                user_obj_keys=list(user_obj.keys()),
-                timezone_field_value=user_obj.get('timezone'),
-                timezone_final=user_timezone,
-                has_timezone_field='timezone' in user_obj
-            )
-        else:
-            user_timezone = 'UTC'
-            logger.warning(
-                f'User object not found, defaulting to UTC',
-                userId=user_id
-            )
+        user_timezone = user_obj.get('timezone', 'UTC') if user_obj else 'UTC'
         
         # Retrieve relevant memories from mem0.ai
         memory_service = MemoryService()
@@ -166,11 +141,9 @@ async def send_message(
         
         if response.get('function_calls'):
             function_calls = response['function_calls']
-            logger.info(f'Function calls requested: {[fc["name"] for fc in function_calls]}', userId=user_id)
             
             # Validate function calls
             if not isinstance(function_calls, list) or len(function_calls) == 0:
-                logger.warning('Invalid function_calls format received', userId=user_id)
                 function_calls = []
             
             # Store the assistant message with tool calls for conversation history
@@ -211,7 +184,6 @@ async def send_message(
                 
                 # Validate function name
                 if not func_name or func_name not in ['get_calendar_by_date', 'generate_meeting_brief']:
-                    logger.warning(f'Unknown function called: {func_name}', userId=user_id)
                     executed_calls.append({
                         'function_name': func_name or 'unknown',
                         'tool_call_id': current_tool_call_id,
@@ -221,14 +193,13 @@ async def send_message(
                 
                 # Validate arguments
                 if not isinstance(func_args, dict):
-                    logger.warning(f'Invalid arguments format for {func_name}: {type(func_args)}', userId=user_id)
                     executed_calls.append({
                         'function_name': func_name,
                         'tool_call_id': current_tool_call_id,
                         'result': {'error': 'Invalid arguments format'}
                     })
                     continue
-
+                                    
                 try:
                     # Use FunctionExecutor to execute the function (pass timezone)
                     executor = FunctionExecutor(user_id, user, user_timezone)
@@ -260,16 +231,7 @@ async def send_message(
                 # The conversation_manager will convert it to 'tool' role when loading for OpenAI
                 tool_result_content = json.dumps(function_results.get('result', {}))
                 
-                logger.info(
-                    f'Storing tool result for function call',
-                    userId=user_id,
-                    function_name=function_results.get('function_name'),
-                    tool_call_id=tool_call_id,
-                    result_keys=list(function_results.get('result', {}).keys()) if isinstance(function_results.get('result'), dict) else None,
-                    result_preview=str(function_results.get('result', {}))[:200]
-                )
-                
-                stored_message = await conversation_manager.add_message_to_history(
+                await conversation_manager.add_message_to_history(
                     user_id=user_id,
                     role='assistant',  # DB stores as assistant, but we'll convert to 'tool' when loading
                     content=tool_result_content,  # Store actual JSON result as content
@@ -278,22 +240,8 @@ async def send_message(
                         'tool_call_id': tool_call_id,
                         'function_name': function_results.get('function_name'),
                         'function_result': function_results.get('result'),
-                        'is_tool_result': True,
-                        'role_override': 'tool'  # Flag to convert to 'tool' role when loading
+                        'is_tool_result': True
                     }
-                )
-                
-                # Verify storage immediately
-                stored_metadata = stored_message.get('metadata', {})
-                logger.info(
-                    f'Tool result storage verification',
-                    userId=user_id,
-                    message_id=stored_message.get('id'),
-                    stored_has_is_tool_result=stored_metadata.get('is_tool_result', False),
-                    stored_tool_call_id=stored_metadata.get('tool_call_id'),
-                    stored_function_name=stored_metadata.get('function_name'),
-                    metadata_type=type(stored_metadata).__name__,
-                    metadata_keys=list(stored_metadata.keys()) if isinstance(stored_metadata, dict) else None
                 )
                 
                 final_response = await service.generate_response(
