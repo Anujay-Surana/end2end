@@ -9,6 +9,9 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from app.middleware.auth import require_auth
 from app.services.chat_panel_service import ChatPanelService
+from app.services.function_executor import FunctionExecutor
+from app.services.conversation_manager import ConversationManager
+from app.services.memory_service import MemoryService
 from app.db.queries.chat_messages import create_chat_message, get_chat_messages, delete_chat_message
 from app.services.logger import logger
 from app.routes.day_prep import get_meetings_for_day
@@ -76,54 +79,50 @@ async def send_message(
         if not openai_api_key:
             raise HTTPException(status_code=500, detail='OpenAI API key not configured')
         
+        # Initialize conversation manager with sliding window (last 20 messages)
+        conversation_manager = ConversationManager(window_size=20)
+        
         # Store user message
-        user_msg = await create_chat_message(
+        user_msg = await conversation_manager.add_message_to_history(
             user_id=user_id,
             role='user',
             content=request.message,
             meeting_id=request.meeting_id
         )
         
-        # Get conversation history from database if not provided
+        # Get conversation history with sliding window (if not provided)
         conversation_history = request.conversation_history
         if not conversation_history:
-            # Load last 20 messages for context
-            db_messages = await get_chat_messages(
+            conversation_history = await conversation_manager.get_conversation_history(
                 user_id=user_id,
                 meeting_id=request.meeting_id,
-                limit=20
+                include_tool_calls=True
             )
-            # Convert to OpenAI format (exclude the message we just created)
-            # Include function calls if present in metadata
-            conversation_history = []
-            for msg in db_messages:
-                if msg['id'] == user_msg['id']:
-                    continue
-                
-                msg_dict = {'role': msg['role'], 'content': msg['content']}
-                
-                # Include tool calls if present
-                if msg.get('metadata') and msg.get('metadata', {}).get('has_tool_calls'):
-                    tool_calls = msg.get('metadata', {}).get('function_calls', [])
-                    if tool_calls:
-                        msg_dict['tool_calls'] = [
-                            {
-                                'id': tc.get('id'),
-                                'type': 'function',
-                                'function': {
-                                    'name': tc.get('name'),
-                                    'arguments': tc.get('arguments') if isinstance(tc.get('arguments'), str) else json.dumps(tc.get('arguments', {}))
-                                }
-                            }
-                            for tc in tool_calls
-                        ]
-                
-                conversation_history.append(msg_dict)
+            # Exclude the message we just created
+            conversation_history = [msg for msg in conversation_history if msg.get('content') != request.message]
         
         # Get user timezone for context
         from app.db.queries.users import find_user_by_id
         user_obj = await find_user_by_id(user_id)
         user_timezone = user_obj.get('timezone', 'UTC') if user_obj else 'UTC'
+        
+        # Retrieve relevant memories from mem0.ai
+        memory_service = MemoryService()
+        relevant_memories = []
+        if memory_service.enabled:
+            try:
+                relevant_memories = await memory_service.search_memories(
+                    user_id=user_id,
+                    query=request.message,
+                    limit=5
+                )
+            except Exception as e:
+                logger.warning(f'Error retrieving memories: {str(e)}', userId=user_id)
+        
+        # Add memory context to system prompt if available
+        memory_context = ""
+        if relevant_memories:
+            memory_context = memory_service.format_memories_for_context(relevant_memories)
         
         # Generate AI response with function calling support
         service = ChatPanelService(openai_api_key)
@@ -131,7 +130,8 @@ async def send_message(
             message=request.message,
             conversation_history=conversation_history,
             meetings=request.meetings or [],
-            user_timezone=user_timezone
+            user_timezone=user_timezone,
+            memory_context=memory_context
         )
         
         # Handle function calls if any
@@ -143,10 +143,14 @@ async def send_message(
             function_calls = response['function_calls']
             logger.info(f'Function calls requested: {[fc["name"] for fc in function_calls]}', userId=user_id)
             
+            # Validate function calls
+            if not isinstance(function_calls, list) or len(function_calls) == 0:
+                logger.warning('Invalid function_calls format received', userId=user_id)
+                function_calls = []
+            
             # Store the assistant message with tool calls for conversation history
-            # Store it in database so conversation history is maintained
-            tool_calls_content = f"[Function calls: {', '.join([fc['name'] for fc in function_calls])}]"
-            assistant_msg_with_tools = await create_chat_message(
+            tool_calls_content = f"[Function calls: {', '.join([fc.get('name', 'unknown') for fc in function_calls])}]"
+            assistant_msg_with_tools = await conversation_manager.add_message_to_history(
                 user_id=user_id,
                 role='assistant',
                 content=response.get('content') or tool_calls_content,
@@ -162,262 +166,63 @@ async def send_message(
                 'content': response.get('content') or tool_calls_content,
                 'tool_calls': [
                     {
-                        'id': fc['id'],
+                        'id': fc.get('id', f"call_{idx}"),
                         'type': 'function',
                         'function': {
-                            'name': fc['name'],
-                            'arguments': json.dumps(fc['arguments'])
+                            'name': fc.get('name', 'unknown'),
+                            'arguments': json.dumps(fc.get('arguments', {})) if isinstance(fc.get('arguments'), dict) else str(fc.get('arguments', ''))
                         }
                     }
-                    for fc in function_calls
+                    for idx, fc in enumerate(function_calls)
                 ]
             }
             
-            # Execute function calls
+            # Execute function calls (handle multiple calls sequentially)
+            executed_calls = []
             for func_call in function_calls:
-                func_name = func_call['name']
-                func_args = func_call['arguments']
-                tool_call_id = func_call['id']  # Store tool_call_id for response
+                func_name = func_call.get('name')
+                func_args = func_call.get('arguments', {})
+                current_tool_call_id = func_call.get('id', f"call_{len(executed_calls)}")
+                
+                # Validate function name
+                if not func_name or func_name not in ['get_calendar_by_date', 'generate_meeting_brief']:
+                    logger.warning(f'Unknown function called: {func_name}', userId=user_id)
+                    executed_calls.append({
+                        'function_name': func_name or 'unknown',
+                        'tool_call_id': current_tool_call_id,
+                        'result': {'error': f'Unknown function: {func_name}'}
+                    })
+                    continue
+                
+                # Validate arguments
+                if not isinstance(func_args, dict):
+                    logger.warning(f'Invalid arguments format for {func_name}: {type(func_args)}', userId=user_id)
+                    executed_calls.append({
+                        'function_name': func_name,
+                        'tool_call_id': current_tool_call_id,
+                        'result': {'error': 'Invalid arguments format'}
+                    })
+                    continue
                 
                 try:
-                    if func_name == 'get_calendar_by_date':
-                        # Get calendar for date
-                        date = func_args.get('date')
-                        if date:
-                            # Call the meetings-for-day endpoint logic
-                            from datetime import datetime, timezone
-                            from app.services.google_api import fetch_calendar_events
-                            from app.db.queries.accounts import get_accounts_by_user_id
-                            from app.services.token_refresh import ensure_all_tokens_valid
-                            from app.services.user_context import get_user_context
-                            from app.services.calendar_event_classifier import classify_calendar_event
-                            
-                            # Parse date
-                            year, month, day = map(int, date.split('-'))
-                            selected_date = datetime(year, month, day, tzinfo=timezone.utc)
-                            start_of_day = selected_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                            end_of_day = selected_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-                            
-                            # Get user accounts
-                            accounts = await get_accounts_by_user_id(user_id)
-                            await ensure_all_tokens_valid(accounts)
-                            valid_accounts = [acc for acc in accounts if acc.get('access_token')]
-                            
-                            # Fetch meetings
-                            all_meetings = []
-                            for account in valid_accounts:
-                                try:
-                                    events = await fetch_calendar_events(
-                                        account,
-                                        start_of_day.isoformat(),
-                                        end_of_day.isoformat(),
-                                        100
-                                    )
-                                    all_meetings.extend(events)
-                                except Exception as e:
-                                    logger.error(f'Error fetching calendar: {str(e)}')
-                            
-                            # Format meetings for response
-                            formatted_meetings = []
-                            for m in all_meetings[:20]:  # Limit to 20
-                                # Handle start time - can be dict or string
-                                start_obj = m.get('start', {})
-                                if isinstance(start_obj, str):
-                                    start = start_obj
-                                elif isinstance(start_obj, dict):
-                                    start = start_obj.get('dateTime') or start_obj.get('date', '')
-                                else:
-                                    start = ''
-                                
-                                # Handle attendees - ensure they're dicts
-                                attendees_list = m.get('attendees', [])
-                                attendee_emails = []
-                                for a in attendees_list:
-                                    if isinstance(a, dict):
-                                        attendee_emails.append(a.get('email', ''))
-                                    elif isinstance(a, str):
-                                        attendee_emails.append(a)
-                                
-                                formatted_meetings.append({
-                                    'id': m.get('id'),
-                                    'summary': m.get('summary', 'Untitled'),
-                                    'start': start,
-                                    'attendees': attendee_emails
-                                })
-                            
-                            function_results = {
-                                'function_name': func_name,
-                                'tool_call_id': tool_call_id,
-                                'result': {
-                                    'date': date,
-                                    'meetings': formatted_meetings,
-                                    'count': len(formatted_meetings)
-                                }
-                            }
-                    
-                    elif func_name == 'generate_meeting_brief':
-                        # Generate meeting brief
-                        meeting_id = func_args.get('meeting_id')
-                        meeting_obj = func_args.get('meeting')
-                        
-                        if not meeting_id and meeting_obj:
-                            meeting_id = meeting_obj.get('id')
-                        
-                        if meeting_id or meeting_obj:
-                            # If only meeting_id provided, fetch meeting from calendar
-                            if not meeting_obj and meeting_id:
-                                try:
-                                    from datetime import datetime, timezone, timedelta
-                                    from app.services.google_api import fetch_calendar_events
-                                    from app.db.queries.accounts import get_accounts_by_user_id
-                                    from app.services.token_refresh import ensure_all_tokens_valid
-                                    
-                                    # Get user accounts
-                                    accounts = await get_accounts_by_user_id(user_id)
-                                    await ensure_all_tokens_valid(accounts)
-                                    valid_accounts = [acc for acc in accounts if acc.get('access_token')]
-                                    
-                                    # Search for meeting in next 30 days
-                                    now_utc = datetime.now(timezone.utc)
-                                    search_end = now_utc + timedelta(days=30)
-                                    
-                                    found_meeting = None
-                                    for account in valid_accounts:
-                                        try:
-                                            events = await fetch_calendar_events(
-                                                account,
-                                                now_utc.isoformat(),
-                                                search_end.isoformat(),
-                                                100
-                                            )
-                                            for event in events:
-                                                if event.get('id') == meeting_id:
-                                                    found_meeting = event
-                                                    break
-                                            if found_meeting:
-                                                break
-                                        except Exception as e:
-                                            logger.error(f'Error searching for meeting: {str(e)}')
-                                    
-                                    if found_meeting:
-                                        meeting_obj = found_meeting
-                                    else:
-                                        function_results = {
-                                            'function_name': func_name,
-                                            'tool_call_id': tool_call_id,
-                                            'result': {
-                                                'error': f'Meeting with ID {meeting_id} not found in calendar'
-                                            }
-                                        }
-                                        break
-                                except Exception as e:
-                                    logger.error(f'Error fetching meeting by ID: {str(e)}', userId=user_id)
-                                    function_results = {
-                                        'function_name': func_name,
-                                        'tool_call_id': tool_call_id,
-                                        'result': {
-                                            'error': f'Error fetching meeting: {str(e)}'
-                                        }
-                                    }
-                                    break
-                            
-                            # If we have meeting object, generate brief
-                            if meeting_obj:
-                                try:
-                                    # Actually generate the brief server-side
-                                    from app.routes.meetings import MeetingPrepRequest, _generate_prep_response
-                                    from fastapi.responses import StreamingResponse
-                                    import asyncio
-                                    
-                                    # Extract attendees
-                                    attendees = meeting_obj.get('attendees', [])
-                                    if not isinstance(attendees, list):
-                                        attendees = []
-                                    
-                                    # Create prep request
-                                    prep_request = MeetingPrepRequest(
-                                        meeting=meeting_obj,
-                                        attendees=attendees
-                                    )
-                                    
-                                    # Generate brief (read streaming response)
-                                    # Request parameter is Optional, so we can pass None
-                                    brief_data = None
-                                    async for chunk in _generate_prep_response(prep_request, user, None, f'chat-{tool_call_id}'):
-                                        try:
-                                            chunk_data = json.loads(chunk)
-                                            if chunk_data.get('type') == 'complete':
-                                                brief_data = {k: v for k, v in chunk_data.items() if k != 'type'}
-                                                break
-                                        except:
-                                            continue
-                                    
-                                    if brief_data:
-                                        # Store brief in database
-                                        from app.db.queries.meeting_briefs import create_meeting_brief
-                                        meeting_id_final = meeting_obj.get('id') or meeting_id
-                                        if meeting_id_final:
-                                            await create_meeting_brief(user_id, meeting_id_final, brief_data)
-                                        
-                                        function_results = {
-                                            'function_name': func_name,
-                                            'tool_call_id': tool_call_id,
-                                            'result': {
-                                                'meeting_id': meeting_id_final,
-                                                'status': 'completed',
-                                                'summary': brief_data.get('summary', 'Brief generated successfully'),
-                                                'message': 'Brief generated successfully. The brief will be displayed in a modal.'
-                                            },
-                                            'meeting': meeting_obj,  # Include meeting for frontend
-                                            'brief': brief_data  # Include brief data
-                                        }
-                                    else:
-                                        function_results = {
-                                            'function_name': func_name,
-                                            'tool_call_id': tool_call_id,
-                                            'result': {
-                                                'error': 'Failed to generate brief - no data received'
-                                            },
-                                            'meeting': meeting_obj
-                                        }
-                                except Exception as e:
-                                    logger.error(f'Error generating brief: {str(e)}', userId=user_id)
-                                    function_results = {
-                                        'function_name': func_name,
-                                        'tool_call_id': tool_call_id,
-                                        'result': {
-                                            'error': f'Error generating brief: {str(e)}'
-                                        },
-                                        'meeting': meeting_obj
-                                    }
-                            else:
-                                function_results = {
-                                    'function_name': func_name,
-                                    'tool_call_id': tool_call_id,
-                                    'result': {
-                                        'error': 'Meeting object required to generate brief'
-                                    }
-                                }
-                        else:
-                            function_results = {
-                                'function_name': func_name,
-                                'tool_call_id': tool_call_id,
-                                'result': {
-                                    'error': 'Meeting ID or meeting object required'
-                                }
-                            }
-                    
-                    # If we got function results, break after first call (can extend for multiple)
-                    if function_results:
-                        break
+                    # Use FunctionExecutor to execute the function
+                    executor = FunctionExecutor(user_id, user)
+                    result = await executor.execute(func_name, func_args, current_tool_call_id)
+                    executed_calls.append(result)
                         
                 except Exception as e:
                     logger.error(f'Error executing function {func_name}: {str(e)}', userId=user_id)
-                    function_results = {
-                        'function_name': func_name,
-                        'tool_call_id': tool_call_id,
+                    executed_calls.append({
+                        'function_name': func_name or 'unknown',
+                        'tool_call_id': current_tool_call_id,
                         'result': {'error': f'Error executing function: {str(e)}'}
-                    }
+                    })
+            
+            # Use the first successful function result (or first result if all failed)
+            # For multiple tool calls, we'll need to handle them properly in the response
+            if executed_calls:
+                function_results = executed_calls[0]  # Use first result for now
+                tool_call_id = function_results.get('tool_call_id')
             
             # If we executed functions, get final response from OpenAI
             # Add assistant message with tool calls to conversation history
@@ -427,7 +232,7 @@ async def send_message(
             if function_results:
                 # Store tool result message in database for conversation history
                 tool_result_content = json.dumps(function_results.get('result', {}))
-                await create_chat_message(
+                await conversation_manager.add_message_to_history(
                     user_id=user_id,
                     role='assistant',
                     content=f"[Tool result: {function_results.get('function_name')}]",
@@ -462,7 +267,7 @@ async def send_message(
         # If we already stored a message with tool calls, update it or create final response
         if assistant_message_with_tool_calls:
             # Store final response as a new message (or update existing)
-            assistant_msg = await create_chat_message(
+            assistant_msg = await conversation_manager.add_message_to_history(
                 user_id=user_id,
                 role='assistant',
                 content=response_text,
@@ -475,7 +280,7 @@ async def send_message(
             )
         else:
             # Normal response without function calls
-            assistant_msg = await create_chat_message(
+            assistant_msg = await conversation_manager.add_message_to_history(
                 user_id=user_id,
                 role='assistant',
                 content=response_text,
@@ -492,6 +297,35 @@ async def send_message(
         # Include function results if any (for frontend to handle)
         if function_results:
             result['function_results'] = function_results
+        
+        # Store conversation summary in mem0.ai for long-term memory (async, don't block response)
+        if memory_service.enabled:
+            try:
+                # Create a summary of this exchange
+                summary_parts = [f"User asked: {request.message}"]
+                if response_text:
+                    summary_parts.append(f"Assistant responded: {response_text[:200]}")
+                if function_results:
+                    func_name = function_results.get('function_name', 'unknown')
+                    summary_parts.append(f"Used function: {func_name}")
+                
+                summary = " ".join(summary_parts)
+                
+                # Store asynchronously (fire and forget)
+                import asyncio
+                asyncio.create_task(
+                    memory_service.add_memory(
+                        user_id=user_id,
+                        content=summary,
+                        metadata={
+                            'meeting_id': request.meeting_id,
+                            'has_function_calls': bool(function_results),
+                            'function_name': function_results.get('function_name') if function_results else None
+                        }
+                    )
+                )
+            except Exception as e:
+                logger.warning(f'Error storing memory: {str(e)}', userId=user_id)
         
         return result
         

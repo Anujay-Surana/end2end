@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Parallel AI
     PARALLEL_API_KEY: str = ""
     
+    # mem0.ai (optional - for long-term memory)
+    MEM0_API_KEY: str = os.getenv('MEM0_API_KEY', '')
+    
     # Session
     SESSION_SECRET: str = os.urandom(32).hex()
     

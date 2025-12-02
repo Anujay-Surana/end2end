@@ -60,10 +60,15 @@ public class OpenAIRealtimePlugin: CAPPlugin {
         
         guard let format = audioFormat else { return }
         
-        // Setup audio session
+        // Optimize audio session for low latency
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+            // Use voiceChat mode for lowest latency
+            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+            // Set preferred buffer duration to 5ms for ultra-low latency (default is ~23ms)
+            try audioSession.setPreferredIOBufferDuration(0.005)
+            // Set preferred sample rate
+            try audioSession.setPreferredSampleRate(16000)
             try audioSession.setActive(true)
         } catch {
             print("Error setting up audio session: \(error)")
@@ -90,19 +95,23 @@ public class OpenAIRealtimePlugin: CAPPlugin {
         
         isRecording = true
         
-        // Install tap to capture audio
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, time in
+        // Install tap to capture audio with optimized buffer size for low latency
+        // Reduced from 4096 to 1024 frames for lower latency (64ms at 16kHz)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
             guard let self = self, self.isRecording else { return }
             
-            // Convert buffer to PCM16 data
+            // Convert buffer to PCM16 data efficiently
             guard let channelData = buffer.int16ChannelData else { return }
             let channelDataValue = channelData.pointee
-            let channelDataValueArray = stride(from: 0, to: Int(buffer.frameLength), by: buffer.stride)
-                .map { channelDataValue[$0] }
+            let frameLength = Int(buffer.frameLength)
             
-            // Send to JavaScript layer
+            // Use UnsafeBufferPointer for better performance
+            let audioData = UnsafeBufferPointer(start: channelDataValue, count: frameLength)
+            let audioArray = Array(audioData)
+            
+            // Send to JavaScript layer (smaller chunks = lower latency)
             self.notifyListeners("audioData", data: [
-                "data": channelDataValueArray.map { Int($0) }
+                "data": audioArray.map { Int($0) }
             ])
         }
     }
