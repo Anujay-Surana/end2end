@@ -48,24 +48,38 @@ class ConversationManager:
                 limit=self.window_size * 2  # Get more than needed for filtering
             )
             
-            # Convert to OpenAI format and apply sliding window
-            conversation_history = []
-            message_count = 0
+            # Build a map of tool_call_id -> tool result message for pairing
+            tool_results_map = {}
+            regular_messages = []
             
-            # Process messages in chronological order (oldest first)
+            # First pass: separate tool results from regular messages
             for msg in db_messages:
-                # Skip tool result messages (they're handled separately)
-                if msg.get('metadata', {}).get('is_tool_result'):
-                    continue
+                metadata = msg.get('metadata', {})
+                if metadata.get('is_tool_result'):
+                    tool_call_id = metadata.get('tool_call_id')
+                    if tool_call_id:
+                        tool_results_map[tool_call_id] = msg
+                else:
+                    regular_messages.append(msg)
+            
+            # Convert to OpenAI format and apply sliding window
+            # We want the most recent N messages, but keep them in chronological order (oldest first) for OpenAI
+            all_formatted_messages = []
+            
+            # Process all messages in chronological order (oldest first)
+            # Pair assistant messages with tool_calls with their tool results
+            for msg in regular_messages:
+                metadata = msg.get('metadata', {})
                 
+                # Regular messages (user, assistant, system)
                 msg_dict = {
                     'role': msg['role'],
                     'content': msg['content'] or ''
                 }
                 
                 # Include tool calls if present and requested
-                if include_tool_calls and msg.get('metadata') and msg.get('metadata', {}).get('has_tool_calls'):
-                    tool_calls = msg.get('metadata', {}).get('function_calls', [])
+                if include_tool_calls and metadata.get('has_tool_calls'):
+                    tool_calls = metadata.get('function_calls', [])
                     if tool_calls:
                         msg_dict['tool_calls'] = [
                             {
@@ -79,15 +93,30 @@ class ConversationManager:
                             for idx, tc in enumerate(tool_calls)
                         ]
                 
-                conversation_history.append(msg_dict)
-                message_count += 1
+                all_formatted_messages.append(msg_dict)
                 
-                # Stop at window size
-                if message_count >= self.window_size:
-                    break
+                # If this assistant message has tool_calls, add corresponding tool results immediately after
+                if msg_dict.get('role') == 'assistant' and msg_dict.get('tool_calls'):
+                    for tool_call in msg_dict['tool_calls']:
+                        tool_call_id = tool_call.get('id')
+                        if tool_call_id and tool_call_id in tool_results_map:
+                            tool_result_msg = tool_results_map[tool_call_id]
+                            tool_metadata = tool_result_msg.get('metadata', {})
+                            function_name = tool_metadata.get('function_name', 'unknown')
+                            function_result = tool_metadata.get('function_result', {})
+                            
+                            # Format as OpenAI tool message
+                            tool_msg = {
+                                'role': 'tool',
+                                'tool_call_id': tool_call_id,
+                                'name': function_name,
+                                'content': json.dumps(function_result) if isinstance(function_result, dict) else str(function_result)
+                            }
+                            all_formatted_messages.append(tool_msg)
             
-            # Reverse to get most recent messages first (OpenAI expects chronological order)
-            conversation_history.reverse()
+            # Take the last N messages (most recent) but keep them in chronological order
+            # OpenAI expects chronological order (oldest first), so we take the tail of the list
+            conversation_history = all_formatted_messages[-self.window_size:] if len(all_formatted_messages) > self.window_size else all_formatted_messages
             
             logger.debug(f'Loaded {len(conversation_history)} messages for conversation history', userId=user_id)
             

@@ -24,9 +24,10 @@ class MemoryService:
         self.api_key = api_key or settings.MEM0_API_KEY
         self.base_url = "https://api.mem0.ai/v1"
         self.enabled = bool(self.api_key)
+        self.token_invalid = False  # Track if token is invalid to avoid repeated errors
         
         if not self.enabled:
-            logger.warning('mem0.ai API key not configured - memory features disabled')
+            logger.debug('mem0.ai API key not configured - memory features disabled')
     
     async def add_memory(
         self,
@@ -45,7 +46,7 @@ class MemoryService:
         Returns:
             Created memory dict or None if disabled
         """
-        if not self.enabled:
+        if not self.enabled or self.token_invalid:
             return None
         
         try:
@@ -65,10 +66,16 @@ class MemoryService:
                 
                 if response.is_success:
                     memory = response.json()
-                    logger.info(f'Added memory to mem0.ai', userId=user_id, memory_id=memory.get('id'))
+                    logger.debug(f'Added memory to mem0.ai', userId=user_id, memory_id=memory.get('id'))
                     return memory
+                elif response.status_code == 401:
+                    # Token invalid - disable service to avoid repeated errors
+                    self.token_invalid = True
+                    self.enabled = False
+                    logger.warning('mem0.ai API token invalid - disabling memory features', userId=user_id)
+                    return None
                 else:
-                    logger.error(f'mem0.ai API error: {response.status_code} - {response.text}', userId=user_id)
+                    logger.debug(f'mem0.ai API error: {response.status_code}', userId=user_id)
                     return None
                     
         except Exception as e:
@@ -92,7 +99,7 @@ class MemoryService:
         Returns:
             List of relevant memories
         """
-        if not self.enabled:
+        if not self.enabled or self.token_invalid:
             return []
         
         try:
@@ -113,10 +120,16 @@ class MemoryService:
                 if response.is_success:
                     data = response.json()
                     memories = data.get('results', [])
-                    logger.info(f'Found {len(memories)} relevant memories', userId=user_id)
+                    logger.debug(f'Found {len(memories)} relevant memories', userId=user_id)
                     return memories
+                elif response.status_code == 401:
+                    # Token invalid - disable service to avoid repeated errors
+                    self.token_invalid = True
+                    self.enabled = False
+                    logger.warning('mem0.ai API token invalid - disabling memory features', userId=user_id)
+                    return []
                 else:
-                    logger.error(f'mem0.ai search error: {response.status_code} - {response.text}', userId=user_id)
+                    logger.debug(f'mem0.ai search error: {response.status_code}', userId=user_id)
                     return []
                     
         except Exception as e:
@@ -138,7 +151,7 @@ class MemoryService:
         Returns:
             List of memories
         """
-        if not self.enabled:
+        if not self.enabled or self.token_invalid:
             return []
         
         try:
@@ -157,10 +170,16 @@ class MemoryService:
                 if response.is_success:
                     data = response.json()
                     memories = data.get('results', [])
-                    logger.info(f'Retrieved {len(memories)} memories', userId=user_id)
+                    logger.debug(f'Retrieved {len(memories)} memories', userId=user_id)
                     return memories
+                elif response.status_code == 401:
+                    # Token invalid - disable service
+                    self.token_invalid = True
+                    self.enabled = False
+                    logger.warning('mem0.ai API token invalid - disabling memory features', userId=user_id)
+                    return []
                 else:
-                    logger.error(f'mem0.ai get error: {response.status_code} - {response.text}', userId=user_id)
+                    logger.debug(f'mem0.ai get error: {response.status_code}', userId=user_id)
                     return []
                     
         except Exception as e:
@@ -177,7 +196,7 @@ class MemoryService:
         Returns:
             Success status
         """
-        if not self.enabled:
+        if not self.enabled or self.token_invalid:
             return False
         
         try:
@@ -190,10 +209,16 @@ class MemoryService:
                 )
                 
                 if response.is_success:
-                    logger.info(f'Deleted memory {memory_id}')
+                    logger.debug(f'Deleted memory {memory_id}')
                     return True
+                elif response.status_code == 401:
+                    # Token invalid - disable service
+                    self.token_invalid = True
+                    self.enabled = False
+                    logger.warning('mem0.ai API token invalid - disabling memory features')
+                    return False
                 else:
-                    logger.error(f'mem0.ai delete error: {response.status_code} - {response.text}')
+                    logger.debug(f'mem0.ai delete error: {response.status_code}')
                     return False
                     
         except Exception as e:

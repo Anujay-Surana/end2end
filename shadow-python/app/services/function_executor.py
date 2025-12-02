@@ -13,14 +13,22 @@ from app.services.token_refresh import ensure_all_tokens_valid
 from app.routes.meetings import MeetingPrepRequest, _generate_prep_response
 from app.db.queries.meeting_briefs import create_meeting_brief
 import json
+import pytz
 
 
 class FunctionExecutor:
     """Service for executing function calls with proper validation and error handling"""
     
-    def __init__(self, user_id: str, user: Optional[Dict[str, Any]] = None):
+    def __init__(self, user_id: str, user: Optional[Dict[str, Any]] = None, user_timezone: str = 'UTC'):
         self.user_id = user_id
         self.user = user
+        self.user_timezone = user_timezone
+        
+        # Get timezone object
+        try:
+            self.tz = pytz.timezone(user_timezone)
+        except:
+            self.tz = pytz.UTC
     
     async def execute(self, function_name: str, arguments: Dict[str, Any], tool_call_id: str) -> Dict[str, Any]:
         """
@@ -119,18 +127,60 @@ class FunctionExecutor:
                     logger.error(error_msg, userId=self.user_id)
                     errors.append(error_msg)
             
-            # Format meetings for response
+            # Format meetings for response with timezone conversion
             formatted_meetings = []
             for m in all_meetings[:20]:  # Limit to 20 meetings
                 try:
-                    # Handle start time - can be dict or string
+                    # Handle start time - convert to user's timezone
                     start_obj = m.get('start', {})
+                    start_iso = None
+                    start_formatted = ''
+                    
                     if isinstance(start_obj, str):
-                        start = start_obj
+                        start_iso = start_obj
                     elif isinstance(start_obj, dict):
-                        start = start_obj.get('dateTime') or start_obj.get('date', '')
-                    else:
-                        start = ''
+                        start_iso = start_obj.get('dateTime') or start_obj.get('date', '')
+                    
+                    # Convert to user's timezone if we have a datetime
+                    if start_iso and 'T' in start_iso:
+                        try:
+                            # Parse UTC datetime
+                            dt_utc = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
+                            if dt_utc.tzinfo is None:
+                                dt_utc = dt_utc.replace(tzinfo=pytz.UTC)
+                            
+                            # Convert to user's timezone
+                            dt_user = dt_utc.astimezone(self.tz)
+                            start_formatted = dt_user.strftime('%I:%M %p %Z')
+                        except Exception as e:
+                            logger.warning(f'Error converting start time: {str(e)}', meeting_id=m.get('id'))
+                            start_formatted = start_iso
+                    elif start_iso:
+                        # All-day event
+                        start_formatted = start_iso
+                    
+                    # Handle end time - convert to user's timezone
+                    end_obj = m.get('end', {})
+                    end_iso = None
+                    end_formatted = ''
+                    
+                    if isinstance(end_obj, str):
+                        end_iso = end_obj
+                    elif isinstance(end_obj, dict):
+                        end_iso = end_obj.get('dateTime') or end_obj.get('date', '')
+                    
+                    if end_iso and 'T' in end_iso:
+                        try:
+                            dt_utc = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
+                            if dt_utc.tzinfo is None:
+                                dt_utc = dt_utc.replace(tzinfo=pytz.UTC)
+                            dt_user = dt_utc.astimezone(self.tz)
+                            end_formatted = dt_user.strftime('%I:%M %p %Z')
+                        except Exception as e:
+                            logger.warning(f'Error converting end time: {str(e)}', meeting_id=m.get('id'))
+                            end_formatted = end_iso
+                    elif end_iso:
+                        end_formatted = end_iso
                     
                     # Handle attendees - ensure they're dicts
                     attendees_list = m.get('attendees', [])
@@ -146,8 +196,11 @@ class FunctionExecutor:
                     formatted_meetings.append({
                         'id': m.get('id'),
                         'summary': m.get('summary', 'Untitled'),
-                        'start': start,
-                        'end': m.get('end', {}).get('dateTime') or m.get('end', {}).get('date', '') if isinstance(m.get('end'), dict) else str(m.get('end', '')),
+                        'start': start_formatted or start_iso or '',
+                        'start_iso': start_iso,  # Keep original for reference
+                        'end': end_formatted or end_iso or '',
+                        'end_iso': end_iso,  # Keep original for reference
+                        'timezone': self.user_timezone,  # Include timezone info
                         'attendees': attendee_emails
                     })
                 except Exception as e:

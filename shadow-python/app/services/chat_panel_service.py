@@ -57,9 +57,10 @@ class ChatPanelService:
                     'name': 'generate_meeting_brief',
                     'description': (
                         'Generate a comprehensive meeting preparation brief for a specific meeting. '
-                        'Use this tool when the user asks to prepare for a meeting, generate a brief, get meeting prep, or wants details about an upcoming meeting. '
-                        'REQUIRED WORKFLOW: If the user mentions a meeting but you don\'t have complete meeting details, FIRST call get_calendar_by_date to retrieve meetings, THEN use one of those meeting objects to generate the brief. '
-                        'You can provide either meeting_id (if you know it exactly) OR the full meeting object (preferred when available from get_calendar_by_date).'
+                        'ALWAYS use this tool when the user asks to "prep me", "prepare me", "can you prep me", "get me ready", "prepare for a meeting", "generate a brief", "get meeting prep", or wants details about an upcoming meeting. '
+                        'IMPORTANT: Check conversation history first - if there are tool results (role="tool") from get_calendar_by_date, use those meeting objects directly. '
+                        'REQUIRED WORKFLOW: If you don\'t have meeting details in conversation history, FIRST call get_calendar_by_date to retrieve meetings, THEN use one of those meeting objects to generate the brief. '
+                        'You can provide either meeting_id (if you know it exactly) OR the full meeting object (preferred when available from get_calendar_by_date or conversation history).'
                     ),
                     'parameters': {
                         'type': 'object',
@@ -385,16 +386,20 @@ YOUR CAPABILITIES AND TOOL USAGE:
    - Convert relative dates ("today", "tomorrow") to YYYY-MM-DD format using current date context
 
 2. **generate_meeting_brief** - Use this tool to generate meeting preparation briefs.
-   - Use when user asks to "prepare for a meeting", "generate a brief", "get meeting prep", or wants details about a meeting
-   - WORKFLOW: If you don't have complete meeting details, FIRST call get_calendar_by_date, THEN use one of the returned meeting objects
-   - Prefer passing the full meeting object (from get_calendar_by_date) over just meeting_id when possible
+   - ALWAYS use when user asks to "prep me", "prepare me", "can you prep me", "get me ready", "prepare for a meeting", "generate a brief", "get meeting prep", or wants details about a meeting
+   - Examples: "prep me for it", "can you prep me", "prepare me for my meeting", "get me ready for the meeting"
+   - IMPORTANT: Function results from previous calls (like get_calendar_by_date) are available in the conversation history. If you see a tool result with meeting data, use that meeting object directly.
+   - WORKFLOW: If you don't have complete meeting details in conversation history, FIRST call get_calendar_by_date, THEN use one of the returned meeting objects
+   - Prefer passing the full meeting object (from get_calendar_by_date or conversation history) over just meeting_id when possible
 
 TOOL USAGE RULES:
 - ALWAYS use tools when appropriate - don't guess or make assumptions about calendar data
-- If user asks about meetings but you don't have the data, use get_calendar_by_date first
-- If user wants meeting prep but you don't have meeting details, get calendar first, then generate brief
+- Check conversation history FIRST - previous tool results (role='tool') contain function outputs that you can use
+- If user asks about meetings but you don't have the data in conversation history, use get_calendar_by_date first
+- If user wants meeting prep (says "prep me", "prepare me", etc.) but you don't have meeting details in conversation history, get calendar first, then generate brief
 - When multiple tools are needed, call them in sequence (get_calendar_by_date → generate_meeting_brief)
 - After calling tools, provide a clear, helpful response based on the tool results
+- Remember: Tool results from previous messages are in the conversation - you can reference them directly
 
 RESPONSE STYLE:
 - Be concise, friendly, and professional

@@ -205,8 +205,8 @@ async def send_message(
                     continue
                 
                 try:
-                    # Use FunctionExecutor to execute the function
-                    executor = FunctionExecutor(user_id, user)
+                    # Use FunctionExecutor to execute the function (pass timezone)
+                    executor = FunctionExecutor(user_id, user, user_timezone)
                     result = await executor.execute(func_name, func_args, current_tool_call_id)
                     executed_calls.append(result)
                         
@@ -231,17 +231,20 @@ async def send_message(
             # Also add tool result message to conversation history for proper context
             if function_results:
                 # Store tool result message in database for conversation history
+                # Note: We store as 'assistant' role in DB (for compatibility) but mark as tool result
+                # The conversation_manager will convert it to 'tool' role when loading for OpenAI
                 tool_result_content = json.dumps(function_results.get('result', {}))
                 await conversation_manager.add_message_to_history(
                     user_id=user_id,
-                    role='assistant',
-                    content=f"[Tool result: {function_results.get('function_name')}]",
+                    role='assistant',  # DB stores as assistant, but we'll convert to 'tool' when loading
+                    content=tool_result_content,  # Store actual JSON result as content
                     meeting_id=request.meeting_id,
                     metadata={
                         'tool_call_id': tool_call_id,
                         'function_name': function_results.get('function_name'),
                         'function_result': function_results.get('result'),
-                        'is_tool_result': True
+                        'is_tool_result': True,
+                        'role_override': 'tool'  # Flag to convert to 'tool' role when loading
                     }
                 )
                 
