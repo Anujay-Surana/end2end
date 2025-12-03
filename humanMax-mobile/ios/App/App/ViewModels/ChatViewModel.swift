@@ -46,6 +46,8 @@ class ChatViewModel: ObservableObject {
     func sendMessage(_ text: String, meetingId: String? = nil) async {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
+        print("💬 Sending message: \(text.prefix(50))... meetingId: \(meetingId ?? "nil")")
+        
         isSending = true
         errorMessage = nil
         
@@ -62,12 +64,24 @@ class ChatViewModel: ObservableObject {
         do {
             let response: ChatMessageSendResponse
             
+            print("📤 Making API request...")
+            let startTime = Date()
+            
             if let meetingId = meetingId {
                 // Use meeting-specific endpoint (auto-injects brief context)
                 response = try await apiClient.sendMeetingChat(meetingId: meetingId, message: text)
             } else {
                 // Use general chat endpoint
                 response = try await apiClient.sendChatMessage(message: text, meetingId: nil)
+            }
+            
+            let duration = Date().timeIntervalSince(startTime)
+            print("📥 API response received in \(String(format: "%.1f", duration))s")
+            print("   Success: \(response.success)")
+            print("   Has userMessage: \(response.userMessage != nil)")
+            print("   Has assistantMessage: \(response.assistantMessage != nil)")
+            if let msg = response.assistantMessage {
+                print("   Assistant response: \(msg.content.prefix(100))...")
             }
             
             // Replace optimistic message with actual user message from backend
@@ -83,13 +97,17 @@ class ChatViewModel: ObservableObject {
             if let assistantMessage = response.assistantMessage {
                 messages.append(assistantMessage)
             }
+            
+            print("✅ Messages updated. Total: \(messages.count)")
         } catch {
+            print("❌ Chat error: \(error)")
             errorMessage = error.localizedDescription
             // Remove optimistic message on error
             messages.removeAll { $0.id == optimisticUserMessage.id }
         }
         
         isSending = false
+        print("💬 Send complete. isSending: \(isSending)")
     }
     
     func deleteMessage(_ messageId: String) async {

@@ -41,6 +41,7 @@ struct MeetingBriefData: Codable {
 /// Full brief data containing attendee research, document analysis, etc.
 /// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
 struct FullBriefData: Codable {
+    // Core brief fields
     let summary: String?
     let purpose: String?
     let agenda: [String]?
@@ -50,9 +51,23 @@ struct FullBriefData: Codable {
     let actionItems: [String]?
     let attendees: [AttendeeResearch]?
     let stats: BriefStats?
+    
+    // NEW: Narrative context from full pipeline
+    let relationshipAnalysis: String?
+    let contributionAnalysis: String?
+    let broaderNarrative: String?
+    let companyResearch: String?
+    
+    // NEW: Timeline for meeting history
+    let timeline: [TimelineEvent]?
+    
+    // NEW: Purpose detection metadata
+    let purposeConfidence: String?
+    let purposeSource: String?
+    let contextEmail: ContextEmail?
 }
 
-/// Attendee with research data
+/// Attendee with research data from web search and email analysis
 /// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
 struct AttendeeResearch: Codable {
     let name: String?
@@ -60,15 +75,54 @@ struct AttendeeResearch: Codable {
     let title: String?
     let company: String?
     let keyFacts: [String]?
-    let source: String?
+    
+    // Data source fields (backend may use either)
+    let dataSource: String?  // Full pipeline uses this
+    let source: String?      // Backwards compatibility
+    
+    /// Get the research source (handles both field names)
+    var researchSource: String? {
+        return dataSource ?? source
+    }
 }
 
-/// Brief statistics
+/// Timeline event for meeting history - shows emails, documents, and past meetings
+/// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
+struct TimelineEvent: Codable {
+    let type: String?           // "email", "document", "meeting"
+    let date: String?           // ISO date string
+    let timestamp: Double?      // Unix timestamp for sorting
+    let subject: String?        // For email events
+    let name: String?           // For document/meeting events
+    let participants: [String]? // People involved
+    let snippet: String?        // Email body preview
+    let action: String?         // "modified", "scheduled", etc.
+    let id: String?             // Event identifier
+    let isReference: Bool?      // True for current meeting marker
+}
+
+/// Context email that provided meeting purpose through attendee overlap matching
+/// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
+struct ContextEmail: Codable {
+    let id: String?
+    let subject: String?
+    let date: String?
+}
+
+/// Brief statistics from meeting prep pipeline
 /// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
 struct BriefStats: Codable {
+    // Core counts
     let emailCount: Int?
     let fileCount: Int?
     let attendeeCount: Int?
+    
+    // NEW: Additional stats from full pipeline
+    let relevantEmailCount: Int?
+    let filesWithContentCount: Int?
+    let calendarEventCount: Int?
+    let multiAccount: Bool?
+    let accountCount: Int?
 }
 
 /// Meeting model
@@ -241,22 +295,17 @@ struct ChatMessagesResponse: Codable {
 }
 
 /// Chat message send response (from POST /api/chat/messages)
+/// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
 struct ChatMessageSendResponse: Codable {
     let success: Bool
     let message: String?
     let userMessage: ChatMessage?
     let assistantMessage: ChatMessage?
     let meetingId: String?
-    
-    enum CodingKeys: String, CodingKey {
-        case success, message
-        case userMessage = "user_message"
-        case assistantMessage = "assistant_message"
-        case meetingId = "meeting_id"
-    }
 }
 
 /// Metadata for chat messages
+/// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
 struct ChatMessageMetadata: Codable {
     let meetingId: String?
     let toolCalls: AnyCodable?
@@ -264,15 +313,6 @@ struct ChatMessageMetadata: Codable {
     let toolCallId: String?
     let functionName: String?
     let isToolResult: Bool?
-    
-    enum CodingKeys: String, CodingKey {
-        case meetingId = "meeting_id"
-        case toolCalls = "tool_calls"
-        case rawRole = "raw_role"
-        case toolCallId = "tool_call_id"
-        case functionName = "function_name"
-        case isToolResult = "is_tool_result"
-    }
     
     init(meetingId: String?, toolCalls: AnyCodable?, rawRole: String?, toolCallId: String?, functionName: String?, isToolResult: Bool?) {
         self.meetingId = meetingId
@@ -285,6 +325,7 @@ struct ChatMessageMetadata: Codable {
 }
 
 /// Chat message model
+/// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
 struct ChatMessage: Codable, Identifiable {
     let id: String
     let role: String // "user", "assistant", "system"
@@ -293,15 +334,6 @@ struct ChatMessage: Codable, Identifiable {
     let userId: String?
     let metadata: ChatMessageMetadata?
     let functionResults: [FunctionResult]?
-    
-    // Backend may include additional fields that we ignore
-    enum CodingKeys: String, CodingKey {
-        case id, role, content
-        case createdAt = "created_at"
-        case userId = "user_id"
-        case metadata
-        case functionResults = "function_results"
-    }
     
     /// Get meeting_id from metadata
     var meetingId: String? {

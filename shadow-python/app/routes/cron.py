@@ -13,6 +13,7 @@ See cron_midnight.py for the midnight-based full-day approach.
 """
 
 import asyncio
+import json
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Request, HTTPException
@@ -24,7 +25,9 @@ from app.db.queries.accounts import get_accounts_by_user_id
 from app.db.queries.meeting_briefs import upsert_meeting_brief, get_brief_by_meeting_id
 from app.services.token_refresh import ensure_all_tokens_valid
 from app.services.google_api import fetch_calendar_events
-from app.services.brief_generator import generate_brief_with_one_liner
+from app.services.brief_generator import generate_one_liner
+from app.services.user_context import get_user_context
+from app.routes.meetings import _generate_prep_response, MeetingPrepRequest
 
 router = APIRouter()
 
@@ -119,7 +122,11 @@ async def generate_brief_for_meeting(
     request_id: str
 ) -> bool:
     """
-    Generate a brief for a single meeting
+    Generate a brief using full prep pipeline and store in DB.
+    
+    This uses the same pipeline as /api/prep-meeting, giving cron-generated
+    briefs all features: web search, purpose detection, narrative context, timeline.
+    
     Returns True if brief was generated, False otherwise
     """
     user_id = user.get('id')
@@ -130,53 +137,83 @@ async def generate_brief_for_meeting(
     
     try:
         logger.info(
-            f'Generating brief for meeting {meeting.get("summary", "Untitled")}',
+            f'Generating full brief for meeting {meeting.get("summary", "Untitled")}',
             userId=user_id,
             meetingId=meeting_id,
             requestId=request_id
         )
         
-        # Generate brief with one-liner
-        brief_result = await generate_brief_with_one_liner(
-            user_id=user_id,
+        # Create request body for prep pipeline
+        request_body = MeetingPrepRequest(
             meeting=meeting,
-            attendees=meeting.get('attendees', []),
-            request_id=request_id
+            attendees=meeting.get('attendees', [])
         )
         
-        if brief_result:
-            # Calculate meeting date
-            start = meeting.get('start', {})
-            if isinstance(start, dict):
-                meeting_date_str = start.get('dateTime') or start.get('date')
-            else:
-                meeting_date_str = str(start) if start else None
-            
-            if meeting_date_str:
-                try:
-                    meeting_date = datetime.fromisoformat(meeting_date_str.replace('Z', '+00:00')).date()
-                except:
-                    meeting_date = datetime.now(timezone.utc).date()
-            else:
-                meeting_date = datetime.now(timezone.utc).date()
-            
-            # Store brief in database
-            await upsert_meeting_brief(
-                user_id=user_id,
-                meeting_id=meeting_id,
-                brief_data=brief_result.get('full_brief', {}),
-                one_liner_summary=brief_result.get('one_liner', ''),
-                meeting_date=meeting_date
-            )
-            
-            logger.info(
-                f'Brief generated and stored for meeting {meeting.get("summary", "Untitled")}',
-                userId=user_id,
-                meetingId=meeting_id
-            )
-            return True
+        # Call full prep pipeline (request=None triggers fallback to get_parallel_client())
+        full_brief = None
+        async for chunk in _generate_prep_response(request_body, user, None, request_id):
+            try:
+                data = json.loads(chunk.strip())
+                if data.get('type') == 'complete':
+                    # Remove 'type' field, keep rest as brief
+                    full_brief = {k: v for k, v in data.items() if k != 'type'}
+                    break
+                elif data.get('type') == 'error':
+                    logger.error(
+                        f'Prep pipeline error: {data.get("message")}',
+                        requestId=request_id,
+                        meetingId=meeting_id
+                    )
+                    return False
+            except json.JSONDecodeError:
+                continue
         
-        return False
+        if not full_brief:
+            logger.warning(f'No brief generated for meeting {meeting_id}', requestId=request_id)
+            return False
+        
+        # Get user context for one-liner generation
+        user_context = await get_user_context(user, request_id)
+        
+        # Generate one-liner summary from full brief
+        one_liner = await generate_one_liner(
+            meeting,
+            meeting.get('attendees', []),
+            full_brief,
+            user_context
+        )
+        
+        # Calculate meeting date
+        start = meeting.get('start', {})
+        if isinstance(start, dict):
+            meeting_date_str = start.get('dateTime') or start.get('date')
+        else:
+            meeting_date_str = str(start) if start else None
+        
+        if meeting_date_str:
+            try:
+                meeting_date = datetime.fromisoformat(meeting_date_str.replace('Z', '+00:00')).date()
+            except:
+                meeting_date = datetime.now(timezone.utc).date()
+        else:
+            meeting_date = datetime.now(timezone.utc).date()
+        
+        # Store in database
+        await upsert_meeting_brief(
+            user_id=user_id,
+            meeting_id=meeting_id,
+            brief_data=full_brief,
+            one_liner_summary=one_liner,
+            meeting_date=meeting_date
+        )
+        
+        logger.info(
+            f'Full brief generated and stored for {meeting.get("summary", "Untitled")}',
+            userId=user_id,
+            meetingId=meeting_id,
+            briefFields=list(full_brief.keys()) if full_brief else []
+        )
+        return True
         
     except Exception as error:
         logger.error(

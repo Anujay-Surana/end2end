@@ -3,7 +3,6 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var meetingsViewModel: MeetingsViewModel
     @State private var selectedMeeting: Meeting?
-    @State private var showMeetingDetail = false
     
     var body: some View {
         NavigationView {
@@ -44,11 +43,9 @@ struct HomeView: View {
         .task {
             await meetingsViewModel.loadMeetings(for: Date())
         }
-        .sheet(isPresented: $showMeetingDetail) {
-            if let meeting = selectedMeeting {
-                HomeMeetingDetailView(meeting: meeting)
-                    .environmentObject(meetingsViewModel)
-            }
+        .sheet(item: $selectedMeeting) { meeting in
+            HomeMeetingDetailView(meeting: meeting)
+                .environmentObject(meetingsViewModel)
         }
     }
     
@@ -118,7 +115,6 @@ struct HomeView: View {
                 HomeMeetingCard(meeting: meeting)
                     .onTapGesture {
                         selectedMeeting = meeting
-                        showMeetingDetail = true
                     }
             }
         }

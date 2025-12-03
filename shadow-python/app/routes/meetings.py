@@ -28,6 +28,7 @@ from app.services.multi_account_fetcher import (
     merge_and_deduplicate_calendar_events
 )
 from app.services.attendee_research import research_attendees
+from app.services.parallel_client import get_parallel_client
 from app.services.email_relevance import filter_relevant_emails
 from app.services.calendar_event_classifier import classify_calendar_event, should_prep_event, get_prep_depth
 from app.services.meeting_purpose_detector import detect_meeting_purpose
@@ -573,7 +574,8 @@ async def _generate_prep_response(
             logger.info(f'  📊 Researching {len(attendees_to_research)} attendees', requestId=request_id)
 
             # Get parallel client if available (from request state, set by middleware)
-            parallel_client = getattr(request.state, 'parallel_client', None) if request else None
+            # Fallback to get_parallel_client() when called from cron (request=None)
+            parallel_client = getattr(request.state, 'parallel_client', None) if request else get_parallel_client()
             
             if parallel_client:
                 logger.info(f'  ✅ Parallel AI client available for web searches', requestId=request_id)

@@ -16,7 +16,6 @@ struct MeetingNote: Identifiable {
 
 struct NotesView: View {
     @State private var selectedNote: MeetingNote?
-    @State private var showNoteDetail = false
     
     // Mock data for demonstration
     private let mockNotes: [MeetingNote] = [
@@ -91,10 +90,8 @@ struct NotesView: View {
             }
             .navigationBarHidden(true)
         }
-        .sheet(isPresented: $showNoteDetail) {
-            if let note = selectedNote {
-                NoteDetailView(note: note)
-            }
+        .sheet(item: $selectedNote) { note in
+            NoteDetailView(note: note)
         }
     }
     
@@ -138,7 +135,6 @@ struct NotesView: View {
                             TimelineNoteCard(note: note)
                                 .onTapGesture {
                                     selectedNote = note
-                                    showNoteDetail = true
                                 }
                         }
                     }
