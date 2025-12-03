@@ -244,20 +244,35 @@ async def generate_hourly_briefs(request: Request = None):
                 for meeting in meetings:
                     meeting_id = meeting.get('id')
                     
-                    # Check if brief already exists
-                    existing = await get_brief_by_meeting_id(user_id, meeting_id)
-                    if existing:
-                        meetings_skipped += 1
-                        logger.info(
-                            f'Skipping meeting {meeting.get("summary", "Untitled")} - brief already exists',
-                            requestId=request_id
+                    try:
+                        # Check if brief already exists
+                        existing = await get_brief_by_meeting_id(user_id, meeting_id)
+                        if existing:
+                            meetings_skipped += 1
+                            logger.info(
+                                f'Skipping meeting {meeting.get("summary", "Untitled")} - brief already exists',
+                                requestId=request_id
+                            )
+                            continue
+                    except Exception as check_error:
+                        # If check fails (e.g., table columns don't exist), continue anyway
+                        logger.warning(
+                            f'Error checking existing brief: {str(check_error)}',
+                            requestId=request_id,
+                            meetingId=meeting_id
                         )
-                        continue
                     
                     # Generate brief
-                    success = await generate_brief_for_meeting(user, meeting, request_id)
-                    if success:
-                        total_briefs += 1
+                    try:
+                        success = await generate_brief_for_meeting(user, meeting, request_id)
+                        if success:
+                            total_briefs += 1
+                    except Exception as gen_error:
+                        logger.error(
+                            f'Error generating brief for meeting {meeting.get("summary", "Untitled")}: {str(gen_error)}',
+                            requestId=request_id,
+                            meetingId=meeting_id
+                        )
                 
             except Exception as user_error:
                 logger.error(
