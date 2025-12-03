@@ -28,12 +28,16 @@ router = APIRouter()
 @router.get('/meetings-for-day')
 async def get_meetings_for_day(
     date: str = Query(..., description='Date in YYYY-MM-DD format'),
+    tz: Optional[str] = Query(None, description='IANA timezone identifier (e.g., America/Los_Angeles)'),
     user: Optional[dict] = Depends(optional_auth),
     request: Request = None
 ):
     """
     Get all meetings for a specific day
     """
+    import pytz
+    from app.db.queries.users import find_user_by_id, update_user
+    
     request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
 
     if not date:
@@ -50,12 +54,11 @@ async def get_meetings_for_day(
         )
 
     try:
-        logger.info('Fetching meetings for day', requestId=request_id, date=date)
+        logger.info('Fetching meetings for day', requestId=request_id, date=date, clientTimezone=tz)
 
-        # Parse date string (YYYY-MM-DD) - create date at midnight in UTC
+        # Parse date string (YYYY-MM-DD)
         try:
             year, month, day = map(int, date.split('-'))
-            selected_date = datetime(year, month, day, tzinfo=timezone.utc)  # Creates date in UTC
         except (ValueError, TypeError):
             raise HTTPException(
                 status_code=400,
@@ -69,9 +72,57 @@ async def get_meetings_for_day(
                 }
             )
 
-        # Set time boundaries for the day (UTC-aware for RFC3339 format)
-        start_of_day = selected_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_of_day = selected_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        # Determine timezone: client-provided > stored > UTC
+        user_tz = pytz.UTC  # Default to UTC
+        timezone_source = 'default'
+        
+        # First, try client-provided timezone
+        if tz:
+            try:
+                user_tz = pytz.timezone(tz)
+                timezone_source = 'client'
+                logger.info(f'Using client timezone: {tz}', requestId=request_id)
+                
+                # Update stored timezone if user is authenticated
+                if user and user.get('id'):
+                    try:
+                        await update_user(user['id'], {'timezone': tz})
+                    except Exception as e:
+                        logger.warning(f'Failed to update user timezone: {str(e)}', requestId=request_id)
+            except pytz.exceptions.UnknownTimeZoneError:
+                logger.warning(f'Unknown client timezone: {tz}', requestId=request_id)
+        
+        # If no client timezone, try stored timezone
+        if timezone_source == 'default' and user and user.get('id'):
+            try:
+                user_data = await find_user_by_id(user['id'])
+                if user_data and user_data.get('timezone'):
+                    try:
+                        user_tz = pytz.timezone(user_data['timezone'])
+                        timezone_source = 'stored'
+                        logger.info(f'Using stored timezone: {user_data["timezone"]}', requestId=request_id)
+                    except pytz.exceptions.UnknownTimeZoneError:
+                        logger.warning(f'Unknown stored timezone: {user_data["timezone"]}, using UTC', requestId=request_id)
+            except Exception as e:
+                logger.warning(f'Error fetching user timezone: {str(e)}', requestId=request_id)
+        
+        if timezone_source == 'default':
+            logger.info('Using default timezone: UTC', requestId=request_id)
+
+        # Create date in user's timezone, then convert to UTC for API calls
+        local_start = user_tz.localize(datetime(year, month, day, 0, 0, 0))
+        local_end = user_tz.localize(datetime(year, month, day, 23, 59, 59, 999999))
+        
+        # Convert to UTC for Google Calendar API
+        start_of_day = local_start.astimezone(pytz.UTC)
+        end_of_day = local_end.astimezone(pytz.UTC)
+        
+        logger.info(
+            f'Date range: {local_start.isoformat()} to {local_end.isoformat()} (local)',
+            requestId=request_id,
+            utcStart=start_of_day.isoformat(),
+            utcEnd=end_of_day.isoformat()
+        )
 
         all_meetings = []
 

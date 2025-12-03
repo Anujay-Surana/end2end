@@ -235,8 +235,14 @@ class APIClient {
     // MARK: - Meeting Endpoints
     
     /// Get meetings for a specific date
-    func getMeetingsForDay(date: String) async throws -> MeetingsResponse {
-        guard let url = URL(string: "\(baseURL)/api/meetings-for-day?date=\(date)") else {
+    func getMeetingsForDay(date: String, timezone: String? = nil) async throws -> MeetingsResponse {
+        // Build URL with timezone parameter
+        var urlString = "\(baseURL)/api/meetings-for-day?date=\(date)"
+        if let tz = timezone, let encoded = tz.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            urlString += "&tz=\(encoded)"
+        }
+        
+        guard let url = URL(string: urlString) else {
             throw APIError.networkError("Invalid URL")
         }
         

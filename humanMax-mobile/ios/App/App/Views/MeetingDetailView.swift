@@ -179,17 +179,33 @@ struct HomeMeetingDetailView: View {
     }
     
     private var extendedSummary: String {
+        // First try the pre-generated one-liner summary
+        if let oneLiner = meeting.oneLiner, !oneLiner.isEmpty {
+            return oneLiner
+        }
+        
+        // Fall back to description
         if let description = meeting.description, !description.isEmpty {
             let trimmed = description.prefix(200)
             return String(trimmed) + (description.count > 200 ? "..." : "")
         }
+        
         return "No meeting description available. Click \"Prep\" to generate a meeting brief with AI-powered insights."
     }
     
     private var keyInsights: [String] {
-        // Placeholder insights - will be populated from brief later
+        // If brief is ready, show insights
+        if meeting.hasBriefReady {
+            return [
+                "Brief is ready - tap \"Prep\" to chat about this meeting",
+                "AI has analyzed attendees and context",
+                "Ask questions to prepare effectively"
+            ]
+        }
+        
+        // Placeholder insights when brief isn't ready
         return [
-            "Generate a meeting brief to see key insights",
+            "Tap \"Prep\" to generate a meeting brief",
             "AI will analyze attendees and context",
             "Get personalized recommendations"
         ]
@@ -238,9 +254,10 @@ struct DetailRow: View {
         location: "Conference Room A",
         htmlLink: nil,
         accountEmail: nil,
-        brief: nil
+        brief: nil,
+        briefData: nil
     )
     
-    return HomeMeetingDetailView(meeting: sampleMeeting)
+    HomeMeetingDetailView(meeting: sampleMeeting)
         .environmentObject(MeetingsViewModel())
 }

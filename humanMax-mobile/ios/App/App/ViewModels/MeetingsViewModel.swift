@@ -16,6 +16,7 @@ class MeetingsViewModel: ObservableObject {
         errorMessage = nil
         
         let dateStr = formatDate(date)
+        let timezone = TimeZone.current.identifier
         
         // Try cache first for immediate display
         if let cachedMeetings = cacheService.getCachedMeetings(forDate: dateStr) {
@@ -23,8 +24,8 @@ class MeetingsViewModel: ObservableObject {
         }
         
         do {
-            print("📅 Loading meetings for date: \(dateStr)")
-            let response = try await apiClient.getMeetingsForDay(date: dateStr)
+            print("📅 Loading meetings for date: \(dateStr) in timezone: \(timezone)")
+            let response = try await apiClient.getMeetingsForDay(date: dateStr, timezone: timezone)
             print("✅ Received \(response.meetings.count) meetings from API")
             
             // Filter out meetings that don't have required fields

@@ -89,12 +89,13 @@ class BackgroundSyncService: ObservableObject {
             // Check if user is authenticated
             _ = try await apiClient.getCurrentUser()
             
-            // Get today's date
+            // Get today's date and timezone
             let today = Date()
             let dateStr = formatDate(today)
+            let timezone = TimeZone.current.identifier
             
             // Fetch today's meetings
-            let response = try await apiClient.getMeetingsForDay(date: dateStr)
+            let response = try await apiClient.getMeetingsForDay(date: dateStr, timezone: timezone)
             
             // Cache the meetings
             cacheService.cacheMeetings(response.meetings, forDate: dateStr)

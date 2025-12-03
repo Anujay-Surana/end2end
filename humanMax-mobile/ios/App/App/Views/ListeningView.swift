@@ -181,8 +181,9 @@ struct ListeningView: View {
         location: nil,
         htmlLink: nil,
         accountEmail: nil,
-        brief: nil
+        brief: nil,
+        briefData: nil
     )
     
-    return ListeningView(meeting: sampleMeeting)
+    ListeningView(meeting: sampleMeeting)
 }

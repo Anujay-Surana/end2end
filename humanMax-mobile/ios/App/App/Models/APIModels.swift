@@ -15,13 +15,18 @@ struct MeetingsResponse: Codable {
 /// Pre-generated brief data attached to meetings
 struct MeetingBriefData: Codable {
     let oneLiner: String?
-    let briefReady: Bool
+    let briefReady: Bool?
     let generatedAt: String?
     
     enum CodingKeys: String, CodingKey {
         case oneLiner = "one_liner"
         case briefReady = "brief_ready"
         case generatedAt = "generated_at"
+    }
+    
+    /// Safely check if brief is ready
+    var isReady: Bool {
+        return briefReady ?? false
     }
 }
 
@@ -56,7 +61,7 @@ struct Meeting: Codable, Identifiable {
     
     /// Check if brief is ready
     var hasBriefReady: Bool {
-        return briefData?.briefReady ?? false
+        return briefData?.isReady ?? false
     }
 }
 
