@@ -11,3 +11,9 @@ capacitor-cordova-ios-plugins
 # Generated Config files
 App/App/capacitor.config.json
 App/App/config.xml
+
+# Info.plist files (contain OAuth Client IDs)
+App/App/Info.plist
+App/Info.plist
+**/Info.plist
+!**/node_modules/**/Info.plist

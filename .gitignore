@@ -36,3 +36,26 @@ venv/
 env/
 ENV/
 .venv
+
+# iOS - Files with secrets
+humanMax-mobile/ios/App/App/Info.plist
+humanMax-mobile/ios/App/Info.plist
+*.plist.backup
+
+# Documentation files with secrets
+UPDATE_ENV_INSTRUCTIONS.md
+BACKEND_CLIENT_ID_FIX.md
+GOOGLE_CLIENT_ID_SETUP.md
+REDIRECT_URI_SETUP.md
+OAUTH_FLOW_FIXES.md
+
+# Files with OAuth Client IDs/Secrets
+humanMax-mobile/client_*.plist
+**/Info.plist
+!**/node_modules/**/Info.plist
+
+# Xcode
+*.xcodeproj/project.pbxproj.backup
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+DerivedData/

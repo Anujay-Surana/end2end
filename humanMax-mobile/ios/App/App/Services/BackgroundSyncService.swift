@@ -13,6 +13,7 @@ class BackgroundSyncService: ObservableObject {
     private let cacheService: CacheService
     private var syncInProgress = false
     private var observers: [NSObjectProtocol] = []
+    private var isInitialized = false
     
     private init() {
         self.apiClient = APIClient.shared
@@ -24,6 +25,12 @@ class BackgroundSyncService: ObservableObject {
     
     /// Initialize background sync service
     func initialize() {
+        // Guard against re-initialization
+        guard !isInitialized else {
+            print("⚠️ BackgroundSyncService already initialized, skipping")
+            return
+        }
+        
         // Listen for app lifecycle notifications
         let willEnterForegroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
@@ -49,6 +56,9 @@ class BackgroundSyncService: ObservableObject {
         }
         
         observers.append(didBecomeActiveObserver)
+        
+        isInitialized = true
+        print("✅ BackgroundSyncService initialized")
     }
     
     /// Cleanup observers
