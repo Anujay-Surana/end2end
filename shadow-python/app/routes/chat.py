@@ -427,19 +427,118 @@ async def send_meeting_chat(
         # Combine brief context with memory context
         combined_context = brief_context + memory_context
         
-        # Generate response with brief context
-        response = await service.generate_response(
-            message=request_body.message,
-            conversation_history=conversation_history,
-            meetings=[],  # Meeting context comes from brief
-            user_timezone=user_timezone,
-            memory_context=combined_context,
-            is_continuation=False
-        )
+        # Function call handling loop (similar to regular chat endpoint)
+        max_iterations = 5
+        response_text = None
+        executed_calls = []
+        is_continuation = False
         
-        response_text = response.get('content') or 'I couldn\'t process that request.'
+        for iteration in range(max_iterations):
+            # Generate response with brief context
+            response = await service.generate_response(
+                message=request_body.message,
+                conversation_history=conversation_history,
+                meetings=[],  # Meeting context comes from brief
+                user_timezone=user_timezone,
+                memory_context=combined_context,
+                is_continuation=is_continuation
+            )
+            
+            function_calls = response.get('function_calls')
+            
+            # If no function calls, we have the final text response
+            if not function_calls:
+                response_text = response.get('content') or 'I\'ve processed your request.'
+                break
+            
+            # Store assistant message with tool_calls in correct OpenAI format
+            tool_calls_for_storage = [
+                {
+                    'id': fc.get('id'),
+                    'type': 'function',
+                    'function': fc.get('function', {})
+                }
+                for fc in function_calls
+            ]
+            
+            # Store assistant message with tool calls
+            await conversation_manager.add_message_to_history(
+                user_id=user_id,
+                role='assistant',
+                content=response.get('content') or '',
+                metadata={'tool_calls': tool_calls_for_storage, 'meeting_id': meeting_id}
+            )
+            
+            # Build assistant message for OpenAI format
+            assistant_message = {
+                'role': 'assistant',
+                'content': response.get('content') or '',
+                'tool_calls': tool_calls_for_storage
+            }
+            
+            # Add to current conversation history
+            conversation_history.append(assistant_message)
+            
+            # Execute function calls and store results
+            for fc in function_calls:
+                func_name = fc.get('function', {}).get('name')
+                func_args = fc.get('_parsed_arguments', {})
+                tool_call_id = fc.get('id')
+                
+                if not func_name or func_name not in ['get_calendar_by_date', 'generate_meeting_brief']:
+                    result = {'error': f'Unknown function: {func_name}'}
+                elif not isinstance(func_args, dict):
+                    result = {'error': 'Invalid arguments'}
+                else:
+                    try:
+                        executor = FunctionExecutor(user_id, user, user_timezone)
+                        exec_result = await executor.execute(func_name, func_args, tool_call_id)
+                        result = exec_result.get('result', {})
+                        executed_calls.append(exec_result)
+                    except Exception as e:
+                        logger.error(f'Error executing {func_name}: {str(e)}', userId=user_id)
+                        result = {'error': str(e)}
+                        executed_calls.append({
+                            'function_name': func_name,
+                            'tool_call_id': tool_call_id,
+                            'result': result
+                        })
+                
+                # Store tool result with raw_role='tool' in metadata
+                tool_result_content = json.dumps(result)
+                await conversation_manager.add_message_to_history(
+                    user_id=user_id,
+                    role='assistant',  # DB constraint
+                    content=tool_result_content,
+                    metadata={
+                        'raw_role': 'tool',
+                        'tool_call_id': tool_call_id,
+                        'function_name': func_name,
+                        'is_tool_result': True,
+                        'meeting_id': meeting_id
+                    }
+                )
+                
+                # Add tool result to conversation history for next iteration
+                tool_message = {
+                    'role': 'tool',
+                    'tool_call_id': tool_call_id,
+                    'name': func_name,
+                    'content': tool_result_content
+                }
+                conversation_history.append(tool_message)
+            
+            # Mark as continuation for next iteration
+            is_continuation = True
         
-        # Store assistant response with meeting_id
+        # Handle max iterations exceeded
+        if iteration >= max_iterations - 1 and response.get('function_calls'):
+            response_text = 'I\'ve processed your request but reached the maximum iterations.'
+        
+        if not response_text or not response_text.strip():
+            response_text = 'I\'ve processed your request.'
+        
+        # Store final assistant response with meeting_id
         assistant_msg = await conversation_manager.add_message_to_history(
             user_id=user_id,
             role='assistant',
