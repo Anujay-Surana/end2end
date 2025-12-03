@@ -1,0 +1,1 @@
+class e{async start(){throw new Error("Voice recording is not supported on web platform. Use native iOS app.")}async stop(){throw new Error("Voice recording is not supported on web platform.")}async onPartialTranscript(){}async onFinalTranscript(){}async onAudioPlayback(){}async addListener(){return{remove:()=>{}}}async removeAllListeners(){}}export{e as OpenAIRealtimeWeb};

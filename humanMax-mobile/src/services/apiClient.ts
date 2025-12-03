@@ -439,9 +439,12 @@ class ApiClient {
 
   async sendChatMessage(message: string, meetingId?: string): Promise<any> {
     try {
+      // Chat messages can take up to 3 minutes when generating meeting briefs
       const response = await this.client.post('/api/chat/messages', {
         message,
         meeting_id: meetingId,
+      }, {
+        timeout: 180000, // 3 minutes for brief generation
       });
       return response.data;
     } catch (error) {

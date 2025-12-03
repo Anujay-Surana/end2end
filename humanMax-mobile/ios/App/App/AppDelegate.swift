@@ -1,14 +1,35 @@
 import UIKit
-import Capacitor
 
-@UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
+        
+        // Initialize notification service
+        Task { @MainActor in
+            await NotificationService.shared.initialize()
+        }
+        
+        // Initialize background sync service
+        BackgroundSyncService.shared.initialize()
+        
         return true
+    }
+    
+    // MARK: - Push Notifications
+    
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Task { @MainActor in
+            NotificationService.shared.didRegisterForRemoteNotifications(deviceToken: deviceToken)
+        }
+    }
+    
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        Task { @MainActor in
+            NotificationService.shared.didFailToRegisterForRemoteNotifications(error: error)
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -34,16 +55,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        // Called when the app was launched with a url. Feel free to add additional processing here,
-        // but if you want the App API to support tracking app url opens, make sure to keep this call
-        return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
+        // Handle OAuth callback deep link
+        print("🔗 AppDelegate received URL: \(url)")
+        if url.scheme == Constants.oauthRedirectScheme {
+            print("✅ AppDelegate: URL scheme matches OAuth redirect scheme")
+            Task { @MainActor in
+                do {
+                    _ = try await AuthService.shared.handleOAuthCallback(callbackURL: url)
+                    print("✅ AppDelegate: OAuth callback handled successfully")
+                } catch {
+                    print("❌ AppDelegate: Error handling OAuth callback: \(error)")
+                }
+            }
+            return true
+        }
+        
+        print("⚠️ AppDelegate: URL scheme mismatch - expected: \(Constants.oauthRedirectScheme), got: \(url.scheme ?? "nil")")
+        return false
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
-        // Called when the app was launched with an activity, including Universal Links.
-        // Feel free to add additional processing here, but if you want the App API to support
-        // tracking app url opens, make sure to keep this call
-        return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
+        // Handle Universal Links if needed
+        return false
     }
 
 }

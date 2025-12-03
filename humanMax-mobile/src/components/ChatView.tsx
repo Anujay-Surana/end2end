@@ -3,6 +3,7 @@ import { apiClient } from '../services/apiClient';
 import { voiceService } from '../services/voiceService';
 import { Capacitor } from '@capacitor/core';
 import { MeetingModal } from './MeetingModal';
+import { MeetingCardModal } from './MeetingCardModal';
 import type { Meeting } from '../types';
 import './ChatView.css';
 
@@ -25,6 +26,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ meetingId }) => {
   const [loading, setLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [cardMeeting, setCardMeeting] = useState<Meeting | null>(null);
   const [generatingBrief, setGeneratingBrief] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -89,27 +91,78 @@ export const ChatView: React.FC<ChatViewProps> = ({ meetingId }) => {
         
         // Handle function results
         if (functionResults) {
-          const funcName = functionResults.function_name;
+          // function_results can be an array or a single object
+          const results = Array.isArray(functionResults) ? functionResults : [functionResults];
           
-          if (funcName === 'generate_meeting_brief' && functionResults.meeting) {
-            // If brief is already generated server-side, show it directly
-            if (functionResults.brief) {
-              const meetingWithBrief: Meeting = {
-                ...functionResults.meeting,
-                summary: functionResults.meeting.summary || 'Meeting',
-                start: functionResults.meeting.start || { dateTime: new Date().toISOString() },
-                end: functionResults.meeting.end || { dateTime: new Date().toISOString() },
-                attendees: functionResults.meeting.attendees || [],
-              } as Meeting;
-              // Attach brief to meeting object
-              (meetingWithBrief as any).brief = functionResults.brief;
-              setSelectedMeeting(meetingWithBrief);
-            } else {
-              // Generate brief client-side if not provided
-              handleGenerateBrief(functionResults.meeting);
+          for (const result of results) {
+            const funcName = result.function_name;
+            
+            // Handle get_calendar_by_date - show meeting card modal
+            if (funcName === 'get_calendar_by_date' && result.result?.meetings) {
+              const meetings = result.result.meetings;
+              if (meetings && meetings.length > 0) {
+                // Show first meeting in card modal
+                const firstMeeting = meetings[0];
+                // Convert formatted meeting back to Meeting type
+                // Handle both ISO format and formatted string
+                let startObj: { dateTime?: string; date?: string } = {};
+                let endObj: { dateTime?: string; date?: string } = {};
+                
+                if (firstMeeting.start_iso) {
+                  if (firstMeeting.start_iso.includes('T')) {
+                    startObj = { dateTime: firstMeeting.start_iso };
+                  } else {
+                    startObj = { date: firstMeeting.start_iso };
+                  }
+                } else if (firstMeeting.start) {
+                  // Fallback to formatted string
+                  startObj = { dateTime: firstMeeting.start };
+                }
+                
+                if (firstMeeting.end_iso) {
+                  if (firstMeeting.end_iso.includes('T')) {
+                    endObj = { dateTime: firstMeeting.end_iso };
+                  } else {
+                    endObj = { date: firstMeeting.end_iso };
+                  }
+                } else if (firstMeeting.end) {
+                  endObj = { dateTime: firstMeeting.end };
+                }
+                
+                const meetingObj: Meeting = {
+                  id: firstMeeting.id,
+                  summary: firstMeeting.summary || 'Untitled Meeting',
+                  start: startObj,
+                  end: endObj,
+                  attendees: (firstMeeting.attendees || []).map((email: string) => ({ email })),
+                } as Meeting;
+                setCardMeeting(meetingObj);
+              }
+            }
+            
+            // Handle generate_meeting_brief
+            if (funcName === 'generate_meeting_brief' && result.meeting) {
+              // Close card modal if open
+              setCardMeeting(null);
+              
+              // If brief is already generated server-side, show it directly
+              if (result.brief) {
+                const meetingWithBrief: Meeting = {
+                  ...result.meeting,
+                  summary: result.meeting.summary || 'Meeting',
+                  start: result.meeting.start || { dateTime: new Date().toISOString() },
+                  end: result.meeting.end || { dateTime: new Date().toISOString() },
+                  attendees: result.meeting.attendees || [],
+                } as Meeting;
+                // Attach brief to meeting object
+                (meetingWithBrief as any).brief = result.brief;
+                setSelectedMeeting(meetingWithBrief);
+              } else {
+                // Generate brief client-side if not provided
+                handleGenerateBrief(result.meeting);
+              }
             }
           }
-          // Calendar results are already included in the assistant message content
         }
       }
     } catch (error: any) {
@@ -313,6 +366,45 @@ export const ChatView: React.FC<ChatViewProps> = ({ meetingId }) => {
           </div>
         </div>
       </div>
+      
+      {cardMeeting && (
+        <MeetingCardModal
+          meeting={cardMeeting}
+          onClose={() => setCardMeeting(null)}
+          onPrepMe={async (meeting) => {
+            // Send "prep me" message to trigger brief generation
+            setCardMeeting(null);
+            setLoading(true);
+            try {
+              const response = await apiClient.sendChatMessage(`prep me for ${meeting.summary}`, meetingId);
+              if (response.success && response.function_results) {
+                const results = Array.isArray(response.function_results) ? response.function_results : [response.function_results];
+                for (const result of results) {
+                  if (result.function_name === 'generate_meeting_brief' && result.meeting) {
+                    if (result.brief) {
+                      const meetingWithBrief: Meeting = {
+                        ...result.meeting,
+                        summary: result.meeting.summary || 'Meeting',
+                        start: result.meeting.start || { dateTime: new Date().toISOString() },
+                        end: result.meeting.end || { dateTime: new Date().toISOString() },
+                        attendees: result.meeting.attendees || [],
+                      } as Meeting;
+                      (meetingWithBrief as any).brief = result.brief;
+                      setSelectedMeeting(meetingWithBrief);
+                    } else {
+                      handleGenerateBrief(result.meeting);
+                    }
+                  }
+                }
+              }
+            } catch (error: any) {
+              console.error('Error generating brief:', error);
+            } finally {
+              setLoading(false);
+            }
+          }}
+        />
+      )}
       
       {selectedMeeting && (
         <MeetingModal

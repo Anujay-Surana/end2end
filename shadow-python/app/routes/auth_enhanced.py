@@ -8,6 +8,7 @@ import os
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
+from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request, Cookie, Response, Query
 from fastapi import Request as FastAPIRequest
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -93,19 +94,33 @@ async def google_callback(
         
         # Determine redirect URI based on request origin
         # For web, use postmessage; for mobile, use Railway URL
-        # Extract platform from request header (mobile app sends X-Capacitor-Platform)
+        # Extract platform from request header (mobile app sends X-Capacitor-Platform or X-Platform)
         capacitor_platform = http_request.headers.get('X-Capacitor-Platform') if http_request else None
-        is_mobile_request = capacitor_platform in ['ios', 'android']
+        platform_header = http_request.headers.get('X-Platform') if http_request else None
+        is_mobile_request = (capacitor_platform in ['ios', 'android']) or (platform_header in ['ios', 'android'])
+        
+        # Log platform detection for debugging
+        logger.info(
+            f'OAuth callback request',
+            capacitorPlatform=capacitor_platform,
+            platformHeader=platform_header,
+            isMobileRequest=is_mobile_request,
+            hasCode=bool(code)
+        )
         
         # Use mobile callback URI for mobile, postmessage for web
         redirect_uri = 'https://end2end-production.up.railway.app/auth/google/mobile-callback' if is_mobile_request else 'postmessage'
+        
+        # For mobile apps, state is validated client-side, so don't send it to backend for validation
+        # The backend's state validation is for web flows where state is managed server-side
+        state_for_exchange = None if is_mobile_request else state
         
         # Exchange code for tokens using OAuth manager
         tokens = await oauth_manager.exchange_code(
             provider_name='google',
             code=code,
             redirect_uri=redirect_uri,
-            state=state
+            state=state_for_exchange
         )
         
         access_token = tokens['access_token']
@@ -173,7 +188,9 @@ async def google_callback(
             path='/'
         )
         
-        return {
+        # Build response matching iOS AuthResponse model
+        # iOS expects: success, user, access_token, session, error
+        response_data = {
             'success': True,
             'user': {
                 'id': user['id'],
@@ -183,15 +200,37 @@ async def google_callback(
             },
             'session': {
                 'token': session_token,
-                'expires_at': session_obj['expires_at']
+                'expires_at': session_obj['expires_at'],
+                'user_id': user['id']  # iOS Session model expects user_id
             },
             'access_token': access_token,
             'token_expires_at': token_expires_at.isoformat()
         }
+        
+        logger.info(
+            f'OAuth callback successful',
+            userId=user['id'],
+            email=user['email'],
+            isMobile=is_mobile_request,
+            hasSessionToken=bool(session_token),
+            hasAccessToken=bool(access_token)
+        )
+        
+        return response_data
     
     except Exception as e:
-        logger.error(f'Auth callback error: {str(e)}')
-        raise HTTPException(status_code=500, detail=f'Authentication failed: {str(e)}')
+        error_msg = str(e)
+        logger.error(
+            f'Auth callback error: {error_msg}',
+            errorType=type(e).__name__,
+            isMobile=is_mobile_request if 'is_mobile_request' in locals() else None,
+            hasCode=bool(code) if 'code' in locals() else False
+        )
+        # Return error response matching iOS AuthResponse model
+        raise HTTPException(
+            status_code=500,
+            detail=f'Authentication failed: {error_msg}'
+        )
 
 
 @router.get('/google/mobile-callback')
@@ -239,11 +278,19 @@ async def mobile_google_callback(
         # So this endpoint just passes through the code and state to the mobile app
         
         # Build deep link with code and state (mobile app will validate state and exchange code)
+        # URL encode parameters to handle special characters
         deep_link_params = {'code': code}
         if state:
             deep_link_params['state'] = state
-        deep_link_query = '&'.join([f'{k}={v}' for k, v in deep_link_params.items()])
+        deep_link_query = urlencode(deep_link_params)
         deep_link = f'com.kordn8.shadow://callback?{deep_link_query}'
+        
+        logger.info(
+            f'Mobile OAuth callback redirecting to deep link',
+            hasCode=bool(code),
+            hasState=bool(state),
+            deepLink=deep_link[:100]  # Log first 100 chars to avoid logging sensitive data
+        )
         return Response(
             content=f'<html><head><meta http-equiv="refresh" content="0;url={deep_link}"></head><body>Redirecting to app...</body></html>',
             media_type='text/html',
