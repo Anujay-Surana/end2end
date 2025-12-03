@@ -7,10 +7,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
         
-        // Note: NotificationService and BackgroundSyncService are initialized in ShadowApp.init()
-        // to avoid duplicate initialization and race conditions. The guard checks in each service
-        // prevent duplicate observers/initialization, but we keep initialization in one place
-        // (ShadowApp.init()) for clarity and to ensure proper async/await handling.
+        // Set up notification delegate synchronously to ensure notifications are handled
+        // even if they arrive during app startup, before async initialization completes
+        NotificationService.shared.setupDelegate()
+        
+        // Initialize notification service async parts (authorization, registration)
+        Task { @MainActor in
+            await NotificationService.shared.initialize()
+        }
+        
+        // Note: BackgroundSyncService is initialized in ShadowApp.init() to avoid duplicate
+        // initialization. The guard check in BackgroundSyncService prevents duplicate observers.
         
         return true
     }
@@ -53,6 +60,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         // Handle OAuth callback deep link
+        // Note: This is the primary handler for OAuth callbacks. SwiftUI's onOpenURL
+        // will also receive the URL, but we handle it here first to prevent duplicate processing.
         print("🔗 AppDelegate received URL: \(url)")
         if url.scheme == Constants.oauthRedirectScheme {
             print("✅ AppDelegate: URL scheme matches OAuth redirect scheme")

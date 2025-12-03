@@ -127,6 +127,14 @@ async def get_meetings_for_day(
 
             meeting_arrays = await asyncio.gather(*[fetch_account_meetings(acc) for acc in valid_accounts])
             all_meetings = [m for arr in meeting_arrays for m in arr]
+            
+            # Extract and update timezone from calendar events if user is authenticated
+            if user and user.get('id'):
+                try:
+                    from app.db.queries.users import extract_and_update_timezone_from_calendar
+                    await extract_and_update_timezone_from_calendar(user.get('id'), all_meetings)
+                except Exception as e:
+                    logger.warning(f'Failed to extract timezone from calendar: {str(e)}', requestId=request_id)
 
         else:
             # Single-account mode (backward compatibility)
@@ -150,6 +158,14 @@ async def get_meetings_for_day(
                 100
             )
             all_meetings = events
+            
+            # Extract and update timezone from calendar events if user is authenticated
+            if user and user.get('id'):
+                try:
+                    from app.db.queries.users import extract_and_update_timezone_from_calendar
+                    await extract_and_update_timezone_from_calendar(user.get('id'), all_meetings)
+                except Exception as e:
+                    logger.warning(f'Failed to extract timezone from calendar: {str(e)}', requestId=request_id)
 
         # Classify events and add classification metadata
         user_context = await get_user_context(user, request_id) if user else None

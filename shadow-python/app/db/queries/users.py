@@ -5,6 +5,9 @@ CRUD operations for users table using Supabase
 """
 
 from app.db.connection import supabase
+from typing import List, Dict, Any, Optional
+from collections import Counter
+from app.services.logger import logger
 
 
 async def create_user(user_data: dict) -> dict:
@@ -90,12 +93,13 @@ async def update_user(user_id: str, updates: dict) -> dict:
     Update user
     Args:
         user_id: User UUID
-        updates: Fields to update (name, picture_url)
+        updates: Fields to update (name, picture_url, timezone)
     Returns:
         Updated user
     """
     name = updates.get('name')
     picture_url = updates.get('picture_url')
+    timezone = updates.get('timezone')
     
     # Build update object conditionally (COALESCE logic in Python)
     update_data = {}
@@ -103,6 +107,8 @@ async def update_user(user_id: str, updates: dict) -> dict:
         update_data['name'] = name
     if picture_url is not None:
         update_data['picture_url'] = picture_url
+    if timezone is not None:
+        update_data['timezone'] = timezone
     
     # Supabase update().eq().select() pattern doesn't work - need to query after update
     # First update the record
@@ -152,7 +158,57 @@ async def delete_user(user_id: str) -> bool:
         
         return True
     except Exception as e:
-        from app.services.logger import logger
         logger.warn(f'Error deleting user: {str(e)}')
         return False
+
+
+async def extract_and_update_timezone_from_calendar(user_id: str, calendar_events: List[Dict[str, Any]]) -> Optional[str]:
+    """
+    Extract the most common timezone from calendar events and update user's timezone if different
+    Args:
+        user_id: User UUID
+        calendar_events: List of calendar events (must have 'timeZone' field)
+    Returns:
+        Detected timezone string or None if no timezone found
+    """
+    if not calendar_events:
+        return None
+    
+    # Extract timezones from calendar events
+    timezones = []
+    for event in calendar_events:
+        timezone = event.get('timeZone')
+        if timezone:
+            timezones.append(timezone)
+    
+    if not timezones:
+        return None
+    
+    # Find the most common timezone
+    timezone_counter = Counter(timezones)
+    most_common_timezone = timezone_counter.most_common(1)[0][0]
+    
+    # Get current user timezone
+    user = await find_user_by_id(user_id)
+    if not user:
+        logger.warning(f'User not found: {user_id}')
+        return None
+    
+    current_timezone = user.get('timezone', 'UTC')
+    
+    # Only update if timezone is different
+    if most_common_timezone != current_timezone:
+        try:
+            await update_user(user_id, {'timezone': most_common_timezone})
+            logger.info(
+                f'Updated user timezone from {current_timezone} to {most_common_timezone}',
+                userId=user_id,
+                oldTimezone=current_timezone,
+                newTimezone=most_common_timezone
+            )
+        except Exception as e:
+            logger.error(f'Failed to update user timezone: {str(e)}', userId=user_id)
+            return None
+    
+    return most_common_timezone
 

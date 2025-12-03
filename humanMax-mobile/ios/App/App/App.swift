@@ -18,21 +18,23 @@ struct ShadowApp: App {
             ContentView()
                 .environmentObject(authViewModel)
                 .onOpenURL { url in
-                    // Handle OAuth deep link
-                    print("🔗 App received URL via onOpenURL: \(url)")
+                    // Note: OAuth deep links are primarily handled in AppDelegate.application(_:open:options:)
+                    // This handler is kept as a fallback, but AuthService.handleOAuthCallback() has
+                    // deduplication logic to prevent processing the same authorization code twice.
                     if url.scheme == Constants.oauthRedirectScheme {
-                        print("✅ URL scheme matches OAuth redirect scheme")
+                        print("🔗 App received URL via onOpenURL (fallback handler): \(url)")
                         Task { @MainActor in
                             do {
                                 _ = try await AuthService.shared.handleOAuthCallback(callbackURL: url)
                                 await authViewModel.checkSession()
-                                print("✅ OAuth callback handled successfully")
+                                print("✅ OAuth callback handled successfully (fallback)")
                             } catch {
-                                print("❌ Error handling OAuth callback: \(error)")
+                                // Ignore "already processed" errors silently
+                                if !error.localizedDescription.contains("already") {
+                                    print("❌ Error handling OAuth callback: \(error)")
+                                }
                             }
                         }
-                    } else {
-                        print("⚠️ URL scheme mismatch - expected: \(Constants.oauthRedirectScheme), got: \(url.scheme ?? "nil")")
                     }
                 }
         }

@@ -13,6 +13,8 @@ class AuthService: NSObject, ObservableObject {
     private let apiClient: APIClient = APIClient.shared
     private let keychainService: KeychainService = KeychainService.shared
     private var authSession: ASWebAuthenticationSession?
+    private var isProcessingCallback = false
+    private var processedCodes: Set<String> = []
     
     private override init() {
         super.init()
@@ -139,6 +141,33 @@ class AuthService: NSObject, ObservableObject {
             throw AuthError.oauthError("No authorization code received")
         }
         
+        // Prevent duplicate processing of the same authorization code
+        // OAuth codes are single-use, so processing the same code twice will fail
+        if processedCodes.contains(code) {
+            print("⚠️ Authorization code already processed, ignoring duplicate callback")
+            // Return current user if already authenticated, otherwise throw error
+            if let currentUser = currentUser {
+                return currentUser
+            }
+            throw AuthError.oauthError("Authorization code already used")
+        }
+        
+        // Check if we're already processing a callback
+        guard !isProcessingCallback else {
+            print("⚠️ OAuth callback already being processed, ignoring duplicate")
+            // Wait a bit and check if we have a user
+            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            if let currentUser = currentUser {
+                return currentUser
+            }
+            throw AuthError.oauthError("OAuth callback already being processed")
+        }
+        
+        isProcessingCallback = true
+        defer {
+            isProcessingCallback = false
+        }
+        
         // Verify state
         if let state = state {
             let storedState = UserDefaults.standard.string(forKey: "oauth_state")
@@ -156,7 +185,17 @@ class AuthService: NSObject, ObservableObject {
         
         print("🔄 Exchanging code for session tokens...")
         // Exchange code for tokens
-        return try await exchangeCodeForSession(code: code, state: state)
+        let user = try await exchangeCodeForSession(code: code, state: state)
+        
+        // Mark code as processed after successful exchange
+        processedCodes.insert(code)
+        // Clean up old codes (keep last 10) - convert to array, remove oldest, recreate set
+        if processedCodes.count > 10 {
+            let codesArray = Array(processedCodes)
+            processedCodes = Set(codesArray.suffix(10))
+        }
+        
+        return user
     }
     
     /// Exchange OAuth code for session tokens

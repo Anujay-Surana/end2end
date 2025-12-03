@@ -40,7 +40,7 @@ class ChatViewModel: ObservableObject {
         errorMessage = nil
         
         // Add user message optimistically
-        let userMessage = ChatMessage(
+        let optimisticUserMessage = ChatMessage(
             id: UUID().uuidString,
             role: "user",
             content: text,
@@ -48,16 +48,24 @@ class ChatViewModel: ObservableObject {
             meeting_id: meetingId,
             function_results: nil
         )
-        messages.append(userMessage)
+        messages.append(optimisticUserMessage)
         
         do {
-            _ = try await apiClient.sendChatMessage(message: text, meetingId: meetingId)
-            // Reload messages to get assistant response
-            await loadMessages(meetingId: meetingId)
+            let response = try await apiClient.sendChatMessage(message: text, meetingId: meetingId)
+            
+            // Replace optimistic message with actual user message from backend
+            if let index = messages.firstIndex(where: { $0.id == optimisticUserMessage.id }) {
+                messages[index] = response.userMessage
+            } else {
+                messages.append(response.userMessage)
+            }
+            
+            // Add assistant message
+            messages.append(response.assistantMessage)
         } catch {
             errorMessage = error.localizedDescription
             // Remove optimistic message on error
-            messages.removeAll { $0.id == userMessage.id }
+            messages.removeAll { $0.id == optimisticUserMessage.id }
         }
         
         isSending = false

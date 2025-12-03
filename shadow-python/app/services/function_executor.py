@@ -130,6 +130,14 @@ class FunctionExecutor:
                     logger.error(error_msg, userId=self.user_id)
                     errors.append(error_msg)
             
+            # Extract and update timezone from calendar events
+            if all_meetings:
+                try:
+                    from app.db.queries.users import extract_and_update_timezone_from_calendar
+                    await extract_and_update_timezone_from_calendar(self.user_id, all_meetings)
+                except Exception as e:
+                    logger.warning(f'Failed to extract timezone from calendar: {str(e)}', userId=self.user_id)
+            
             # Format meetings for response with timezone conversion
             formatted_meetings = []
             for m in all_meetings[:20]:  # Limit to 20 meetings

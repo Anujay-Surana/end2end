@@ -51,7 +51,7 @@ struct Account: Codable, Identifiable {
     let email: String?
     let name: String?
     let picture: String?
-    let is_primary: Bool
-    let created_at: String?
+    let isPrimary: Bool
+    let createdAt: String?
 }
 

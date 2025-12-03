@@ -76,8 +76,8 @@ async def send_message(
         if not openai_api_key:
             raise HTTPException(status_code=500, detail='OpenAI API key not configured')
         
-        # Initialize conversation manager with sliding window (last 20 messages)
-        conversation_manager = ConversationManager(window_size=20)
+        # Initialize conversation manager with sliding window (last 40 messages for better context)
+        conversation_manager = ConversationManager(window_size=40)
         
         # Store user message
         user_msg = await conversation_manager.add_message_to_history(

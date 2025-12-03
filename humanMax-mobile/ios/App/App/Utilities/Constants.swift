@@ -55,7 +55,7 @@ struct Constants {
     
     /// Realtime WebSocket endpoint
     static var realtimeWebSocketURL: String {
-        return "\(websocketURL)/realtime"
+        return "\(websocketURL)/ws/realtime"
     }
 }
 

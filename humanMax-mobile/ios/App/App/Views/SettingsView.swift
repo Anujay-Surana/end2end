@@ -60,7 +60,7 @@ struct SettingsView: View {
                                 
                                 Spacer()
                                 
-                                if account.is_primary {
+                                if account.isPrimary {
                                     Text("Primary")
                                         .font(.caption)
                                         .padding(.horizontal, 8)

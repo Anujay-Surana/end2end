@@ -616,12 +616,19 @@ async def fetch_calendar_events(
 
 def _format_calendar_event(event: Dict[str, Any]) -> Dict[str, Any]:
     """Format a calendar event to standard format"""
+    start_obj = event.get('start', {})
+    end_obj = event.get('end', {})
+    
+    # Extract timezone from start/end objects (Google Calendar API provides timeZone field)
+    timezone = start_obj.get('timeZone') or end_obj.get('timeZone')
+    
     return {
         'id': event.get('id'),
         'summary': event.get('summary') or 'No title',
         'description': event.get('description') or '',
-        'start': event.get('start', {}).get('dateTime') or event.get('start', {}).get('date') or '',
-        'end': event.get('end', {}).get('dateTime') or event.get('end', {}).get('date') or '',
+        'start': start_obj.get('dateTime') or start_obj.get('date') or '',
+        'end': end_obj.get('dateTime') or end_obj.get('date') or '',
+        'timeZone': timezone,  # Preserve timezone information
         'attendees': [{
             'email': a.get('email'),
             'displayName': a.get('displayName'),

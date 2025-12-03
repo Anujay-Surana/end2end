@@ -84,7 +84,7 @@ struct MeetingRow: View {
                 
                 Spacer()
                 
-                if let startTime = parseTime(meeting.start) {
+                if let start = meeting.start, let startTime = parseTime(start) {
                     Text(startTime)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
@@ -146,7 +146,7 @@ struct MeetingDetailView: View {
                             .font(.body)
                     }
                     
-                    if let startTime = formatDateTime(meeting.start) {
+                    if let start = meeting.start, let startTime = formatDateTime(start) {
                         Label(startTime, systemImage: "clock")
                     }
                     

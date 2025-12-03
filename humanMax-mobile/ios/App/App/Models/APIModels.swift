@@ -18,20 +18,83 @@ struct Meeting: Codable, Identifiable {
     let summary: String
     let title: String?
     let description: String?
-    let start: MeetingTime
-    let end: MeetingTime
+    let start: MeetingTime?
+    let end: MeetingTime?
     let attendees: [Attendee]?
     let location: String?
     let htmlLink: String?
     let accountEmail: String?
     let brief: AnyCodable?
+    
+    // Ignore unknown fields like _classification from backend
+    enum CodingKeys: String, CodingKey {
+        case id, summary, title, description, start, end, attendees, location
+        case htmlLink = "htmlLink"
+        case accountEmail = "accountEmail"
+        case brief
+    }
 }
 
 /// Meeting time (can be dateTime or date)
+/// Handles both string format (from backend) and dictionary format
 struct MeetingTime: Codable {
     let dateTime: String?
     let date: String?
     let timeZone: String?
+    
+    init(dateTime: String?, date: String?, timeZone: String?) {
+        self.dateTime = dateTime
+        self.date = date
+        self.timeZone = timeZone
+    }
+    
+    init(from decoder: Decoder) throws {
+        // Try to decode as dictionary first (expected format: {"dateTime": "...", "date": null, "timeZone": null})
+        do {
+            let keyedContainer = try decoder.container(keyedBy: CodingKeys.self)
+            self.dateTime = try? keyedContainer.decodeIfPresent(String.self, forKey: .dateTime)
+            self.date = try? keyedContainer.decodeIfPresent(String.self, forKey: .date)
+            self.timeZone = try? keyedContainer.decodeIfPresent(String.self, forKey: .timeZone)
+            return
+        } catch {
+            // If keyed container fails, try single value container (string format from backend)
+        }
+        
+        // Fallback: try to decode as string (backend format: "2025-12-02T10:00:00-08:00")
+        let container = try decoder.singleValueContainer()
+        if let stringValue = try? container.decode(String.self) {
+            // If it's a string, treat it as dateTime
+            self.dateTime = stringValue
+            self.date = nil
+            self.timeZone = nil
+        } else {
+            // If neither format works, initialize with nil values
+            self.dateTime = nil
+            self.date = nil
+            self.timeZone = nil
+        }
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        
+        // If only dateTime is set and it's a string format, encode as string
+        if let dateTime = dateTime, date == nil && timeZone == nil {
+            try container.encode(dateTime)
+            return
+        }
+        
+        // Otherwise encode as dictionary
+        var dict: [String: String?] = [:]
+        dict["dateTime"] = dateTime
+        dict["date"] = date
+        dict["timeZone"] = timeZone
+        try container.encode(dict)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case dateTime, date, timeZone
+    }
 }
 
 /// Attendee model
@@ -76,6 +139,14 @@ struct ChatMessagesResponse: Codable {
     let messages: [ChatMessage]
 }
 
+/// Chat message send response (from POST /api/chat/messages)
+struct ChatMessageSendResponse: Codable {
+    let success: Bool
+    let message: String?
+    let userMessage: ChatMessage
+    let assistantMessage: ChatMessage
+}
+
 /// Chat message model
 struct ChatMessage: Codable, Identifiable {
     let id: String
@@ -84,6 +155,14 @@ struct ChatMessage: Codable, Identifiable {
     let created_at: String?
     let meeting_id: String?
     let function_results: [FunctionResult]?
+    
+    // Backend may include additional fields that we ignore
+    enum CodingKeys: String, CodingKey {
+        case id, role, content
+        case created_at
+        case meeting_id
+        case function_results
+    }
 }
 
 /// Function result from AI

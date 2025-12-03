@@ -107,7 +107,16 @@ class APIClient {
             if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
                 let decoder = JSONDecoder()
                 decoder.keyDecodingStrategy = .convertFromSnakeCase
-                return try decoder.decode(T.self, from: data)
+                do {
+                    return try decoder.decode(T.self, from: data)
+                } catch {
+                    // Log decoding error for debugging
+                    if let jsonString = String(data: data, encoding: .utf8) {
+                        print("❌ Decoding error: \(error)")
+                        print("📄 Response JSON (first 1000 chars): \(String(jsonString.prefix(1000)))")
+                    }
+                    throw error
+                }
             } else {
                 let error = try? JSONDecoder().decode(APIErrorResponse.self, from: data)
                 throw APIError.httpError(httpResponse.statusCode, error?.message ?? "Request failed")
@@ -137,7 +146,7 @@ class APIClient {
         let request = GoogleCallbackRequest(code: code, state: state)
         let bodyData = try JSONEncoder().encode(request)
         
-        guard let request = buildRequest(
+        guard let urlRequest = buildRequest(
             endpoint: "/auth/google/callback",
             method: "POST",
             body: bodyData,
@@ -146,7 +155,9 @@ class APIClient {
             throw APIError.networkError("Invalid request")
         }
         
-        return try await executeRequest(request, responseType: AuthResponse.self)
+        // OAuth codes are single-use, so don't retry on errors
+        // Retrying would cause duplicate processing attempts and "Bad Request" errors
+        return try await executeRequest(urlRequest, responseType: AuthResponse.self, retryCount: maxRetries)
     }
     
     /// Add Google account
@@ -238,7 +249,20 @@ class APIClient {
             request.setValue("Bearer \(sessionToken)", forHTTPHeaderField: "Authorization")
         }
         
-        return try await executeRequest(request, responseType: MeetingsResponse.self)
+        do {
+            let response = try await executeRequest(request, responseType: MeetingsResponse.self)
+            print("📥 API Response decoded successfully: \(response.meetings.count) meetings")
+            return response
+        } catch {
+            print("❌ Failed to decode meetings response: \(error)")
+            // Try to get raw response for debugging
+            if let urlResponse = try? await session.data(for: request) {
+                if let jsonString = String(data: urlResponse.0, encoding: .utf8) {
+                    print("📄 Raw response (first 500 chars): \(String(jsonString.prefix(500)))")
+                }
+            }
+            throw error
+        }
     }
     
     /// Prep meeting (streaming response)
@@ -299,7 +323,7 @@ class APIClient {
     }
     
     /// Send chat message
-    func sendChatMessage(message: String, meetingId: String? = nil) async throws -> [String: AnyCodable] {
+    func sendChatMessage(message: String, meetingId: String? = nil) async throws -> ChatMessageSendResponse {
         struct ChatMessageRequest: Codable {
             let message: String
             let meeting_id: String?
@@ -312,7 +336,7 @@ class APIClient {
         
         let bodyData = try JSONEncoder().encode(request)
         
-        guard let request = buildRequest(
+        guard let urlRequest = buildRequest(
             endpoint: "/api/chat/messages",
             method: "POST",
             body: bodyData
@@ -321,10 +345,10 @@ class APIClient {
         }
         
         // Increase timeout for chat messages (can take up to 3 minutes)
-        var mutableRequest = request
+        var mutableRequest = urlRequest
         mutableRequest.timeoutInterval = 180.0
         
-        return try await executeRequest(mutableRequest, responseType: [String: AnyCodable].self)
+        return try await executeRequest(mutableRequest, responseType: ChatMessageSendResponse.self)
     }
     
     /// Delete chat message

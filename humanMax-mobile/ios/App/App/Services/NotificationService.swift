@@ -20,12 +20,15 @@ class NotificationService: NSObject, ObservableObject {
     
     // MARK: - Initialization
     
-    /// Initialize notification service
+    /// Set up the notification delegate synchronously (must be called early in app lifecycle)
+    func setupDelegate() {
+        // Set delegate synchronously to ensure notifications are handled even during app startup
+        UNUserNotificationCenter.current().delegate = self
+    }
+    
+    /// Initialize notification service (async parts: authorization and registration)
     func initialize() async {
         guard !isInitialized else { return }
-        
-        // Set delegate
-        UNUserNotificationCenter.current().delegate = self
         
         // Request authorization
         do {
@@ -130,7 +133,8 @@ class NotificationService: NSObject, ObservableObject {
     
     /// Schedule a local notification for a meeting reminder
     func scheduleMeetingReminder(meeting: Meeting, minutesBefore: Int = 15) async throws {
-        guard let startTime = parseMeetingTime(meeting.start) else {
+        guard let start = meeting.start,
+              let startTime = parseMeetingTime(start) else {
             throw NotificationError.invalidMeetingTime
         }
         

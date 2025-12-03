@@ -14,12 +14,12 @@ import json
 class ConversationManager:
     """Manages conversation history with sliding window"""
     
-    def __init__(self, window_size: int = 20):
+    def __init__(self, window_size: int = 40):
         """
         Initialize conversation manager
         
         Args:
-            window_size: Number of recent messages to keep in active context
+            window_size: Number of recent messages to keep in active context (increased for better understanding)
         """
         self.window_size = window_size
     
