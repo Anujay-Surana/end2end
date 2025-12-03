@@ -315,4 +315,3 @@ enum NotificationError: Error, LocalizedError {
         }
     }
 }
-

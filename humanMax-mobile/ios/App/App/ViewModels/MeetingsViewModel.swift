@@ -52,4 +52,3 @@ class MeetingsViewModel: ObservableObject {
         return formatter.string(from: date)
     }
 }
-

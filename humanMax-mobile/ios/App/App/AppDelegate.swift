@@ -7,13 +7,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
         
-        // Initialize notification service
-        Task { @MainActor in
-            await NotificationService.shared.initialize()
-        }
-        
-        // Initialize background sync service
-        BackgroundSyncService.shared.initialize()
+        // Note: NotificationService and BackgroundSyncService are initialized in ShadowApp.init()
+        // to avoid duplicate initialization and race conditions. The guard checks in each service
+        // prevent duplicate observers/initialization, but we keep initialization in one place
+        // (ShadowApp.init()) for clarity and to ensure proper async/await handling.
         
         return true
     }
