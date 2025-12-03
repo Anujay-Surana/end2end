@@ -30,23 +30,29 @@ class NotificationService: NSObject, ObservableObject {
     func initialize() async {
         guard !isInitialized else { return }
         
-        // Request authorization
-        do {
-            let granted = try await requestAuthorization()
-            guard granted else {
-                print("Notification permission not granted")
-                return
+            // Request authorization
+            do {
+                let granted = try await requestAuthorization()
+                guard granted else {
+                    print("Notification permission not granted")
+                    return
+                }
+                
+                // Register for remote notifications (only if Push Notifications capability is enabled)
+                // This will fail gracefully if Push Notifications is not available (e.g., free Apple Developer account)
+                await MainActor.run {
+                    // Check if Push Notifications capability is available
+                    // If not available, this will fail silently, which is fine for development
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+                
+                isInitialized = true
+            } catch {
+                print("Error initializing notifications: \(error)")
+                // Still mark as initialized if local notifications are available
+                // Remote notifications may fail on free developer accounts
+                isInitialized = true
             }
-            
-            // Register for remote notifications
-            await MainActor.run {
-                UIApplication.shared.registerForRemoteNotifications()
-            }
-            
-            isInitialized = true
-        } catch {
-            print("Error initializing notifications: \(error)")
-        }
     }
     
     /// Request notification authorization
@@ -260,6 +266,7 @@ class NotificationService: NSObject, ObservableObject {
 
 // MARK: - UNUserNotificationCenterDelegate
 
+@MainActor
 extension NotificationService: UNUserNotificationCenterDelegate {
     /// Handle notification when app is in foreground
     func userNotificationCenter(

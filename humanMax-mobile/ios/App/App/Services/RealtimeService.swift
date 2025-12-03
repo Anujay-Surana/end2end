@@ -1,25 +1,64 @@
 import Foundation
+import Combine
+
+/// Connection state for the realtime service
+enum ConnectionState: Equatable {
+    case disconnected
+    case connecting
+    case connected
+    case reconnecting(attempt: Int)
+    case failed(reason: String)
+}
 
 /// Service for managing WebSocket connection to backend realtime API
-class RealtimeService {
+/// Supports binary audio streaming and automatic reconnection
+@MainActor
+class RealtimeService: ObservableObject {
     static let shared = RealtimeService()
+    
+    // MARK: - Published Properties
+    
+    @Published private(set) var connectionState: ConnectionState = .disconnected
+    @Published private(set) var isConnected = false
+    @Published private(set) var isSpeaking = false // User is speaking (VAD)
+    @Published private(set) var isResponding = false // AI is responding
+    
+    // Live caption state
+    @Published var userTranscript: String = ""
+    @Published var assistantTranscript: String = ""
+    @Published var partialTranscript: String = ""
+    
+    // MARK: - Private Properties
     
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession
     private let keychainService: KeychainService
-    private var isConnected = false
     private var receiveTask: Task<Void, Never>?
+    private var heartbeatTask: Task<Void, Never>?
     
-    // Callbacks
-    var onTranscript: ((String, Bool) -> Void)? // (text, isFinal)
-    var onAudio: ((Data) -> Void)? // Audio data (PCM16)
+    // Reconnection
+    private var reconnectAttempts = 0
+    private let maxReconnectAttempts = 5
+    private var shouldReconnect = true
+    
+    // MARK: - Callbacks
+    
+    var onTranscript: ((String, Bool, String) -> Void)? // (text, isFinal, source: "user"/"assistant")
+    var onAudio: ((Data) -> Void)? // Raw PCM16 audio data
     var onResponse: ((String) -> Void)? // Text response
-    var onError: ((Error) -> Void)? // Error callback
-    var onReady: (() -> Void)? // Connection ready
+    var onError: ((Error) -> Void)?
+    var onReady: (() -> Void)?
+    var onSpeechStarted: (() -> Void)?
+    var onSpeechStopped: (() -> Void)?
+    var onResponseDone: (() -> Void)?
+    var onConnectionStateChanged: ((ConnectionState) -> Void)?
+    
+    // MARK: - Initialization
     
     private init() {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30.0
+        configuration.waitsForConnectivity = true
         self.urlSession = URLSession(configuration: configuration)
         self.keychainService = KeychainService.shared
     }
@@ -28,10 +67,20 @@ class RealtimeService {
     
     /// Connect to realtime WebSocket endpoint
     func connect() async throws {
-        guard !isConnected else {
+        guard connectionState != .connected && connectionState != .connecting else {
             return
         }
         
+        shouldReconnect = true
+        reconnectAttempts = 0
+        connectionState = .connecting
+        onConnectionStateChanged?(.connecting)
+        
+        try await performConnect()
+    }
+    
+    /// Internal connection logic
+    private func performConnect() async throws {
         // Build WebSocket URL with authentication token
         var components = URLComponents(string: Constants.realtimeWebSocketURL)
         if let sessionToken = keychainService.getSessionToken() {
@@ -39,6 +88,7 @@ class RealtimeService {
         }
         
         guard let url = components?.url else {
+            connectionState = .failed(reason: "Invalid URL")
             throw RealtimeError.invalidURL
         }
         
@@ -47,9 +97,15 @@ class RealtimeService {
         webSocketTask?.resume()
         
         isConnected = true
+        connectionState = .connected
+        reconnectAttempts = 0
+        onConnectionStateChanged?(.connected)
         
         // Start receiving messages
         startReceiving()
+        
+        // Start heartbeat
+        startHeartbeat()
         
         // Wait for ready message
         try await waitForReady()
@@ -57,6 +113,11 @@ class RealtimeService {
     
     /// Disconnect from WebSocket
     func disconnect() {
+        shouldReconnect = false
+        
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        
         receiveTask?.cancel()
         receiveTask = nil
         
@@ -64,20 +125,88 @@ class RealtimeService {
         webSocketTask = nil
         
         isConnected = false
+        isSpeaking = false
+        isResponding = false
+        connectionState = .disconnected
+        onConnectionStateChanged?(.disconnected)
+        
+        // Clear transcripts
+        userTranscript = ""
+        assistantTranscript = ""
+        partialTranscript = ""
+    }
+    
+    /// Attempt to reconnect with exponential backoff
+    private func attemptReconnect() async {
+        guard shouldReconnect && reconnectAttempts < maxReconnectAttempts else {
+            connectionState = .failed(reason: "Max reconnection attempts reached")
+            onConnectionStateChanged?(connectionState)
+            return
+        }
+        
+        reconnectAttempts += 1
+        connectionState = .reconnecting(attempt: reconnectAttempts)
+        onConnectionStateChanged?(connectionState)
+        
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        let delay = pow(2.0, Double(reconnectAttempts - 1))
+        print("🔄 RealtimeService: Reconnecting in \(delay)s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))")
+        
+        do {
+            try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            
+            guard shouldReconnect else { return }
+            
+            try await performConnect()
+            print("✅ RealtimeService: Reconnected successfully")
+        } catch {
+            print("❌ RealtimeService: Reconnect failed: \(error.localizedDescription)")
+            await attemptReconnect()
+        }
     }
     
     /// Wait for ready message from server
     private func waitForReady() async throws {
         // Give server a moment to send ready message
-        try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-        
-        // Check if we received ready message (handled in receive loop)
+        try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
         onReady?()
+    }
+    
+    // MARK: - Heartbeat
+    
+    /// Start heartbeat to keep connection alive
+    private func startHeartbeat() {
+        heartbeatTask = Task {
+            while !Task.isCancelled && isConnected {
+                do {
+                    try await Task.sleep(nanoseconds: 15_000_000_000) // 15 seconds
+                    await ping()
+                } catch {
+                    break
+                }
+            }
+        }
+    }
+    
+    /// Send ping to keep connection alive
+    func ping() async {
+        guard let webSocketTask = webSocketTask, isConnected else {
+            return
+        }
+        
+        webSocketTask.sendPing { [weak self] error in
+            if let error = error {
+                print("⚠️ RealtimeService: Ping failed: \(error.localizedDescription)")
+                Task { @MainActor in
+                    self?.handleDisconnect()
+                }
+            }
+        }
     }
     
     // MARK: - Message Sending
     
-    /// Send text message to OpenAI Realtime API
+    /// Send text message to backend
     func sendText(_ text: String) async throws {
         guard let webSocketTask = webSocketTask, isConnected else {
             throw RealtimeError.notConnected
@@ -97,18 +226,25 @@ class RealtimeService {
         try await webSocketTask.send(message)
     }
     
-    /// Send audio data to OpenAI Realtime API
+    /// Send raw audio data as binary WebSocket message (low latency)
     func sendAudio(_ audioData: Data) async throws {
         guard let webSocketTask = webSocketTask, isConnected else {
             throw RealtimeError.notConnected
         }
         
-        // Encode audio as base64
-        let base64Audio = audioData.base64EncodedString()
+        // Send as raw binary - no JSON/base64 encoding for minimum latency
+        let message = URLSessionWebSocketTask.Message.data(audioData)
+        try await webSocketTask.send(message)
+    }
+    
+    /// Send stop signal to cancel AI response
+    func sendStop() async throws {
+        guard let webSocketTask = webSocketTask, isConnected else {
+            throw RealtimeError.notConnected
+        }
         
         let messageDict: [String: Any] = [
-            "type": "audio",
-            "audio": base64Audio
+            "type": "stop"
         ]
         
         guard let jsonData = try? JSONSerialization.data(withJSONObject: messageDict),
@@ -120,15 +256,13 @@ class RealtimeService {
         try await webSocketTask.send(message)
     }
     
-    /// Send stop signal
-    func sendStop() async throws {
+    /// Send ping message (JSON)
+    func sendPing() async throws {
         guard let webSocketTask = webSocketTask, isConnected else {
             throw RealtimeError.notConnected
         }
         
-        let messageDict: [String: Any] = [
-            "type": "stop"
-        ]
+        let messageDict: [String: Any] = ["type": "ping"]
         
         guard let jsonData = try? JSONSerialization.data(withJSONObject: messageDict),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
@@ -160,16 +294,43 @@ class RealtimeService {
                 case .string(let text):
                     await handleTextMessage(text)
                 case .data(let data):
-                    await handleDataMessage(data)
+                    // Binary audio data - pass directly to callback (no decoding needed)
+                    onAudio?(data)
                 @unknown default:
                     break
                 }
             } catch {
                 if !Task.isCancelled {
-                    isConnected = false
-                    onError?(error)
+                    handleDisconnect()
                 }
                 break
+            }
+        }
+    }
+    
+    /// Handle disconnection and attempt reconnect
+    private func handleDisconnect() {
+        guard isConnected else { return }
+        
+        isConnected = false
+        isSpeaking = false
+        isResponding = false
+        
+        webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+        webSocketTask = nil
+        
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        
+        receiveTask?.cancel()
+        receiveTask = nil
+        
+        onError?(RealtimeError.connectionFailed)
+        
+        // Attempt reconnect if allowed
+        if shouldReconnect {
+            Task {
+                await attemptReconnect()
             }
         }
     }
@@ -189,13 +350,27 @@ class RealtimeService {
         case "realtime_transcript":
             if let transcriptText = json["text"] as? String,
                let isFinal = json["is_final"] as? Bool {
-                onTranscript?(transcriptText, isFinal)
-            }
-            
-        case "realtime_audio":
-            if let audioBase64 = json["audio"] as? String,
-               let audioData = Data(base64Encoded: audioBase64) {
-                onAudio?(audioData)
+                let source = json["source"] as? String ?? "user"
+                
+                // Update published transcripts for live captions
+                if source == "user" {
+                    if isFinal {
+                        userTranscript = transcriptText
+                        partialTranscript = ""
+                    } else {
+                        partialTranscript = transcriptText
+                    }
+                } else if source == "assistant" {
+                    if isFinal {
+                        assistantTranscript = transcriptText
+                        partialTranscript = ""
+                    } else {
+                        // Accumulate partial assistant transcript
+                        partialTranscript += transcriptText
+                    }
+                }
+                
+                onTranscript?(transcriptText, isFinal, source)
             }
             
         case "realtime_response":
@@ -203,21 +378,45 @@ class RealtimeService {
                 onResponse?(responseText)
             }
             
-        case "error":
-            if let errorMessage = json["message"] as? String {
+        case "realtime_speech_started":
+            isSpeaking = true
+            isResponding = false
+            partialTranscript = ""
+            onSpeechStarted?()
+            
+        case "realtime_speech_stopped":
+            isSpeaking = false
+            onSpeechStopped?()
+            
+        case "realtime_response_done":
+            isResponding = false
+            onResponseDone?()
+            
+        case "realtime_error", "error":
+            if let errorDict = json["error"] as? [String: Any],
+               let errorMessage = errorDict["message"] as? String {
+                onError?(RealtimeError.serverError(errorMessage))
+            } else if let errorMessage = json["message"] as? String {
                 onError?(RealtimeError.serverError(errorMessage))
             }
             
-        default:
-            // Handle other message types
+        case "pong":
+            // Heartbeat response received
             break
+            
+        case "realtime_event":
+            // Handle session events if needed
+            if let event = json["event"] as? [String: Any],
+               let eventType = event["type"] as? String {
+                if eventType == "response.audio.delta" {
+                    isResponding = true
+                }
+            }
+            
+        default:
+            // Log unknown message types for debugging
+            print("📨 RealtimeService: Unknown message type: \(type)")
         }
-    }
-    
-    /// Handle binary data message
-    private func handleDataMessage(_ data: Data) async {
-        // Handle binary audio data if needed
-        onAudio?(data)
     }
     
     // MARK: - Connection Status
@@ -227,17 +426,10 @@ class RealtimeService {
         return isConnected && webSocketTask != nil
     }
     
-    /// Send ping to keep connection alive
-    func ping() async throws {
-        guard let webSocketTask = webSocketTask, isConnected else {
-            return
-        }
-        
-        try await webSocketTask.sendPing { error in
-            if let error = error {
-                self.onError?(error)
-            }
-        }
+    /// Reset reconnection state
+    func resetReconnection() {
+        reconnectAttempts = 0
+        shouldReconnect = true
     }
 }
 
@@ -250,6 +442,7 @@ enum RealtimeError: Error, LocalizedError {
     case decodingError
     case serverError(String)
     case connectionFailed
+    case maxReconnectAttemptsReached
     
     var errorDescription: String? {
         switch self {
@@ -264,8 +457,9 @@ enum RealtimeError: Error, LocalizedError {
         case .serverError(let msg):
             return "Server error: \(msg)"
         case .connectionFailed:
-            return "Failed to connect to WebSocket"
+            return "Connection failed"
+        case .maxReconnectAttemptsReached:
+            return "Maximum reconnection attempts reached"
         }
     }
 }
-

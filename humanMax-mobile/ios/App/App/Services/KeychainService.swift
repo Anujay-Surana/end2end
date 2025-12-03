@@ -20,7 +20,7 @@ class KeychainService {
         }
         
         // Delete existing item if it exists
-        delete(forKey: key)
+        _ = delete(forKey: key)
         
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -124,8 +124,8 @@ extension KeychainService {
     
     /// Clear all authentication tokens
     func clearAuthTokens() {
-        deleteAccessToken()
-        deleteSessionToken()
+        _ = deleteAccessToken()
+        _ = deleteSessionToken()
     }
 }
 

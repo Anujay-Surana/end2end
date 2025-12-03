@@ -22,8 +22,14 @@ struct AuthResponse: Codable {
 /// Session model
 struct Session: Codable {
     let token: String
-    let expires_at: String?
-    let user_id: String
+    let expiresAt: String?
+    let userId: String
+    
+    enum CodingKeys: String, CodingKey {
+        case token
+        case expiresAt = "expires_at"
+        case userId = "user_id"
+    }
 }
 
 /// OAuth callback request

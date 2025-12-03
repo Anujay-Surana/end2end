@@ -149,7 +149,7 @@ class RealtimeService:
             await self.connect(user_id)
         
         try:
-            # Create session
+            # Create session with 24kHz PCM16 audio format
             session_config = {
                 "type": "session.update",
                 "session": {
@@ -165,7 +165,7 @@ class RealtimeService:
                         "type": "server_vad",
                         "threshold": 0.5,
                         "prefix_padding_ms": 300,
-                        "silence_duration_ms": 500
+                        "silence_duration_ms": 700
                     },
                     "tools": [
                         {

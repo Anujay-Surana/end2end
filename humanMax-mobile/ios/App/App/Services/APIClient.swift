@@ -98,7 +98,7 @@ class APIClient {
             // Handle 401 Unauthorized
             if httpResponse.statusCode == 401 {
                 // Clear session token
-                keychainService.deleteSessionToken()
+                _ = keychainService.deleteSessionToken()
                 let error = try? JSONDecoder().decode(APIErrorResponse.self, from: data)
                 throw APIError.unauthorized(error?.message ?? "Session expired")
             }

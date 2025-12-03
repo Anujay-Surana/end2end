@@ -269,7 +269,7 @@ class AuthService: NSObject, ObservableObject {
     /// Sign out
     func signOut() async {
         // Call backend logout endpoint
-        try? await apiClient.logout()
+        _ = try? await apiClient.logout()
         
         // Clear local data
         keychainService.clearAuthTokens()

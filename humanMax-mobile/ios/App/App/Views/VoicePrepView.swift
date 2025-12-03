@@ -76,7 +76,7 @@ struct VoicePrepView: View {
     }
     
     private func setupCallbacks() {
-        voiceService.onTranscript = { text, final in
+        voiceService.onTranscript = { text, final, source in
             Task { @MainActor in
                 transcript = text
                 isFinal = final

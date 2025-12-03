@@ -118,11 +118,10 @@ class ChatViewModel: ObservableObject {
     }
     
     private func setupVoiceServiceCallbacks() {
-        voiceService.onTranscript = { [weak self] text, isFinal in
+        voiceService.onTranscript = { [weak self] text, isFinal, source in
             Task { @MainActor in
-                // Handle transcript updates
-                if isFinal {
-                    // Send final transcript as message
+                // Handle transcript updates - only send user's final transcript as message
+                if isFinal && source == "user" {
                     await self?.sendMessage(text)
                 }
             }
