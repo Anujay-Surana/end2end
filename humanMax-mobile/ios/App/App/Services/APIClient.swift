@@ -429,6 +429,42 @@ class APIClient {
         return try await executeRequest(mutableRequest, responseType: ChatMessageSendResponse.self)
     }
     
+    // MARK: - Save Message Only (for voice transcripts)
+    
+    /// Response for save message
+    struct SaveMessageResponse: Codable {
+        let success: Bool
+        let message: ChatMessage?
+    }
+    
+    /// Save a chat message without generating AI response
+    /// Used by voice/realtime to save transcripts and responses to chat history
+    func saveChatMessage(message: String, role: String, meetingId: String) async throws -> SaveMessageResponse {
+        struct SaveMessageRequest: Codable {
+            let message: String
+            let role: String
+            let meeting_id: String
+        }
+        
+        let request = SaveMessageRequest(
+            message: message,
+            role: role,
+            meeting_id: meetingId
+        )
+        
+        let bodyData = try JSONEncoder().encode(request)
+        
+        guard let urlRequest = buildRequest(
+            endpoint: "/api/chat/save-message",
+            method: "POST",
+            body: bodyData
+        ) else {
+            throw APIError.networkError("Invalid request")
+        }
+        
+        return try await executeRequest(urlRequest, responseType: SaveMessageResponse.self)
+    }
+    
     // MARK: - Device Endpoints
     
     /// Register device for push notifications

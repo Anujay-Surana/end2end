@@ -35,6 +35,12 @@ class MeetingChatRequest(BaseModel):
     message: str
 
 
+class SaveMessageRequest(BaseModel):
+    message: str
+    role: str  # 'user' or 'assistant'
+    meeting_id: str
+
+
 @router.get('/chat/messages')
 async def get_messages(
     limit: int = Query(100, ge=1, le=500, description='Maximum number of messages'),
@@ -297,6 +303,57 @@ async def delete_message(
     except Exception as e:
         logger.error(f'Error deleting chat message: {str(e)}', userId=user.get('id'))
         raise HTTPException(status_code=500, detail=f'Failed to delete message: {str(e)}')
+
+
+# ============================================================
+# Save Message Only (for voice transcripts)
+# ============================================================
+
+
+@router.post('/chat/save-message')
+async def save_chat_message_only(
+    request_body: SaveMessageRequest,
+    user: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Save a chat message without generating AI response.
+    Used by voice/realtime to save transcripts and responses to chat history.
+    """
+    try:
+        user_id = user.get('id')
+        if not user_id:
+            raise HTTPException(status_code=401, detail='User not authenticated')
+        
+        # Validate role
+        if request_body.role not in ['user', 'assistant']:
+            raise HTTPException(status_code=400, detail='Role must be "user" or "assistant"')
+        
+        # Save message with meeting_id in metadata
+        saved_message = await create_chat_message(
+            user_id=user_id,
+            role=request_body.role,
+            content=request_body.message,
+            metadata={'meeting_id': request_body.meeting_id, 'source': 'voice_realtime'}
+        )
+        
+        logger.info(
+            f'Saved voice message to chat history',
+            userId=user_id,
+            meetingId=request_body.meeting_id,
+            role=request_body.role,
+            contentLength=len(request_body.message)
+        )
+        
+        return {
+            'success': True,
+            'message': saved_message
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f'Error saving chat message: {str(e)}', userId=user.get('id'))
+        raise HTTPException(status_code=500, detail=f'Failed to save message: {str(e)}')
 
 
 # ============================================================

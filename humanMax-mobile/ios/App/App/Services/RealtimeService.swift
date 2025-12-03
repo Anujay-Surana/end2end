@@ -63,14 +63,21 @@ class RealtimeService: ObservableObject {
         self.keychainService = KeychainService.shared
     }
     
+    // MARK: - Connection State
+    
+    /// Current meeting ID (for context injection)
+    private var currentMeetingId: String?
+    
     // MARK: - Connection Management
     
     /// Connect to realtime WebSocket endpoint
-    func connect() async throws {
+    /// - Parameter meetingId: Optional meeting ID for context injection
+    func connect(meetingId: String? = nil) async throws {
         guard connectionState != .connected && connectionState != .connecting else {
             return
         }
         
+        currentMeetingId = meetingId
         shouldReconnect = true
         reconnectAttempts = 0
         connectionState = .connecting
@@ -81,10 +88,20 @@ class RealtimeService: ObservableObject {
     
     /// Internal connection logic
     private func performConnect() async throws {
-        // Build WebSocket URL with authentication token
+        // Build WebSocket URL with authentication token and optional meeting_id
         var components = URLComponents(string: Constants.realtimeWebSocketURL)
+        var queryItems: [URLQueryItem] = []
+        
         if let sessionToken = keychainService.getSessionToken() {
-            components?.queryItems = [URLQueryItem(name: "token", value: sessionToken)]
+            queryItems.append(URLQueryItem(name: "token", value: sessionToken))
+        }
+        
+        if let meetingId = currentMeetingId {
+            queryItems.append(URLQueryItem(name: "meeting_id", value: meetingId))
+        }
+        
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
         }
         
         guard let url = components?.url else {

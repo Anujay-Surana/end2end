@@ -10,10 +10,89 @@ from app.services.logger import logger
 from app.services.realtime_service import RealtimeService
 from app.services.function_executor import FunctionExecutor
 from app.middleware.auth import optional_auth
-from typing import Dict, Any, Optional
+from app.db.queries.meeting_briefs import get_brief_by_meeting_id
+from app.db.queries.chat_messages import get_meeting_chat_messages
+from typing import Dict, Any, Optional, List
 import json
 import base64
 import asyncio
+
+
+# =============================================================================
+# Context Builder for Realtime Session
+# =============================================================================
+
+def build_realtime_context(brief: Optional[Dict], chat_history: List[Dict]) -> str:
+    """
+    Build system instructions for OpenAI Realtime session from brief and chat history
+    
+    Args:
+        brief: Meeting brief data (from database)
+        chat_history: Previous chat messages for this meeting
+        
+    Returns:
+        System instructions string
+    """
+    instructions = "You are Shadow, an executive assistant helping prepare for a meeting. Be concise, helpful, and conversational.\n\n"
+    
+    if brief:
+        brief_data = brief.get('brief_data', {})
+        one_liner = brief.get('one_liner_summary', '')
+        
+        instructions += "MEETING CONTEXT:\n"
+        
+        if one_liner:
+            instructions += f"- Quick Summary: {one_liner}\n"
+        
+        if brief_data.get('summary'):
+            instructions += f"- Overview: {brief_data['summary'][:500]}\n"
+        
+        if brief_data.get('purpose'):
+            instructions += f"- Purpose: {brief_data['purpose']}\n"
+        
+        if brief_data.get('agenda'):
+            agenda = brief_data['agenda']
+            if isinstance(agenda, list):
+                instructions += f"- Agenda: {'; '.join(str(item) for item in agenda[:5])}\n"
+            else:
+                instructions += f"- Agenda: {agenda[:300]}\n"
+        
+        if brief_data.get('attendees'):
+            attendees = brief_data['attendees']
+            attendee_info = []
+            for a in attendees[:5]:
+                name = a.get('name', 'Unknown')
+                title = a.get('title', '')
+                company = a.get('company', '')
+                info = name
+                if title:
+                    info += f" ({title})"
+                if company:
+                    info += f" at {company}"
+                attendee_info.append(info)
+            instructions += f"- Attendees: {', '.join(attendee_info)}\n"
+        
+        if brief_data.get('recommendations'):
+            recs = brief_data['recommendations']
+            if isinstance(recs, list):
+                instructions += f"- Key Points: {'; '.join(str(r)[:100] for r in recs[:3])}\n"
+        
+        if brief_data.get('emailAnalysis'):
+            instructions += f"- Email Context: {brief_data['emailAnalysis'][:300]}\n"
+    
+    if chat_history:
+        instructions += "\nPREVIOUS CONVERSATION:\n"
+        # Include last 10 messages for context
+        for msg in chat_history[-10:]:
+            role = "User" if msg.get('role') == 'user' else "Assistant"
+            content = msg.get('content', '')[:200]
+            # Skip tool results from showing in conversation history
+            metadata = msg.get('metadata', {})
+            if metadata.get('is_tool_result'):
+                continue
+            instructions += f"{role}: {content}\n"
+    
+    return instructions
 
 router = APIRouter()
 
@@ -102,7 +181,10 @@ async def realtime_websocket(websocket: WebSocket):
         except Exception as e:
             logger.debug(f'WebSocket auth failed: {str(e)}', userId='anonymous')
     
-    logger.info('Realtime WebSocket connection established', userId=user_id)
+    # Get meeting_id from query params for context injection
+    meeting_id = query_params.get('meeting_id')
+    
+    logger.info('Realtime WebSocket connection established', userId=user_id, meetingId=meeting_id)
     
     realtime_service = None
     function_executor = None
@@ -126,6 +208,24 @@ async def realtime_websocket(websocket: WebSocket):
             # No init message, continue with defaults
             pass
         
+        # STEP 1.5: Fetch meeting context if meeting_id provided
+        realtime_context = None
+        if meeting_id and user:
+            try:
+                brief = await get_brief_by_meeting_id(user_id, meeting_id)
+                chat_history = await get_meeting_chat_messages(user_id, meeting_id, limit=20)
+                realtime_context = build_realtime_context(brief, chat_history)
+                logger.info(
+                    f'Built realtime context for meeting',
+                    userId=user_id,
+                    meetingId=meeting_id,
+                    briefFound=brief is not None,
+                    chatHistoryCount=len(chat_history),
+                    contextLength=len(realtime_context) if realtime_context else 0
+                )
+            except Exception as e:
+                logger.warning(f'Failed to build meeting context: {str(e)}', userId=user_id, meetingId=meeting_id)
+        
         # STEP 2: Initialize realtime service and connect to OpenAI
         realtime_service = RealtimeService()
         connected = await realtime_service.connect(user_id)
@@ -142,8 +242,8 @@ async def realtime_websocket(websocket: WebSocket):
         if user:
             function_executor = FunctionExecutor(user_id, user)
         
-        # Create OpenAI session
-        await realtime_service.create_session(user_id)
+        # Create OpenAI session with meeting context (if available)
+        await realtime_service.create_session(user_id, instructions=realtime_context)
         
         # STEP 3: Start keepalive task to ping OpenAI
         keepalive_task = asyncio.create_task(

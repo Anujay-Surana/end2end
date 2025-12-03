@@ -12,6 +12,9 @@ class ChatViewModel: ObservableObject {
     @Published var cardMeeting: Meeting?
     @Published var generatingBrief = false
     
+    /// Current meeting ID for voice context
+    private var currentMeetingId: String?
+    
     private let apiClient = APIClient.shared
     private let voiceService = VoiceService.shared
     
@@ -119,9 +122,12 @@ class ChatViewModel: ObservableObject {
         }
     }
     
-    func startVoiceRecording() async {
+    /// Start voice recording with optional meeting context
+    /// - Parameter meetingId: Optional meeting ID for context injection in OpenAI Realtime
+    func startVoiceRecording(meetingId: String? = nil) async {
         do {
-            try await voiceService.start()
+            currentMeetingId = meetingId
+            try await voiceService.start(meetingId: meetingId)
             isRecording = true
         } catch {
             errorMessage = error.localizedDescription
@@ -131,6 +137,22 @@ class ChatViewModel: ObservableObject {
     func stopVoiceRecording() async {
         await voiceService.stop()
         isRecording = false
+    }
+    
+    // MARK: - Voice Message Saving
+    
+    /// Save a message to the database without triggering AI response
+    /// Used for voice transcripts and realtime AI responses
+    private func saveMessageOnly(_ text: String, role: String, meetingId: String?) async {
+        guard let meetingId = meetingId, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        
+        do {
+            _ = try await apiClient.saveChatMessage(message: text, role: role, meetingId: meetingId)
+        } catch {
+            print("⚠️ Failed to save voice message: \(error.localizedDescription)")
+        }
     }
     
     func prepMeeting(_ meeting: Meeting) async {
@@ -157,19 +179,50 @@ class ChatViewModel: ObservableObject {
     }
     
     private func setupVoiceServiceCallbacks() {
+        // Handle user transcripts from voice
+        // Now we show them in chat but DON'T call chat API (OpenAI Realtime handles response)
         voiceService.onTranscript = { [weak self] text, isFinal, source in
             Task { @MainActor in
-                // Handle transcript updates - only send user's final transcript as message
-                if isFinal && source == "user" {
-                    await self?.sendMessage(text)
+                guard let self = self else { return }
+                
+                // Only handle final user transcripts
+                if isFinal && source == "user" && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // Add user message to chat UI
+                    let userMessage = ChatMessage(
+                        id: UUID().uuidString,
+                        role: "user",
+                        content: text,
+                        createdAt: ISO8601DateFormatter().string(from: Date()),
+                        meetingId: self.currentMeetingId
+                    )
+                    self.messages.append(userMessage)
+                    
+                    // Save to database (but DON'T call chat API - OpenAI Realtime handles response)
+                    await self.saveMessageOnly(text, role: "user", meetingId: self.currentMeetingId)
                 }
             }
         }
         
+        // Handle AI responses from OpenAI Realtime
+        // This is the ONLY AI response we use (no separate GPT-4 call)
         voiceService.onResponse = { [weak self] text in
             Task { @MainActor in
-                // Handle AI response
-                await self?.loadMessages()
+                guard let self = self else { return }
+                
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                
+                // Add AI response to chat UI
+                let assistantMessage = ChatMessage(
+                    id: UUID().uuidString,
+                    role: "assistant",
+                    content: text,
+                    createdAt: ISO8601DateFormatter().string(from: Date()),
+                    meetingId: self.currentMeetingId
+                )
+                self.messages.append(assistantMessage)
+                
+                // Save to database
+                await self.saveMessageOnly(text, role: "assistant", meetingId: self.currentMeetingId)
             }
         }
         

@@ -1,118 +1,63 @@
 import SwiftUI
 
+/// Tab selection for meeting detail view
+enum MeetingDetailTab: String, CaseIterable {
+    case overview = "Overview"
+    case participants = "Participants"
+    case timeline = "Timeline"
+    
+    var icon: String {
+        switch self {
+        case .overview: return "doc.text"
+        case .participants: return "person.2"
+        case .timeline: return "clock"
+        }
+    }
+}
+
 // Renamed to avoid conflict with existing MeetingDetailView in CalendarView.swift
 struct HomeMeetingDetailView: View {
     let meeting: Meeting
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var meetingsViewModel: MeetingsViewModel
     @State private var showPrepChat = false
+    @State private var selectedTab: MeetingDetailTab = .overview
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // Title
-                    Text(meeting.summary)
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .foregroundColor(.primary)
-                    
-                    // Time Section
-                    DetailRow(
-                        icon: "clock",
-                        label: "Time",
-                        value: formattedDateTime
-                    )
-                    
-                    // Location Section
-                    if let location = meeting.location, !location.isEmpty {
-                        DetailRow(
-                            icon: "location",
-                            label: "Location",
-                            value: location
-                        )
-                    }
-                    
-                    // Attendees Section
-                    if let attendees = meeting.attendees, !attendees.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "person.2")
-                                    .foregroundColor(.secondary)
-                                Text("Attendees (\(attendees.count))")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .textCase(.uppercase)
-                                    .tracking(0.5)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                ForEach(attendees.prefix(6), id: \.email) { attendee in
-                                    HStack {
-                                        Text(attendee.displayName ?? attendee.email)
-                                            .font(.subheadline)
-                                        if attendee.organizer == true {
-                                            Text("(organizer)")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                    .padding(.vertical, 4)
-                                    
-                                    if attendee.email != attendees.prefix(6).last?.email {
-                                        Divider()
-                                    }
-                                }
-                                
-                                if attendees.count > 6 {
-                                    Text("+\(attendees.count - 6) more")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .italic()
-                                        .padding(.top, 4)
-                                }
+            VStack(spacing: 0) {
+                // Custom Tab Bar
+                HStack(spacing: 0) {
+                    ForEach(MeetingDetailTab.allCases, id: \.self) { tab in
+                        TabButton(
+                            tab: tab,
+                            isSelected: selectedTab == tab,
+                            badgeCount: badgeCount(for: tab)
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                selectedTab = tab
                             }
                         }
                     }
-                    
-                    // Summary Section
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Summary")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .textCase(.uppercase)
-                            .tracking(0.5)
-                        
-                        Text(extendedSummary)
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                            .lineSpacing(4)
-                    }
-                    
-                    // Key Insights Section
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Key Insights")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .textCase(.uppercase)
-                            .tracking(0.5)
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(keyInsights, id: \.self) { insight in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text("•")
-                                        .fontWeight(.bold)
-                                    Text(insight)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                    }
-                    
-                    Spacer(minLength: 80)
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.top, 8)
+                
+                Divider()
+                    .padding(.top, 8)
+                
+                // Tab Content
+                TabView(selection: $selectedTab) {
+                    OverviewTabContent(meeting: meeting)
+                        .tag(MeetingDetailTab.overview)
+                    
+                    ParticipantsTabView(meeting: meeting)
+                        .tag(MeetingDetailTab.participants)
+                    
+                    TimelineTabView(meeting: meeting)
+                        .tag(MeetingDetailTab.timeline)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
             }
             .navigationTitle("Meeting Details")
             .navigationBarTitleDisplayMode(.inline)
@@ -145,6 +90,200 @@ struct HomeMeetingDetailView: View {
         .fullScreenCover(isPresented: $showPrepChat) {
             PrepChatView(meeting: meeting)
         }
+    }
+    
+    // MARK: - Badge Counts
+    
+    private func badgeCount(for tab: MeetingDetailTab) -> Int? {
+        switch tab {
+        case .overview:
+            return nil
+        case .participants:
+            return meeting.attendees?.count
+        case .timeline:
+            return meeting.fullBrief?.timeline?.count
+        }
+    }
+    
+}
+
+// MARK: - Tab Button Component
+
+struct TabButton: View {
+    let tab: MeetingDetailTab
+    let isSelected: Bool
+    let badgeCount: Int?
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: tab.icon)
+                        .font(.system(size: 14))
+                    
+                    Text(tab.rawValue)
+                        .font(.subheadline)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                    
+                    if let count = badgeCount, count > 0 {
+                        Text("\(count)")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .foregroundColor(isSelected ? .white : .secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(isSelected ? Color.black : Color.secondary.opacity(0.2))
+                            .cornerRadius(10)
+                    }
+                }
+                .foregroundColor(isSelected ? .primary : .secondary)
+                
+                // Selection indicator
+                Rectangle()
+                    .fill(isSelected ? Color.black : Color.clear)
+                    .frame(height: 2)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Overview Tab Content
+
+struct OverviewTabContent: View {
+    let meeting: Meeting
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // Title
+                Text(meeting.summary)
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
+                
+                // Time Section
+                DetailRow(
+                    icon: "clock",
+                    label: "Time",
+                    value: formattedDateTime
+                )
+                
+                // Location Section
+                if let location = meeting.location, !location.isEmpty {
+                    DetailRow(
+                        icon: "location",
+                        label: "Location",
+                        value: location
+                    )
+                }
+                
+                // Quick Attendees Preview
+                if let attendees = meeting.attendees, !attendees.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "person.2")
+                                .foregroundColor(.secondary)
+                            Text("Attendees (\(attendees.count))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .textCase(.uppercase)
+                                .tracking(0.5)
+                        }
+                        
+                        // Avatar stack
+                        HStack(spacing: -8) {
+                            ForEach(attendees.prefix(5), id: \.email) { attendee in
+                                Circle()
+                                    .fill(avatarColor(for: attendee.email))
+                                    .frame(width: 32, height: 32)
+                                    .overlay(
+                                        Text(initials(for: attendee))
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.white)
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color(.systemBackground), lineWidth: 2)
+                                    )
+                            }
+                            
+                            if attendees.count > 5 {
+                                Circle()
+                                    .fill(Color.secondary.opacity(0.3))
+                                    .frame(width: 32, height: 32)
+                                    .overlay(
+                                        Text("+\(attendees.count - 5)")
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundColor(.secondary)
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color(.systemBackground), lineWidth: 2)
+                                    )
+                            }
+                        }
+                    }
+                }
+                
+                // Summary Section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Summary")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                    
+                    Text(extendedSummary)
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .lineSpacing(4)
+                }
+                
+                // Key Insights Section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Key Insights")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(keyInsights, id: \.self) { insight in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("•")
+                                    .fontWeight(.bold)
+                                Text(insight)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(minLength: 80)
+            }
+            .padding()
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func avatarColor(for email: String) -> Color {
+        let hash = email.hashValue
+        let hue = Double(abs(hash) % 360) / 360.0
+        return Color(hue: hue, saturation: 0.5, brightness: 0.7)
+    }
+    
+    private func initials(for attendee: Attendee) -> String {
+        let name = attendee.displayName ?? attendee.email.components(separatedBy: "@").first ?? ""
+        let components = name.components(separatedBy: " ")
+        if components.count >= 2 {
+            return "\(components[0].prefix(1))\(components[1].prefix(1))".uppercased()
+        }
+        return String(name.prefix(2)).uppercased()
     }
     
     // MARK: - Computed Properties

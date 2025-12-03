@@ -174,15 +174,21 @@ class VoiceService: ObservableObject {
     
     // MARK: - Voice Recording
     
+    /// Current meeting ID for context
+    private var currentMeetingId: String?
+    
     /// Start voice recording and connect to realtime API
-    func start() async throws {
+    /// - Parameter meetingId: Optional meeting ID for context injection
+    func start(meetingId: String? = nil) async throws {
         guard !isRecording else {
             throw VoiceError.alreadyRecording
         }
         
-        // Connect to realtime WebSocket
+        currentMeetingId = meetingId
+        
+        // Connect to realtime WebSocket with meeting context
         do {
-            try await realtimeService.connect()
+            try await realtimeService.connect(meetingId: meetingId)
         } catch {
             throw VoiceError.connectionFailed(error.localizedDescription)
         }
