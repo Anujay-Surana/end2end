@@ -194,8 +194,38 @@ struct HomeMeetingDetailView: View {
     }
     
     private var keyInsights: [String] {
-        // If brief is ready, show insights
-        if meeting.hasBriefReady {
+        // If brief is ready, show actual insights from brief data
+        if meeting.hasBriefReady, let fullBrief = meeting.fullBrief {
+            var insights: [String] = []
+            
+            // Add recommendations if available
+            if let recommendations = fullBrief.recommendations, !recommendations.isEmpty {
+                insights.append(contentsOf: recommendations.prefix(3))
+            }
+            
+            // Add attendee insights
+            if let attendees = fullBrief.attendees, !attendees.isEmpty {
+                let attendeeWithFacts = attendees.first { ($0.keyFacts?.count ?? 0) > 0 }
+                if let attendee = attendeeWithFacts, let facts = attendee.keyFacts, let firstFact = facts.first {
+                    insights.append("About \(attendee.name ?? "attendee"): \(firstFact)")
+                }
+            }
+            
+            // Add stats-based insights
+            if let stats = fullBrief.stats {
+                if let emailCount = stats.emailCount, emailCount > 0 {
+                    insights.append("Analyzed \(emailCount) relevant emails")
+                }
+                if let fileCount = stats.fileCount, fileCount > 0 {
+                    insights.append("Reviewed \(fileCount) related documents")
+                }
+            }
+            
+            // Return insights or default message
+            if !insights.isEmpty {
+                return Array(insights.prefix(4))
+            }
+            
             return [
                 "Brief is ready - tap \"Prep\" to chat about this meeting",
                 "AI has analyzed attendees and context",

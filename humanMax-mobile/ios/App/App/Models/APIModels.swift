@@ -17,16 +17,70 @@ struct MeetingBriefData: Codable {
     let oneLiner: String?
     let briefReady: Bool?
     let generatedAt: String?
+    let briefData: FullBriefData?
     
     enum CodingKeys: String, CodingKey {
         case oneLiner = "one_liner"
         case briefReady = "brief_ready"
         case generatedAt = "generated_at"
+        case briefData = "brief_data"
     }
     
     /// Safely check if brief is ready
     var isReady: Bool {
         return briefReady ?? false
+    }
+}
+
+/// Full brief data containing attendee research, document analysis, etc.
+struct FullBriefData: Codable {
+    let summary: String?
+    let purpose: String?
+    let agenda: [String]?
+    let emailAnalysis: String?
+    let documentAnalysis: String?
+    let recommendations: [String]?
+    let actionItems: [String]?
+    let attendees: [AttendeeResearch]?
+    let stats: BriefStats?
+    
+    enum CodingKeys: String, CodingKey {
+        case summary, purpose, agenda
+        case emailAnalysis = "emailAnalysis"
+        case documentAnalysis = "documentAnalysis"
+        case recommendations
+        case actionItems = "actionItems"
+        case attendees
+        case stats
+    }
+}
+
+/// Attendee with research data
+struct AttendeeResearch: Codable {
+    let name: String?
+    let email: String?
+    let title: String?
+    let company: String?
+    let keyFacts: [String]?
+    let source: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case name, email, title, company
+        case keyFacts = "keyFacts"
+        case source
+    }
+}
+
+/// Brief statistics
+struct BriefStats: Codable {
+    let emailCount: Int?
+    let fileCount: Int?
+    let attendeeCount: Int?
+    
+    enum CodingKeys: String, CodingKey {
+        case emailCount = "emailCount"
+        case fileCount = "fileCount"
+        case attendeeCount = "attendeeCount"
     }
 }
 
@@ -62,6 +116,36 @@ struct Meeting: Codable, Identifiable {
     /// Check if brief is ready
     var hasBriefReady: Bool {
         return briefData?.isReady ?? false
+    }
+    
+    /// Get the full brief data
+    var fullBrief: FullBriefData? {
+        return briefData?.briefData
+    }
+    
+    /// Get attendees with research data
+    var attendeesWithResearch: [AttendeeResearch]? {
+        return fullBrief?.attendees
+    }
+    
+    /// Get brief summary
+    var briefSummary: String? {
+        return fullBrief?.summary
+    }
+    
+    /// Get email analysis
+    var emailAnalysis: String? {
+        return fullBrief?.emailAnalysis
+    }
+    
+    /// Get document analysis
+    var documentAnalysis: String? {
+        return fullBrief?.documentAnalysis
+    }
+    
+    /// Get recommendations
+    var recommendations: [String]? {
+        return fullBrief?.recommendations
     }
 }
 

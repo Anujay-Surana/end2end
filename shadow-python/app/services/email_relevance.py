@@ -299,13 +299,32 @@ FILTERING STRICTNESS (HIGH CONFIDENCE):
     batch_indices = []
     batch_reasoning = {}
     
+    # Check for None response from GPT
+    if relevance_check is None:
+        logger.warning(f'GPT returned None for email relevance check batch {batch_index + 1}', requestId=request_id)
+        return {'indices': [], 'reasoning': {}}
+    
     try:
         parsed = safe_parse_json(relevance_check)
-        batch_indices = [batch['start'] + idx for idx in (parsed.get('relevant_indices') or [])]
+        
+        # Check for None after parsing
+        if parsed is None:
+            logger.warning(f'Failed to parse GPT response for email batch {batch_index + 1}', requestId=request_id)
+            return {'indices': [], 'reasoning': {}}
+        
+        # Safely get relevant_indices - handle both None and non-list cases
+        relevant_indices = parsed.get('relevant_indices') if isinstance(parsed, dict) else None
+        if relevant_indices is None:
+            relevant_indices = []
+        elif not isinstance(relevant_indices, list):
+            relevant_indices = []
+        
+        batch_indices = [batch['start'] + idx for idx in relevant_indices]
         
         # Store reasoning for each relevant email
-        if parsed.get('reasoning'):
-            for relative_idx_str, reasoning in parsed['reasoning'].items():
+        reasoning_data = parsed.get('reasoning') if isinstance(parsed, dict) else None
+        if reasoning_data and isinstance(reasoning_data, dict):
+            for relative_idx_str, reasoning in reasoning_data.items():
                 try:
                     relative_idx = int(relative_idx_str)
                     absolute_idx = batch['start'] + relative_idx

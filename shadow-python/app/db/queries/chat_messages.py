@@ -146,11 +146,61 @@ async def get_meeting_chat_messages(
     Returns:
         List of messages for the meeting
     """
-    # Fetch messages and filter by meeting_id in metadata
-    # Supabase JSONB queries: use ->> for text extraction and containment
-    query = supabase.table('chat_messages').select('id, user_id, role, content, metadata, created_at').eq('user_id', user_id)
+    # Use Supabase JSONB containment filter for server-side filtering
+    # This is much more efficient than client-side filtering
+    query = supabase.table('chat_messages') \
+        .select('id, user_id, role, content, metadata, created_at') \
+        .eq('user_id', user_id) \
+        .contains('metadata', {'meeting_id': meeting_id})
     
-    response = query.order('created_at', desc=False).limit(limit * 2).execute()  # Fetch extra to filter
+    response = query.order('created_at', desc=False).limit(limit).execute()
+    
+    if hasattr(response, 'error') and response.error:
+        # Fall back to client-side filtering if server-side fails
+        logger.warning(f'Server-side JSONB filter failed, falling back to client-side: {response.error.message}')
+        return await _get_meeting_chat_messages_fallback(user_id, meeting_id, limit)
+    
+    if not response.data:
+        return []
+    
+    # Process metadata for consistency
+    processed_messages = []
+    for msg in response.data:
+        raw_metadata = msg.get('metadata')
+        
+        # Handle metadata deserialization
+        if raw_metadata is None:
+            msg['metadata'] = {}
+        elif isinstance(raw_metadata, str):
+            try:
+                msg['metadata'] = json.loads(raw_metadata)
+            except (json.JSONDecodeError, TypeError):
+                msg['metadata'] = {}
+        elif isinstance(raw_metadata, dict):
+            msg['metadata'] = raw_metadata
+        else:
+            msg['metadata'] = {}
+        
+        processed_messages.append(msg)
+    
+    return processed_messages
+
+
+async def _get_meeting_chat_messages_fallback(
+    user_id: str,
+    meeting_id: str,
+    limit: int = 100
+) -> List[Dict[str, Any]]:
+    """
+    Fallback client-side filtering for meeting chat messages
+    Used when Supabase JSONB filter is not available
+    """
+    # Fetch ALL messages for the user (up to a high limit) to ensure we find meeting messages
+    query = supabase.table('chat_messages') \
+        .select('id, user_id, role, content, metadata, created_at') \
+        .eq('user_id', user_id)
+    
+    response = query.order('created_at', desc=False).limit(1000).execute()
     
     if hasattr(response, 'error') and response.error:
         raise Exception(f'Database error: {response.error.message}')

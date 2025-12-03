@@ -256,10 +256,19 @@ async def get_meetings_for_day(
                 
                 # Create a map of meeting_id -> brief data
                 for brief in briefs:
+                    # Get timestamp - try multiple field names for compatibility
+                    generated_at = (
+                        brief.get('updated_at') or 
+                        brief.get('created_at') or 
+                        brief.get('generated_at')
+                    )
+                    
                     briefs_map[brief.get('meeting_id')] = {
                         'one_liner': brief.get('one_liner_summary', ''),
                         'brief_ready': True,
-                        'generated_at': brief.get('updated_at') or brief.get('created_at')
+                        'generated_at': generated_at,
+                        # Include full brief data for attendee info, document analysis, etc.
+                        'brief_data': brief.get('brief_data', {})
                     }
                 
                 logger.info(
