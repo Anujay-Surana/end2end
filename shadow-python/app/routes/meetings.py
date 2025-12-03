@@ -46,7 +46,14 @@ class MeetingPrepRequest(BaseModel):
 
 def format_meeting_date(meeting: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Format meeting date for temporal context"""
-    start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
+    # Handle both dict format ({"dateTime": "..."}) and string format for backwards compatibility
+    start_obj = meeting.get('start', {})
+    if isinstance(start_obj, dict):
+        start = start_obj.get('dateTime') or start_obj.get('date')
+    elif isinstance(start_obj, str):
+        start = start_obj
+    else:
+        start = meeting.get('start_iso') or meeting.get('start_formatted')
     if not start:
         return None
 
@@ -408,7 +415,14 @@ async def _generate_prep_response(
 
             # Fetch calendar events
             # Extract meeting date from meeting object (as datetime for calendar query)
-            meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
+            # Handle both dict format ({"dateTime": "..."}) and string format for backwards compatibility
+            start_obj = meeting.get('start', {})
+            if isinstance(start_obj, dict):
+                meeting_start = start_obj.get('dateTime') or start_obj.get('date')
+            elif isinstance(start_obj, str):
+                meeting_start = start_obj
+            else:
+                meeting_start = meeting.get('start_iso') or meeting.get('start_formatted')
             if meeting_start:
                 meeting_datetime = datetime.fromisoformat(meeting_start.replace('Z', '+00:00'))
                 # Ensure timezone-aware (if naive, assume UTC)
