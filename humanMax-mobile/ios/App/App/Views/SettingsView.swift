@@ -127,7 +127,7 @@ struct SettingsView: View {
     private func addAccount() {
         Task {
             do {
-                try await AuthService.shared.signIn()
+                _ = try await AuthService.shared.signIn()
                 await loadAccounts()
             } catch {
                 errorMessage = error.localizedDescription

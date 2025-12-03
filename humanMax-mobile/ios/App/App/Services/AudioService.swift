@@ -13,7 +13,8 @@ private enum AudioConfig {
 /// Follows Apple's correct AVAudioEngine setup order:
 /// 1. Setup session -> 2. Create engine + nodes -> 3. Attach nodes
 /// 4. Install tap -> 5. Connect nodes -> 6. Prepare -> 7. Start -> 8. Play
-class AudioService: ObservableObject {
+/// Note: @unchecked Sendable is required for DispatchQueue.main.async callbacks from audio thread
+class AudioService: ObservableObject, @unchecked Sendable {
     static let shared = AudioService()
     
     // MARK: - Published Properties for UI (updated from audio queue)
@@ -44,20 +45,34 @@ class AudioService: ObservableObject {
     
     // MARK: - Audio Session Setup
     
-    /// Setup audio session for voice chat
+    /// Setup audio session for voice chat with echo cancellation
     private func setupAudioSession() throws {
         let audioSession = AVAudioSession.sharedInstance()
         
+        // Use voiceChat mode for hardware echo cancellation, noise suppression, and AGC
+        // Include all Bluetooth and AirPlay options for best echo cancellation on speaker
         try audioSession.setCategory(
             .playAndRecord,
             mode: .voiceChat,
-            options: [.defaultToSpeaker, .allowBluetoothHFP]
+            options: [
+                .defaultToSpeaker,
+                .allowBluetooth,
+                .allowBluetoothA2DP,
+                .allowAirPlay
+            ]
         )
         
         try audioSession.setPreferredSampleRate(AudioConfig.sampleRate)
         try audioSession.setPreferredIOBufferDuration(AudioConfig.bufferDurationMs / 1000.0)
         
         try audioSession.setActive(true)
+    }
+    
+    // MARK: - Volume Control (for echo attenuation)
+    
+    /// Set output volume (0.0 to 1.0) - used for echo attenuation during user speech
+    func setOutputVolume(_ volume: Float) {
+        audioEngine?.mainMixerNode.outputVolume = max(0.0, min(1.0, volume))
     }
     
     // MARK: - Step 1 & 2 & 3: Create Engine and Attach Nodes (NO start, NO connect, NO tap)

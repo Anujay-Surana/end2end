@@ -23,33 +23,19 @@ class ChatPanelService:
         self.function_handlers[function_name] = handler
     
     def get_tools_definition(self) -> List[Dict[str, Any]]:
-        """Get OpenAI tools definition for function calling with improved descriptions"""
+        """Get OpenAI tools definition for function calling"""
         return [
             {
                 'type': 'function',
                 'function': {
                     'name': 'get_calendar_by_date',
-                    'description': (
-                        'Retrieve calendar events and meetings for a specific date. '
-                        'Use this tool when the user asks about their schedule, calendar, meetings, or events for a particular date. '
-                        'Examples: "What meetings do I have today?", "Show me my schedule for tomorrow", "What\'s on my calendar for December 5th?". '
-                        'Always use this tool BEFORE generate_meeting_brief if you need to find a meeting first.'
-                    ),
+                    'description': 'Retrieve calendar events for a specific date. Use when user asks about schedule, calendar, or meetings.',
                     'parameters': {
                         'type': 'object',
                         'properties': {
                             'date': {
                                 'type': 'string',
-                                'description': (
-                                    'Date in YYYY-MM-DD format. CRITICAL: This parameter MUST be in YYYY-MM-DD format. '
-                                    'Examples: "2024-12-01" for December 1st, 2024, "2024-12-15" for December 15th, 2024. '
-                                    'NEVER pass "today", "tomorrow", or "yesterday" as-is. '
-                                    'ALWAYS convert relative dates to actual dates using the current date context from the system prompt. '
-                                    'If user says "today", use the current date from system prompt. '
-                                    'If user says "tomorrow", calculate tomorrow\'s date. '
-                                    'If user says "yesterday", calculate yesterday\'s date. '
-                                    'The date must match the pattern: YYYY-MM-DD (e.g., "2024-12-15").'
-                                ),
+                                'description': 'Date in YYYY-MM-DD format. Convert relative dates (today, tomorrow) using system prompt context.',
                                 'pattern': '^\\d{4}-\\d{2}-\\d{2}$'
                             }
                         },
@@ -61,59 +47,23 @@ class ChatPanelService:
                 'type': 'function',
                 'function': {
                     'name': 'generate_meeting_brief',
-                    'description': (
-                        'Generate a comprehensive meeting preparation brief for a specific meeting. '
-                        'ALWAYS use this tool when the user asks to "prep me", "prepare me", "can you prep me", "get me ready", "prepare for a meeting", "generate a brief", "get meeting prep", or wants details about an upcoming meeting. '
-                        'IMPORTANT: Check conversation history first - if there are tool results (role="tool") from get_calendar_by_date, use those meeting objects directly. '
-                        'REQUIRED WORKFLOW: If you don\'t have meeting details in conversation history, FIRST call get_calendar_by_date to retrieve meetings, THEN use one of those meeting objects to generate the brief. '
-                        'You can provide either meeting_id (if you know it exactly) OR the full meeting object (preferred when available from get_calendar_by_date or conversation history).'
-                    ),
+                    'description': 'Generate meeting preparation brief. Use when user says "prep me", "prepare me", or wants meeting details. Prefer passing full meeting object from get_calendar_by_date.',
                     'parameters': {
                         'type': 'object',
                         'properties': {
                             'meeting_id': {
                                 'type': 'string',
-                                'description': (
-                                    'The exact Google Calendar event ID of the meeting. '
-                                    'Only use this if you have the exact meeting ID. '
-                                    'If you don\'t have the ID, use the meeting object parameter instead.'
-                                )
+                                'description': 'Google Calendar event ID'
                             },
                             'meeting': {
                                 'type': 'object',
-                                'description': (
-                                    'Complete meeting object from get_calendar_by_date response. '
-                                    'This is the PREFERRED method when you have retrieved meetings from get_calendar_by_date. '
-                                    'Must include: id (string), summary (string), start (object with dateTime or date), end (object), attendees (array).'
-                                ),
+                                'description': 'Complete meeting object from get_calendar_by_date response',
                                 'properties': {
-                                    'id': {
-                                        'type': 'string',
-                                        'description': 'Google Calendar event ID'
-                                    },
-                                    'summary': {
-                                        'type': 'string',
-                                        'description': 'Meeting title/summary'
-                                    },
-                                    'start': {
-                                        'type': 'object',
-                                        'description': 'Start time object with dateTime (ISO string) or date (YYYY-MM-DD)'
-                                    },
-                                    'end': {
-                                        'type': 'object',
-                                        'description': 'End time object with dateTime (ISO string) or date (YYYY-MM-DD)'
-                                    },
-                                    'attendees': {
-                                        'type': 'array',
-                                        'description': 'Array of attendee objects with email and displayName',
-                                        'items': {
-                                            'type': 'object',
-                                            'properties': {
-                                                'email': {'type': 'string'},
-                                                'displayName': {'type': 'string'}
-                                            }
-                                        }
-                                    }
+                                    'id': {'type': 'string'},
+                                    'summary': {'type': 'string'},
+                                    'start': {'type': 'object'},
+                                    'end': {'type': 'object'},
+                                    'attendees': {'type': 'array'}
                                 },
                                 'required': ['id', 'summary', 'start', 'end']
                             }
@@ -130,18 +80,22 @@ class ChatPanelService:
         conversation_history: List[Dict[str, str]] = None,
         meetings: List[Dict[str, Any]] = None,
         user_timezone: str = 'UTC',
-        memory_context: Optional[str] = None
+        memory_context: Optional[str] = None,
+        is_continuation: bool = False
     ) -> Dict[str, Any]:
         """
         Generate chat response using OpenAI with function calling support
+        
         Args:
             message: User message
-            conversation_history: Previous messages in conversation (includes tool results if any)
+            conversation_history: Previous messages in OpenAI format (includes tool results)
             meetings: Today's meetings for context
             user_timezone: User's timezone
             memory_context: Memory context from mem0.ai
+            is_continuation: If True, don't add user message (it's already in history)
+        
         Returns:
-            Dict with 'content' (response text) and optionally 'function_calls' (list of function calls to execute)
+            Dict with 'content', 'function_calls', and 'assistant_message' (raw OpenAI message)
         """
         if conversation_history is None:
             conversation_history = []
@@ -149,35 +103,30 @@ class ChatPanelService:
             meetings = []
 
         try:
-            # Build system prompt with current date/time and memory context
+            # Build system prompt
             system_prompt = self.build_system_prompt(meetings, user_timezone, memory_context)
 
-            # Build messages array - conversation_history already includes tool results
-            messages = [
-                {'role': 'system', 'content': system_prompt},
-                *conversation_history,
-            ]
+            # Build messages array
+            messages = [{'role': 'system', 'content': system_prompt}]
             
-            # Add user message if provided and not already in conversation_history
-            # Check if last message is user message to avoid duplicates
-            if message and (not conversation_history or conversation_history[-1].get('role') != 'user'):
+            # Add conversation history
+            messages.extend(conversation_history)
+            
+            # FIX #2: Only add user message if it's NOT a continuation
+            # (i.e., only on first iteration, and only if not already in history)
+            if message and not is_continuation:
                 messages.append({'role': 'user', 'content': message})
 
-            # Check if last message in history is a tool result - if so, don't include tools
-            # (model should generate text response based on tool results)
-            last_message_is_tool = conversation_history and conversation_history[-1].get('role') == 'tool'
-            
+            # FIX #3: ALWAYS include tools - model needs them for multi-step workflows
+            # Do NOT disable tools after tool results
             request_data = {
                 'model': 'gpt-4o-mini',
                 'messages': messages,
-                'max_tokens': 1500,  # Increased for better context understanding and comprehensive responses
+                'max_tokens': 1500,
                 'temperature': 0.7,
+                'tools': self.get_tools_definition(),
+                'tool_choice': 'auto'
             }
-            
-            # Include tools if we're not responding to tool results
-            if not last_message_is_tool:
-                request_data['tools'] = self.get_tools_definition()
-                request_data['tool_choice'] = 'auto'
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
@@ -196,89 +145,74 @@ class ChatPanelService:
 
             data = response.json()
             
-            # Validate response structure
             if 'choices' not in data or len(data['choices']) == 0:
                 logger.error(f'Invalid OpenAI API response: no choices', response_data=data)
                 raise Exception('Invalid OpenAI API response: no choices')
             
             message_obj = data['choices'][0]['message']
             
-            # Check if model wants to call functions
+            # FIX #4: Keep tool_calls in exact OpenAI schema format
             function_calls = []
             if 'tool_calls' in message_obj and message_obj['tool_calls']:
                 for tool_call in message_obj['tool_calls']:
-                    try:
-                        # Validate tool call structure
-                        if 'function' not in tool_call:
-                            logger.warning(f'Invalid tool_call structure: missing function', tool_call=tool_call)
-                            continue
-                        
-                        func_name = tool_call['function'].get('name')
-                        func_args_str = tool_call['function'].get('arguments', '{}')
-                        
-                        # Parse arguments JSON
-                        try:
-                            func_args = json.loads(func_args_str) if isinstance(func_args_str, str) else func_args_str
-                        except json.JSONDecodeError as e:
-                            logger.warning(f'Failed to parse function arguments: {str(e)}', arguments=func_args_str)
-                            func_args = {}
-                        
-                        function_calls.append({
-                            'id': tool_call.get('id', f"call_{len(function_calls)}"),
-                            'name': func_name,
-                            'arguments': func_args
-                        })
-                    except Exception as e:
-                        logger.error(f'Error processing tool call: {str(e)}', tool_call=tool_call)
+                    if 'function' not in tool_call:
                         continue
+                    
+                    func_name = tool_call['function'].get('name')
+                    func_args_str = tool_call['function'].get('arguments', '{}')
+                    
+                    # Parse arguments for executor, but keep original string for history
+                    try:
+                        func_args = json.loads(func_args_str) if isinstance(func_args_str, str) else func_args_str
+                    except json.JSONDecodeError:
+                        func_args = {}
+                    
+                    function_calls.append({
+                        'id': tool_call.get('id'),
+                        'type': 'function',
+                        'function': {
+                            'name': func_name,
+                            'arguments': func_args_str  # Keep as string for OpenAI
+                        },
+                        # Also include parsed args for easier execution
+                        '_parsed_arguments': func_args
+                    })
             
-            # Get response content (may be None if only function calls)
+            # FIX #6: Don't strip markdown - it corrupts JSON arguments
             response_text = message_obj.get('content', '').strip() if message_obj.get('content') else None
             
             result = {
-                'content': self.strip_markdown(response_text) if response_text else None,
-                'function_calls': function_calls if function_calls else None
+                'content': response_text,  # Return raw, unmodified
+                'function_calls': function_calls if function_calls else None,
+                'assistant_message': message_obj  # Return full OpenAI message for history
             }
             
             return result
+            
         except Exception as error:
             logger.error(f'Error generating chat response: {str(error)}')
             raise
 
     async def generate_initial_update(self, meetings: List[Dict[str, Any]]) -> str:
-        """
-        Generate initial update about today's meetings
-        Args:
-            meetings: Today's meetings
-        Returns:
-            Initial update message
-        """
+        """Generate initial update about today's meetings"""
         try:
             if not meetings or len(meetings) == 0:
                 return "You have no meetings scheduled for today. I'm here to help whenever you need me!"
 
             meeting_list = []
             for idx, m in enumerate(meetings):
-                start_time = m.get('start', {}).get('dateTime') or m.get('start', {}).get('date') or m.get('start')
+                start_time = m.get('start', {}).get('dateTime') or m.get('start', {}).get('date')
                 time_str = 'Time TBD'
                 
                 if start_time:
                     if m.get('start', {}).get('dateTime'):
-                        # Timed event - show time
                         try:
                             dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
                             time_str = dt.strftime('%I:%M %p')
                         except:
                             time_str = 'Time TBD'
                     elif m.get('start', {}).get('date'):
-                        # All-day event - show "All day"
                         time_str = 'All day'
-                    elif isinstance(start_time, str):
-                        try:
-                            dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                            time_str = dt.strftime('%I:%M %p')
-                        except:
-                            time_str = 'Time TBD'
                 
                 attendees = ', '.join([a.get('displayName') or a.get('email') for a in (m.get('attendees') or [])])
                 meeting_list.append(f"{idx + 1}. {m.get('summary') or 'Untitled Meeting'} at {time_str}{f' with {attendees}' if attendees else ''}")
@@ -291,7 +225,7 @@ class ChatPanelService:
                         'Authorization': f'Bearer {self.openai_api_key}'
                     },
                     json={
-                        'model': 'gpt-4o-mini',  # Fixed typo: was 'gpt-4.1-mini'
+                        'model': 'gpt-4o-mini',
                         'messages': [
                             {
                                 'role': 'system',
@@ -311,39 +245,20 @@ class ChatPanelService:
                 raise Exception(f'OpenAI API error: {response.status_code}')
 
             data = response.json()
-            response_text = data['choices'][0]['message']['content'].strip()
-            # Strip markdown formatting for clean display
-            return self.strip_markdown(response_text)
+            return data['choices'][0]['message']['content'].strip()
+            
         except Exception as error:
             logger.error(f'Error generating initial update: {str(error)}')
-            # Fallback message
             return f"You have {len(meetings)} meeting{'s' if len(meetings) != 1 else ''} scheduled for today. Ready to help you prepare!"
-
-    def strip_markdown(self, text: str) -> str:
-        """
-        Strip markdown formatting from text
-        Args:
-            text: Text with markdown
-        Returns:
-            Clean text without markdown
-        """
-        if not text:
-            return text
-        # Remove markdown formatting: **bold**, *italic*, `code`, etc.
-        return re.sub(r'\*\*([^*]+)\*\*', r'\1', text).replace('*', '').replace('`', '').replace(r'#{1,6}\s+', '').replace(r'\[([^\]]+)\]\([^\)]+\)', r'\1').strip()
 
     def build_system_prompt(self, meetings: List[Dict[str, Any]] = None, user_timezone: str = 'UTC', memory_context: Optional[str] = None) -> str:
         """
         Build system prompt with meeting context and current date/time
-        Args:
-            meetings: Today's meetings
-            user_timezone: User's timezone (e.g., 'America/New_York', 'UTC')
-        Returns:
-            System prompt
+        FIX #7: Simplified system prompt to reduce token usage
         """
-        # Get current date/time in user's timezone
         from datetime import datetime
         import pytz
+        
         try:
             user_tz = pytz.timezone(user_timezone)
         except:
@@ -354,77 +269,37 @@ class ChatPanelService:
         current_date = now_user_tz.strftime('%Y-%m-%d')
         current_time = now_user_tz.strftime('%I:%M %p %Z')
         current_day = now_user_tz.strftime('%A')
+        tomorrow_date = (now_user_tz + timedelta(days=1)).strftime('%Y-%m-%d')
+        yesterday_date = (now_user_tz - timedelta(days=1)).strftime('%Y-%m-%d')
         
-        prompt = f"""You are Shadow, an executive assistant AI that helps users prepare for meetings and manage their day.
+        # FIX #7: Simplified, more concise system prompt
+        prompt = f"""You are Shadow, an executive assistant AI.
 
-⚠️ CRITICAL: TIME AWARENESS ⚠️
-CURRENT DATE AND TIME (User's timezone: {user_timezone}):
-- Today is {current_day}, {current_date}
-- Current time: {current_time}
-- IMPORTANT: You MUST always be aware of the current date/time above
-- When users say "today", convert to: {current_date}
-- When users say "tomorrow", convert to: {(datetime.now(user_tz) + timedelta(days=1)).strftime('%Y-%m-%d')}
-- When users say "yesterday", convert to: {(datetime.now(user_tz) - timedelta(days=1)).strftime('%Y-%m-%d')}
-- ALWAYS convert relative dates ("today", "tomorrow", "yesterday") to YYYY-MM-DD format BEFORE calling functions
-- Example: User says "what meetings do I have today?" → Call get_calendar_by_date with date="{current_date}"
-- Example: User says "show me tomorrow's schedule" → Call get_calendar_by_date with date="{(datetime.now(user_tz) + timedelta(days=1)).strftime('%Y-%m-%d')}"
+CURRENT TIME ({user_timezone}): {current_day}, {current_date} at {current_time}
+- "today" = {current_date}
+- "tomorrow" = {tomorrow_date}
+- "yesterday" = {yesterday_date}
 
-YOUR CAPABILITIES AND TOOL USAGE:
+TOOLS:
+1. get_calendar_by_date(date) - Get calendar events. Date MUST be YYYY-MM-DD format.
+2. generate_meeting_brief(meeting_id OR meeting) - Generate meeting prep. Prefer passing full meeting object.
 
-1. **get_calendar_by_date** - Use this tool to retrieve calendar events for any date.
-   - ALWAYS use this when user asks about their schedule, calendar, meetings, or events
-   - CRITICAL: The 'date' parameter MUST be in YYYY-MM-DD format (e.g., "2024-12-15")
-   - NEVER pass "today", "tomorrow", or "yesterday" as-is - ALWAYS convert to YYYY-MM-DD first
-   - Examples: 
-     * User: "What meetings do I have today?" → get_calendar_by_date(date="{current_date}")
-     * User: "Show me tomorrow's schedule" → get_calendar_by_date(date="{(datetime.now(user_tz) + timedelta(days=1)).strftime('%Y-%m-%d')}")
-     * User: "What's on my calendar for December 20th?" → get_calendar_by_date(date="2024-12-20")
-   - If user mentions a date without year, assume current year unless context suggests otherwise
-
-2. **generate_meeting_brief** - Use this tool to generate meeting preparation briefs.
-   - ALWAYS use when user asks to "prep me", "prepare me", "can you prep me", "get me ready", "prepare for a meeting", "generate a brief", "get meeting prep", or wants details about a meeting
-   - Examples: "prep me for it", "can you prep me", "prepare me for my meeting", "get me ready for the meeting"
-   - IMPORTANT: Function results from previous calls (like get_calendar_by_date) are available in the conversation history. If you see a tool result with meeting data, use that meeting object directly.
-   - WORKFLOW: If you don't have complete meeting details in conversation history, FIRST call get_calendar_by_date, THEN use one of the returned meeting objects
-   - Prefer passing the full meeting object (from get_calendar_by_date or conversation history) over just meeting_id when possible
-
-TOOL USAGE RULES:
-- ALWAYS use tools when appropriate - don't guess or make assumptions about calendar data
-- CRITICAL: Before making ANY tool call, carefully read the ENTIRE conversation history
-- Look for tool results (messages with role='tool') - these contain function outputs from previous calls
-- If you see tool results with meeting data, USE THAT DATA DIRECTLY - don't call get_calendar_by_date again
-- Example: If conversation history shows a tool result with meetings for today, use those meeting objects directly
-- If user asks about meetings but you don't have the data in conversation history, use get_calendar_by_date first
-- If user wants meeting prep (says "prep me", "prepare me", etc.) but you don't have meeting details in conversation history, get calendar first, then generate brief
-- When multiple tools are needed, call them in sequence (get_calendar_by_date → generate_meeting_brief)
-- After calling tools, ALWAYS read the tool results carefully before responding
-- Provide a clear, helpful response based on the ACTUAL tool results - don't make assumptions
-- Remember: Tool results from previous messages are in the conversation - you can reference them directly
-
-RESPONSE STYLE:
-- Be concise, friendly, and professional
-- Keep responses under 150 words unless user asks for more detail
-- After tool calls, summarize the results clearly based on ACTUAL data from tool results
-- When mentioning times, use the user's timezone ({user_timezone}) context
-- If tool calls fail, explain what went wrong and suggest alternatives
-- Always be accurate - if you don't know something, use tools to find out rather than guessing
-
-UNDERSTANDING AND CONTEXT:
-- Read the ENTIRE conversation history carefully before responding
-- Pay attention to tool results - they contain real data you should use
-- Understand the context of what the user is asking
-- If something is unclear, ask clarifying questions or use tools to gather information
-- Be aware of the current date/time and use it to interpret relative dates correctly"""
+RULES:
+- Use tools when needed - don't guess calendar data
+- Check conversation history for previous tool results before calling tools again
+- After tool results, continue with more tools if needed (multi-step is OK)
+- Keep responses concise (<150 words unless asked for detail)
+- Be accurate - use tools to verify, don't assume"""
         
-        # Add memory context if available
+        # Add memory context as separate system context
         if memory_context:
-            prompt += f"\n\n{memory_context}"
+            prompt += f"\n\nRELEVANT CONTEXT:\n{memory_context}"
 
         if meetings and len(meetings) > 0:
-            prompt += "\n\nToday's meetings:\n"
-            for idx, m in enumerate(meetings):
-                start_time = m.get('start', {}).get('dateTime') or m.get('start', {}).get('date') or m.get('start')
-                time_str = 'Time TBD'
+            prompt += "\n\nTODAY'S MEETINGS:\n"
+            for idx, m in enumerate(meetings[:5]):  # Limit to 5 meetings to save tokens
+                start_time = m.get('start', {}).get('dateTime') or m.get('start', {}).get('date')
+                time_str = 'TBD'
                 
                 if start_time:
                     if m.get('start', {}).get('dateTime'):
@@ -432,18 +307,11 @@ UNDERSTANDING AND CONTEXT:
                             dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
                             time_str = dt.strftime('%I:%M %p')
                         except:
-                            time_str = 'Time TBD'
+                            pass
                     elif m.get('start', {}).get('date'):
                         time_str = 'All day'
-                    elif isinstance(start_time, str):
-                        try:
-                            dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                            time_str = dt.strftime('%I:%M %p')
-                        except:
-                            time_str = 'Time TBD'
                 
-                attendees = ', '.join([a.get('displayName') or a.get('email') for a in (m.get('attendees') or [])]) or 'No attendees'
-                prompt += f"{idx + 1}. {m.get('summary') or 'Untitled Meeting'} at {time_str} with {attendees}\n"
+                attendees = ', '.join([a.get('displayName') or a.get('email') for a in (m.get('attendees') or [])[:3]]) or 'No attendees'
+                prompt += f"{idx + 1}. {m.get('summary', 'Untitled')} @ {time_str} - {attendees}\n"
 
         return prompt
-

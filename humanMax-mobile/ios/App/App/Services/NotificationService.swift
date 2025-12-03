@@ -265,11 +265,12 @@ class NotificationService: NSObject, ObservableObject {
 }
 
 // MARK: - UNUserNotificationCenterDelegate
+// Note: Delegate methods are nonisolated because UNUserNotificationCenterDelegate
+// can call these from any thread. We dispatch to MainActor for isolated operations.
 
-@MainActor
 extension NotificationService: UNUserNotificationCenterDelegate {
     /// Handle notification when app is in foreground
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
@@ -279,7 +280,7 @@ extension NotificationService: UNUserNotificationCenterDelegate {
     }
     
     /// Handle notification tap
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
@@ -292,7 +293,10 @@ extension NotificationService: UNUserNotificationCenterDelegate {
             data: userInfo
         )
         
-        handleNotificationTap(data: data)
+        // Dispatch to MainActor for the callback since class is @MainActor
+        Task { @MainActor in
+            self.handleNotificationTap(data: data)
+        }
         completionHandler()
     }
 }

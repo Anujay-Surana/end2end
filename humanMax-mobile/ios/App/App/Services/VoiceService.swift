@@ -153,6 +153,23 @@ class VoiceService: ObservableObject {
                 }
             }
         }
+        
+        // Handle speech state for echo cancellation
+        // Attenuate playback volume when user is speaking to prevent echo feedback
+        realtimeService.onSpeechStarted = { [weak self] in
+            Task { @MainActor in
+                // Reduce output volume to 5% when user starts speaking
+                // This helps echo cancellation by reducing speaker bleed into mic
+                self?.audioService.setOutputVolume(0.05)
+            }
+        }
+        
+        realtimeService.onSpeechStopped = { [weak self] in
+            Task { @MainActor in
+                // Restore full output volume when user stops speaking
+                self?.audioService.setOutputVolume(1.0)
+            }
+        }
     }
     
     // MARK: - Voice Recording

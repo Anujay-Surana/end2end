@@ -19,7 +19,7 @@ class ConversationManager:
         Initialize conversation manager
         
         Args:
-            window_size: Number of recent messages to keep in active context (increased for better understanding)
+            window_size: Number of recent messages to keep in active context
         """
         self.window_size = window_size
     
@@ -31,6 +31,9 @@ class ConversationManager:
         """
         Get conversation history with sliding window
         
+        Properly reconstructs tool messages from DB storage where they're stored
+        as assistant messages with raw_role='tool' in metadata.
+        
         Args:
             user_id: User ID
             include_tool_calls: Whether to include tool calls in history
@@ -39,64 +42,63 @@ class ConversationManager:
             List of messages in OpenAI format (last N messages)
         """
         try:
-            # Load messages from database (we'll get more than window_size to ensure we have enough)
+            # Load messages from database
             db_messages = await get_chat_messages(
                 user_id=user_id,
-                limit=self.window_size * 2  # Get more than needed for filtering
+                limit=self.window_size * 2
             )
             
-            # Build a map of tool_call_id -> tool result message for pairing
+            # Separate tool results from regular messages
             tool_results_map = {}
             regular_messages = []
             
-            # First pass: separate tool results from regular messages
             for msg in db_messages:
                 metadata = msg.get('metadata', {})
                 if not isinstance(metadata, dict):
                     metadata = {}
                 
-                # Tool results are stored with role='assistant' but marked with is_tool_result=True
-                if metadata.get('is_tool_result'):
+                # FIX #5: Check for raw_role='tool' OR is_tool_result=True
+                if metadata.get('raw_role') == 'tool' or metadata.get('is_tool_result'):
                     tool_call_id = metadata.get('tool_call_id')
                     if tool_call_id:
                         tool_results_map[tool_call_id] = msg
                 else:
                     regular_messages.append(msg)
             
-            # Convert to OpenAI format and apply sliding window
-            # We want the most recent N messages, but keep them in chronological order (oldest first) for OpenAI
+            # Convert to OpenAI format
             all_formatted_messages = []
             
-            # Process all messages in chronological order (oldest first)
-            # Pair assistant messages with tool_calls with their tool results
             for msg in regular_messages:
                 metadata = msg.get('metadata', {})
                 
-                # Regular messages (user, assistant, system)
                 msg_dict = {
                     'role': msg['role'],
                     'content': msg['content'] or ''
                 }
                 
-                # Include tool calls if present and requested
+                # Include tool calls if present
                 if include_tool_calls:
                     tool_calls = metadata.get('tool_calls', [])
                     if tool_calls:
-                        msg_dict['tool_calls'] = [
-                            {
+                        # Ensure tool_calls are in correct OpenAI format
+                        formatted_tool_calls = []
+                        for idx, tc in enumerate(tool_calls):
+                            formatted_tc = {
                                 'id': tc.get('id', f"call_{idx}"),
                                 'type': 'function',
-                                'function': {
+                                'function': tc.get('function', {
                                     'name': tc.get('name', 'unknown'),
                                     'arguments': tc.get('arguments') if isinstance(tc.get('arguments'), str) else json.dumps(tc.get('arguments', {}))
-                                }
+                                })
                             }
-                            for idx, tc in enumerate(tool_calls)
-                        ]
+                            formatted_tool_calls.append(formatted_tc)
+                        
+                        if formatted_tool_calls:
+                            msg_dict['tool_calls'] = formatted_tool_calls
                 
                 all_formatted_messages.append(msg_dict)
                 
-                # If this assistant message has tool_calls, add corresponding tool results immediately after
+                # If assistant message has tool_calls, add corresponding tool results
                 if msg_dict.get('role') == 'assistant' and msg_dict.get('tool_calls'):
                     for tool_call in msg_dict['tool_calls']:
                         tool_call_id = tool_call.get('id')
@@ -105,17 +107,16 @@ class ConversationManager:
                             tool_metadata = tool_result_msg.get('metadata', {})
                             function_name = tool_metadata.get('function_name', 'unknown')
                             
-                            # Format as OpenAI tool message - content is already JSON string
+                            # FIX #5: Reconstruct as proper tool message for OpenAI
                             tool_msg = {
-                                'role': 'tool',
+                                'role': 'tool',  # Use actual 'tool' role for OpenAI
                                 'tool_call_id': tool_call_id,
                                 'name': function_name,
                                 'content': tool_result_msg.get('content', '{}')
                             }
                             all_formatted_messages.append(tool_msg)
             
-            # Take the last N messages (most recent) but keep them in chronological order
-            # OpenAI expects chronological order (oldest first), so we take the tail of the list
+            # Apply sliding window
             conversation_history = all_formatted_messages[-self.window_size:] if len(all_formatted_messages) > self.window_size else all_formatted_messages
             
             return conversation_history
@@ -136,9 +137,10 @@ class ConversationManager:
         
         Args:
             user_id: User ID
-            role: Message role ('user', 'assistant', 'system', 'tool')
+            role: Message role ('user', 'assistant', 'system')
+                  For tool results, use 'assistant' with metadata={'raw_role': 'tool'}
             content: Message content
-            metadata: Optional metadata
+            metadata: Optional metadata (include raw_role, tool_call_id, function_name for tool results)
             
         Returns:
             Created message dict
@@ -163,7 +165,7 @@ class ConversationManager:
         include_tool_results: bool = True
     ) -> List[Dict[str, Any]]:
         """
-        Format messages for OpenAI API, including tool results
+        Format messages for OpenAI API
         
         Args:
             messages: List of message dicts
@@ -180,13 +182,11 @@ class ConversationManager:
                 'content': msg.get('content', '')
             }
             
-            # Add tool calls if present
             if 'tool_calls' in msg:
                 formatted_msg['tool_calls'] = msg['tool_calls']
             
             formatted.append(formatted_msg)
             
-            # If this is an assistant message with tool calls, add tool results if available
             if include_tool_results and formatted_msg.get('tool_calls') and 'tool_result' in msg:
                 tool_result = msg['tool_result']
                 formatted.append({
@@ -211,7 +211,6 @@ class ConversationManager:
         if not messages:
             return ""
         
-        # Simple summary: count messages and extract key topics
         user_messages = [m for m in messages if m.get('role') == 'user']
         assistant_messages = [m for m in messages if m.get('role') == 'assistant']
         
@@ -219,12 +218,10 @@ class ConversationManager:
             f"Conversation with {len(user_messages)} user messages and {len(assistant_messages)} assistant responses."
         ]
         
-        # Extract first few user messages as context
         if user_messages:
             first_messages = user_messages[:3]
             topics = [m.get('content', '')[:100] for m in first_messages if m.get('content')]
             if topics:
-                summary_parts.append(f"Topics discussed: {', '.join(topics)}")
+                summary_parts.append(f"Topics: {', '.join(topics)}")
         
         return " ".join(summary_parts)
-
