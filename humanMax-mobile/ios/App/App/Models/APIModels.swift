@@ -12,6 +12,19 @@ struct MeetingsResponse: Codable {
     let meetings: [Meeting]
 }
 
+/// Pre-generated brief data attached to meetings
+struct MeetingBriefData: Codable {
+    let oneLiner: String?
+    let briefReady: Bool
+    let generatedAt: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case oneLiner = "one_liner"
+        case briefReady = "brief_ready"
+        case generatedAt = "generated_at"
+    }
+}
+
 /// Meeting model
 struct Meeting: Codable, Identifiable {
     let id: String
@@ -25,6 +38,7 @@ struct Meeting: Codable, Identifiable {
     let htmlLink: String?
     let accountEmail: String?
     let brief: AnyCodable?
+    let briefData: MeetingBriefData?
     
     // Ignore unknown fields like _classification from backend
     enum CodingKeys: String, CodingKey {
@@ -32,6 +46,17 @@ struct Meeting: Codable, Identifiable {
         case htmlLink = "htmlLink"
         case accountEmail = "accountEmail"
         case brief
+        case briefData = "_brief"
+    }
+    
+    /// Get the one-liner summary if available
+    var oneLiner: String? {
+        return briefData?.oneLiner
+    }
+    
+    /// Check if brief is ready
+    var hasBriefReady: Bool {
+        return briefData?.briefReady ?? false
     }
 }
 

@@ -6,7 +6,7 @@ stores older messages in database for retrieval via mem0.ai
 """
 
 from typing import List, Dict, Any, Optional
-from app.db.queries.chat_messages import get_chat_messages, create_chat_message
+from app.db.queries.chat_messages import get_chat_messages, create_chat_message, get_meeting_chat_messages
 from app.services.logger import logger
 import json
 
@@ -123,6 +123,106 @@ class ConversationManager:
             
         except Exception as e:
             logger.error(f'Error loading conversation history: {str(e)}', userId=user_id)
+            return []
+    
+    async def get_meeting_conversation_history(
+        self,
+        user_id: str,
+        meeting_id: str,
+        include_tool_calls: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Get conversation history for a specific meeting
+        
+        Args:
+            user_id: User ID
+            meeting_id: Google Calendar event ID
+            include_tool_calls: Whether to include tool calls in history
+            
+        Returns:
+            List of messages in OpenAI format for this meeting
+        """
+        try:
+            # Load meeting-specific messages from database
+            db_messages = await get_meeting_chat_messages(
+                user_id=user_id,
+                meeting_id=meeting_id,
+                limit=self.window_size * 2
+            )
+            
+            # Separate tool results from regular messages
+            tool_results_map = {}
+            regular_messages = []
+            
+            for msg in db_messages:
+                metadata = msg.get('metadata', {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                
+                # Check for tool messages
+                if metadata.get('raw_role') == 'tool' or metadata.get('is_tool_result'):
+                    tool_call_id = metadata.get('tool_call_id')
+                    if tool_call_id:
+                        tool_results_map[tool_call_id] = msg
+                else:
+                    regular_messages.append(msg)
+            
+            # Convert to OpenAI format
+            all_formatted_messages = []
+            
+            for msg in regular_messages:
+                metadata = msg.get('metadata', {})
+                
+                msg_dict = {
+                    'role': msg['role'],
+                    'content': msg['content'] or ''
+                }
+                
+                # Include tool calls if present
+                if include_tool_calls:
+                    tool_calls = metadata.get('tool_calls', [])
+                    if tool_calls:
+                        formatted_tool_calls = []
+                        for idx, tc in enumerate(tool_calls):
+                            formatted_tc = {
+                                'id': tc.get('id', f"call_{idx}"),
+                                'type': 'function',
+                                'function': tc.get('function', {
+                                    'name': tc.get('name', 'unknown'),
+                                    'arguments': tc.get('arguments') if isinstance(tc.get('arguments'), str) else json.dumps(tc.get('arguments', {}))
+                                })
+                            }
+                            formatted_tool_calls.append(formatted_tc)
+                        
+                        if formatted_tool_calls:
+                            msg_dict['tool_calls'] = formatted_tool_calls
+                
+                all_formatted_messages.append(msg_dict)
+                
+                # If assistant message has tool_calls, add corresponding tool results
+                if msg_dict.get('role') == 'assistant' and msg_dict.get('tool_calls'):
+                    for tool_call in msg_dict['tool_calls']:
+                        tool_call_id = tool_call.get('id')
+                        if tool_call_id and tool_call_id in tool_results_map:
+                            tool_result_msg = tool_results_map[tool_call_id]
+                            tool_metadata = tool_result_msg.get('metadata', {})
+                            function_name = tool_metadata.get('function_name', 'unknown')
+                            
+                            tool_msg = {
+                                'role': 'tool',
+                                'tool_call_id': tool_call_id,
+                                'name': function_name,
+                                'content': tool_result_msg.get('content', '{}')
+                            }
+                            all_formatted_messages.append(tool_msg)
+            
+            # Apply sliding window
+            conversation_history = all_formatted_messages[-self.window_size:] if len(all_formatted_messages) > self.window_size else all_formatted_messages
+            
+            return conversation_history
+            
+        except Exception as e:
+            logger.error(f'Error loading meeting conversation history: {str(e)}', userId=user_id, meetingId=meeting_id)
             return []
     
     async def add_message_to_history(

@@ -131,3 +131,86 @@ async def delete_user_chat_messages(user_id: str) -> bool:
         raise Exception(f'Failed to delete chat messages: {response.error.message}')
     return True
 
+
+async def get_meeting_chat_messages(
+    user_id: str,
+    meeting_id: str,
+    limit: int = 100
+) -> List[Dict[str, Any]]:
+    """
+    Get chat messages for a specific meeting
+    Args:
+        user_id: User UUID
+        meeting_id: Google Calendar event ID
+        limit: Maximum number of messages to return
+    Returns:
+        List of messages for the meeting
+    """
+    # Fetch messages and filter by meeting_id in metadata
+    # Supabase JSONB queries: use ->> for text extraction and containment
+    query = supabase.table('chat_messages').select('id, user_id, role, content, metadata, created_at').eq('user_id', user_id)
+    
+    response = query.order('created_at', desc=False).limit(limit * 2).execute()  # Fetch extra to filter
+    
+    if hasattr(response, 'error') and response.error:
+        raise Exception(f'Database error: {response.error.message}')
+    
+    if not response.data:
+        return []
+    
+    # Filter messages by meeting_id in metadata
+    meeting_messages = []
+    for msg in response.data:
+        raw_metadata = msg.get('metadata')
+        
+        # Handle metadata deserialization
+        if raw_metadata is None:
+            metadata = {}
+        elif isinstance(raw_metadata, str):
+            try:
+                metadata = json.loads(raw_metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        elif isinstance(raw_metadata, dict):
+            metadata = raw_metadata
+        else:
+            metadata = {}
+        
+        msg['metadata'] = metadata
+        
+        # Check if this message is for the specified meeting
+        if metadata.get('meeting_id') == meeting_id:
+            meeting_messages.append(msg)
+    
+    return meeting_messages[:limit]
+
+
+async def create_meeting_chat_message(
+    user_id: str,
+    meeting_id: str,
+    role: str,
+    content: str,
+    metadata: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Create a chat message for a specific meeting
+    Args:
+        user_id: User UUID
+        meeting_id: Google Calendar event ID
+        role: Message role ('user', 'assistant')
+        content: Message content
+        metadata: Optional additional metadata
+    Returns:
+        Created message
+    """
+    # Ensure meeting_id is in metadata
+    msg_metadata = metadata.copy() if metadata else {}
+    msg_metadata['meeting_id'] = meeting_id
+    
+    return await create_chat_message(
+        user_id=user_id,
+        role=role,
+        content=content,
+        metadata=msg_metadata
+    )
+

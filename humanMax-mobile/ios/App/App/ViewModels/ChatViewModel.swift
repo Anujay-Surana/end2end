@@ -19,13 +19,21 @@ class ChatViewModel: ObservableObject {
         setupVoiceServiceCallbacks()
     }
     
+    /// Load messages - uses meeting-specific endpoint if meetingId is provided
     func loadMessages(meetingId: String? = nil) async {
         isLoading = true
         errorMessage = nil
         
         do {
-            let response = try await apiClient.getChatMessages(meetingId: meetingId)
-            messages = response.messages
+            if let meetingId = meetingId {
+                // Use meeting-specific endpoint
+                let response = try await apiClient.getMeetingChat(meetingId: meetingId)
+                messages = response.messages
+            } else {
+                // Use general chat endpoint
+                let response = try await apiClient.getChatMessages(meetingId: nil)
+                messages = response.messages
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -33,6 +41,8 @@ class ChatViewModel: ObservableObject {
         isLoading = false
     }
     
+    /// Send message - uses meeting-specific endpoint if meetingId is provided
+    /// Meeting-specific chat automatically injects brief context on the backend
     func sendMessage(_ text: String, meetingId: String? = nil) async {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
@@ -51,7 +61,15 @@ class ChatViewModel: ObservableObject {
         messages.append(optimisticUserMessage)
         
         do {
-            let response = try await apiClient.sendChatMessage(message: text, meetingId: meetingId)
+            let response: ChatMessageSendResponse
+            
+            if let meetingId = meetingId {
+                // Use meeting-specific endpoint (auto-injects brief context)
+                response = try await apiClient.sendMeetingChat(meetingId: meetingId, message: text)
+            } else {
+                // Use general chat endpoint
+                response = try await apiClient.sendChatMessage(message: text, meetingId: nil)
+            }
             
             // Replace optimistic message with actual user message from backend
             if let index = messages.firstIndex(where: { $0.id == optimisticUserMessage.id }) {

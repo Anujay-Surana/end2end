@@ -70,16 +70,18 @@ struct MainTabView: View {
     
     var body: some View {
         TabView {
-            CalendarView()
+            HomeView()
                 .environmentObject(meetingsViewModel)
                 .tabItem {
-                    Label("Calendar", systemImage: "calendar")
+                    Label("Home", systemImage: "house")
                 }
             
-            ChatView()
-                .environmentObject(chatViewModel)
+            // Chat tab removed - chat is now meeting-specific only
+            // Accessible via: Home -> Meeting -> Prep -> PrepChatView
+            
+            NotesView()
                 .tabItem {
-                    Label("Chat", systemImage: "message")
+                    Label("Notes", systemImage: "note.text")
                 }
             
             SettingsView()
@@ -88,6 +90,8 @@ struct MainTabView: View {
                     Label("Settings", systemImage: "gearshape")
                 }
         }
+        // Keep chatViewModel available for meeting-specific chat via environment
+        .environmentObject(chatViewModel)
     }
 }
 

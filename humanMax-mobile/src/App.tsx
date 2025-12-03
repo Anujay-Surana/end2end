@@ -8,8 +8,13 @@ import { authService } from './services/authService';
 import { notificationService } from './services/notificationService';
 import { backgroundSyncService } from './services/backgroundSync';
 import { AuthView } from './components/AuthView';
+import { HomeView } from './components/HomeView';
 import { ChatView } from './components/ChatView';
+import { NotesView } from './components/NotesView';
 import { Settings } from './components/Settings';
+import { MeetingDetailModal } from './components/MeetingDetailModal';
+import { PrepChatView } from './components/PrepChatView';
+import { ListeningView } from './components/ListeningView';
 import { MeetingPrep } from './components/MeetingPrep';
 import { MeetingModal } from './components/MeetingModal';
 import type { User, Meeting } from './types';
@@ -186,9 +191,51 @@ function App() {
   );
 }
 
-function AppContent({ selectedMeeting, setSelectedMeeting, handleSignOut, notificationMeeting, setNotificationMeeting }: any) {
+interface AppContentProps {
+  selectedMeeting: Meeting | null;
+  setSelectedMeeting: (meeting: Meeting | null) => void;
+  handleSignOut: () => void;
+  notificationMeeting: Meeting | null;
+  setNotificationMeeting: (meeting: Meeting | null) => void;
+}
+
+function AppContent({ 
+  selectedMeeting, 
+  setSelectedMeeting, 
+  handleSignOut, 
+  notificationMeeting, 
+  setNotificationMeeting 
+}: AppContentProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  
+  // State for meeting flow: Home -> MeetingDetail -> PrepChat -> Listening
+  const [detailMeeting, setDetailMeeting] = useState<Meeting | null>(null);
+  const [prepMeeting, setPrepMeeting] = useState<Meeting | null>(null);
+  const [listeningMeeting, setListeningMeeting] = useState<Meeting | null>(null);
+  
+  // Handle meeting click from HomeView
+  const handleMeetingClick = (meeting: Meeting) => {
+    setDetailMeeting(meeting);
+  };
+  
+  // Handle Prep button from MeetingDetailModal
+  const handlePrep = (meeting: Meeting) => {
+    setDetailMeeting(null);
+    setPrepMeeting(meeting);
+  };
+  
+  // Handle Listen In from PrepChatView
+  const handleListenIn = () => {
+    if (prepMeeting) {
+      setListeningMeeting(prepMeeting);
+    }
+  };
+  
+  // Close handlers
+  const closeDetailModal = () => setDetailMeeting(null);
+  const closePrepChat = () => setPrepMeeting(null);
+  const closeListening = () => setListeningMeeting(null);
   
   return (
     <div className="app">
@@ -197,53 +244,100 @@ function AppContent({ selectedMeeting, setSelectedMeeting, handleSignOut, notifi
           <h1 className="app-title">Shadow</h1>
           <div className="nav-actions">
             <button
+              className={`nav-button ${location.pathname === '/home' ? 'active' : ''}`}
+              onClick={() => navigate('/home')}
+            >
+              🏠 Home
+            </button>
+            <button
               className={`nav-button ${location.pathname === '/chat' ? 'active' : ''}`}
               onClick={() => navigate('/chat')}
             >
               💬 Chat
             </button>
             <button
+              className={`nav-button ${location.pathname === '/notes' ? 'active' : ''}`}
+              onClick={() => navigate('/notes')}
+            >
+              📝 Notes
+            </button>
+            <button
               className={`nav-button ${location.pathname === '/settings' ? 'active' : ''}`}
               onClick={() => navigate('/settings')}
             >
-              ⚙️ Settings
+              ⚙️
             </button>
           </div>
         </div>
       </nav>
 
-        <main className="app-main">
-          <Routes>
-            <Route
-              path="/"
-              element={<Navigate to="/chat" replace />}
-            />
-            <Route
-              path="/chat"
-              element={<ChatView />}
-            />
-            <Route
-              path="/settings"
-              element={<Settings onSignOut={handleSignOut} />}
-            />
-            <Route path="*" element={<Navigate to="/chat" replace />} />
-          </Routes>
-        </main>
-
-        {selectedMeeting && (
-          <MeetingPrep
-            meeting={selectedMeeting}
-            onClose={() => setSelectedMeeting(null)}
+      <main className="app-main">
+        <Routes>
+          <Route
+            path="/"
+            element={<Navigate to="/home" replace />}
           />
-        )}
-
-        {notificationMeeting && (
-          <MeetingModal
-            meeting={notificationMeeting}
-            onClose={() => setNotificationMeeting(null)}
+          <Route
+            path="/home"
+            element={<HomeView onMeetingClick={handleMeetingClick} />}
           />
-        )}
-      </div>
+          <Route
+            path="/chat"
+            element={<ChatView />}
+          />
+          <Route
+            path="/notes"
+            element={<NotesView />}
+          />
+          <Route
+            path="/settings"
+            element={<Settings onSignOut={handleSignOut} />}
+          />
+          <Route path="*" element={<Navigate to="/home" replace />} />
+        </Routes>
+      </main>
+
+      {/* Meeting Detail Modal */}
+      {detailMeeting && (
+        <MeetingDetailModal
+          meeting={detailMeeting}
+          onClose={closeDetailModal}
+          onPrep={handlePrep}
+        />
+      )}
+
+      {/* Prep Chat View */}
+      {prepMeeting && (
+        <PrepChatView
+          meeting={prepMeeting}
+          onClose={closePrepChat}
+          onListenIn={handleListenIn}
+        />
+      )}
+
+      {/* Listening View */}
+      {listeningMeeting && (
+        <ListeningView
+          meeting={listeningMeeting}
+          onClose={closeListening}
+        />
+      )}
+
+      {/* Legacy modals for backward compatibility */}
+      {selectedMeeting && (
+        <MeetingPrep
+          meeting={selectedMeeting}
+          onClose={() => setSelectedMeeting(null)}
+        />
+      )}
+
+      {notificationMeeting && (
+        <MeetingModal
+          meeting={notificationMeeting}
+          onClose={() => setNotificationMeeting(null)}
+        />
+      )}
+    </div>
   );
 }
 

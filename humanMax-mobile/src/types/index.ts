@@ -107,3 +107,12 @@ export interface ApiError {
   requestId?: string;
 }
 
+// Meeting Notes types (for Listen In feature)
+export interface MeetingNote {
+  id: string;
+  meetingId: string;
+  meeting: Meeting;
+  listenedAt: string;
+  notes: string[];  // In-meeting notes captured during listening
+}
+

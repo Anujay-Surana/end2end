@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3010676322CE75973347CE4B /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36CE1A24DE5BDC420D4D0A0 /* HomeView.swift */; };
+		3EC0A978644573278DD2C132 /* ListeningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1DE875FF51B48A3D6950BA0 /* ListeningView.swift */; };
 		443811862EDFAF6300875454 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811782EDFAF6300875454 /* App.swift */; };
 		443811872EDFAF6300875454 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811B02EDFB0C500875454 /* AppDelegate.swift */; };
 		443811882EDFAF6300875454 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811B82EDFB0C500875454 /* APIModels.swift */; };
@@ -33,9 +35,13 @@
 		4438119D2EDFAF6300875454 /* VoicePrepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811842EDFAF6300875454 /* VoicePrepView.swift */; };
 		4438119E2EDFAF6300875454 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811C52EDFB0C500875454 /* Constants.swift */; };
 		B931273957743C2A71AE5CAD /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1950F51798DACA824467B023 /* Pods_App.framework */; };
+		CEDBEBC5534E13CF0CF642FA /* MeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1BFD4C71FA0D84B972E6B33 /* MeetingDetailView.swift */; };
+		E8F1D80CE4909D3835030D2C /* NotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3102FA749B8D9891C33F3CE /* NotesView.swift */; };
+		F01536CE314F4EBD54D9C8FC /* PrepChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9D9FB80E480A9645A7E183 /* PrepChatView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0D9D9FB80E480A9645A7E183 /* PrepChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PrepChatView.swift; sourceTree = "<group>"; };
 		1950F51798DACA824467B023 /* Pods_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		443811782EDFAF6300875454 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		443811792EDFAF6300875454 /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
@@ -70,7 +76,11 @@
 		443811C52EDFB0C500875454 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8599F4B97FC61AAA6070F851 /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
+		A36CE1A24DE5BDC420D4D0A0 /* HomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		DD644E365E1CFB90F191964F /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
+		E1BFD4C71FA0D84B972E6B33 /* MeetingDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MeetingDetailView.swift; sourceTree = "<group>"; };
+		E1DE875FF51B48A3D6950BA0 /* ListeningView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ListeningView.swift; sourceTree = "<group>"; };
+		F3102FA749B8D9891C33F3CE /* NotesView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -106,6 +116,11 @@
 				443811822EDFAF6300875454 /* MeetingPrepView.swift */,
 				443811832EDFAF6300875454 /* SettingsView.swift */,
 				443811842EDFAF6300875454 /* VoicePrepView.swift */,
+				A36CE1A24DE5BDC420D4D0A0 /* HomeView.swift */,
+				E1BFD4C71FA0D84B972E6B33 /* MeetingDetailView.swift */,
+				0D9D9FB80E480A9645A7E183 /* PrepChatView.swift */,
+				E1DE875FF51B48A3D6950BA0 /* ListeningView.swift */,
+				F3102FA749B8D9891C33F3CE /* NotesView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -326,6 +341,11 @@
 				4438119C2EDFAF6300875454 /* SettingsView.swift in Sources */,
 				4438119D2EDFAF6300875454 /* VoicePrepView.swift in Sources */,
 				4438119E2EDFAF6300875454 /* Constants.swift in Sources */,
+				3010676322CE75973347CE4B /* HomeView.swift in Sources */,
+				CEDBEBC5534E13CF0CF642FA /* MeetingDetailView.swift in Sources */,
+				F01536CE314F4EBD54D9C8FC /* PrepChatView.swift in Sources */,
+				3EC0A978644573278DD2C132 /* ListeningView.swift in Sources */,
+				E8F1D80CE4909D3835030D2C /* NotesView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -404,7 +424,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
@@ -461,7 +481,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -482,7 +502,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -511,7 +531,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

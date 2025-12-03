@@ -7,11 +7,12 @@ Handles day prep requests - fetches all meetings for a day and prepares comprehe
 import asyncio
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as date_type
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.middleware.auth import optional_auth
 from app.db.queries.accounts import get_accounts_by_user_id
+from app.db.queries.meeting_briefs import get_briefs_for_user_date, get_brief_by_meeting_id
 from app.services.token_refresh import ensure_all_tokens_valid
 from app.services.google_api import fetch_calendar_events
 from app.services.day_prep_synthesizer import synthesize_day_prep
@@ -190,9 +191,52 @@ async def get_meetings_for_day(
 
         classified_meetings.sort(key=lambda m: get_start_time(m) or '0')
         
+        # Fetch pre-generated briefs for this date
+        briefs_map = {}
+        if user and user.get('id'):
+            try:
+                # Parse date string to date object
+                year, month, day = map(int, date.split('-'))
+                meeting_date = date_type(year, month, day)
+                
+                # Get all briefs for this user and date
+                briefs = await get_briefs_for_user_date(user['id'], meeting_date)
+                
+                # Create a map of meeting_id -> brief data
+                for brief in briefs:
+                    briefs_map[brief.get('meeting_id')] = {
+                        'one_liner': brief.get('one_liner_summary', ''),
+                        'brief_ready': True,
+                        'generated_at': brief.get('updated_at') or brief.get('created_at')
+                    }
+                
+                logger.info(
+                    f'Found {len(briefs)} pre-generated briefs for date {date}',
+                    requestId=request_id,
+                    userId=user['id']
+                )
+            except Exception as brief_error:
+                logger.warning(
+                    f'Error fetching briefs: {str(brief_error)}',
+                    requestId=request_id
+                )
+        
+        # Add brief data to each meeting
+        for meeting in classified_meetings:
+            meeting_id = meeting.get('id')
+            if meeting_id and meeting_id in briefs_map:
+                meeting['_brief'] = briefs_map[meeting_id]
+            else:
+                meeting['_brief'] = {
+                    'one_liner': None,
+                    'brief_ready': False,
+                    'generated_at': None
+                }
+        
         # Count meetings vs non-meetings
         meetings_count = sum(1 for m in classified_meetings if m['_classification']['type'] == 'meeting')
         non_meetings_count = len(classified_meetings) - meetings_count
+        briefs_ready_count = sum(1 for m in classified_meetings if m.get('_brief', {}).get('brief_ready'))
 
         logger.info(
             'Meetings fetched for day',
@@ -200,7 +244,8 @@ async def get_meetings_for_day(
             date=date,
             meetingCount=meetings_count,
             totalEvents=len(classified_meetings),
-            nonMeetings=non_meetings_count
+            nonMeetings=non_meetings_count,
+            briefsReady=briefs_ready_count
         )
 
         return {'meetings': classified_meetings}

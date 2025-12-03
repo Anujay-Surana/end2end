@@ -294,9 +294,9 @@ class APIClient {
         return try await executeRequest(request, responseType: [String: AnyCodable].self)
     }
     
-    // MARK: - Chat Endpoints
+    // MARK: - Chat Endpoints (General)
     
-    /// Get chat messages
+    /// Get chat messages (general)
     func getChatMessages(meetingId: String? = nil, limit: Int = 100) async throws -> ChatMessagesResponse {
         var queryItems = [URLQueryItem(name: "limit", value: "\(limit)")]
         if let meetingId = meetingId {
@@ -322,7 +322,7 @@ class APIClient {
         return try await executeRequest(request, responseType: ChatMessagesResponse.self)
     }
     
-    /// Send chat message
+    /// Send chat message (general)
     func sendChatMessage(message: String, meetingId: String? = nil) async throws -> ChatMessageSendResponse {
         struct ChatMessageRequest: Codable {
             let message: String
@@ -361,6 +361,66 @@ class APIClient {
         }
         
         return try await executeRequest(request, responseType: [String: Bool].self)
+    }
+    
+    // MARK: - Meeting-Specific Chat Endpoints
+    
+    /// Response for meeting chat with brief context
+    struct MeetingChatResponse: Codable {
+        let success: Bool
+        let messages: [ChatMessage]
+        let meetingId: String
+        let briefAvailable: Bool
+        let oneLiner: String?
+        
+        enum CodingKeys: String, CodingKey {
+            case success, messages
+            case meetingId = "meeting_id"
+            case briefAvailable = "brief_available"
+            case oneLiner = "one_liner"
+        }
+    }
+    
+    /// Get chat messages for a specific meeting
+    func getMeetingChat(meetingId: String, limit: Int = 100) async throws -> MeetingChatResponse {
+        guard let url = URL(string: "\(baseURL)/api/meetings/\(meetingId)/chat?limit=\(limit)") else {
+            throw APIError.networkError("Invalid URL")
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("ios", forHTTPHeaderField: "X-Platform")
+        
+        if let sessionToken = keychainService.getSessionToken() {
+            request.setValue("Bearer \(sessionToken)", forHTTPHeaderField: "Authorization")
+        }
+        
+        return try await executeRequest(request, responseType: MeetingChatResponse.self)
+    }
+    
+    /// Send chat message for a specific meeting (with brief context injection)
+    func sendMeetingChat(meetingId: String, message: String) async throws -> ChatMessageSendResponse {
+        struct MeetingChatRequest: Codable {
+            let message: String
+        }
+        
+        let chatRequest = MeetingChatRequest(message: message)
+        let bodyData = try JSONEncoder().encode(chatRequest)
+        
+        guard let urlRequest = buildRequest(
+            endpoint: "/api/meetings/\(meetingId)/chat",
+            method: "POST",
+            body: bodyData
+        ) else {
+            throw APIError.networkError("Invalid request")
+        }
+        
+        // Increase timeout for chat messages (can take up to 3 minutes)
+        var mutableRequest = urlRequest
+        mutableRequest.timeoutInterval = 180.0
+        
+        return try await executeRequest(mutableRequest, responseType: ChatMessageSendResponse.self)
     }
     
     // MARK: - Device Endpoints

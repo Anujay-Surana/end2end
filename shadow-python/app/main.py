@@ -111,7 +111,7 @@ async def shutdown_event():
 
 
 # Import routes
-from app.routes import auth_enhanced, accounts, meetings, day_prep, parallel, tts, websocket, onboarding, credentials, service_auth, chat_panel, devices, chat
+from app.routes import auth_enhanced, accounts, meetings, day_prep, parallel, tts, websocket, onboarding, credentials, service_auth, chat_panel, devices, chat, cron
 
 app.include_router(auth_enhanced.router, prefix='/auth', tags=['auth'])
 app.include_router(accounts.router, prefix='/api/accounts', tags=['accounts'])
@@ -126,6 +126,7 @@ app.include_router(onboarding.router, prefix='/onboarding', tags=['onboarding'])
 app.include_router(credentials.router, prefix='', tags=['credentials'])
 app.include_router(service_auth.router, prefix='/auth', tags=['service-auth'])
 app.include_router(devices.router, prefix='/api', tags=['devices'])
+app.include_router(cron.router, prefix='/api', tags=['cron'])
 
 # Serve static files (frontend) - must be after API routes
 # Get the project root directory (parent of shadow-python)
