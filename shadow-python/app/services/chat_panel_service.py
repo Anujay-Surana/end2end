@@ -63,7 +63,16 @@ class ChatPanelService:
                                     'summary': {'type': 'string'},
                                     'start': {'type': 'object'},
                                     'end': {'type': 'object'},
-                                    'attendees': {'type': 'array'}
+                                    'attendees': {
+                                        'type': 'array',
+                                        'items': {
+                                            'type': 'object',
+                                            'properties': {
+                                                'email': {'type': 'string'},
+                                                'displayName': {'type': 'string'}
+                                            }
+                                        }
+                                    }
                                 },
                                 'required': ['id', 'summary', 'start', 'end']
                             }
