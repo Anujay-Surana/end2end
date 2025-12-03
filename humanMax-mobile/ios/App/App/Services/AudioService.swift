@@ -25,6 +25,20 @@ class AudioService {
     
     /// Setup audio engine with optimal configuration for low latency
     private func setupAudioEngine() throws {
+        // If engine is already running, don't setup again
+        if let engine = audioEngine, engine.isRunning {
+            return
+        }
+        
+        // If engine exists but is stopped, restart it
+        if let engine = audioEngine, let playerNode = playerNode, let format = audioFormat {
+            if !engine.isRunning {
+                try engine.start()
+            }
+            return
+        }
+        
+        // Create new engine and nodes
         audioEngine = AVAudioEngine()
         guard let engine = audioEngine else {
             throw AudioError.engineSetupFailed
@@ -32,6 +46,10 @@ class AudioService {
         
         inputNode = engine.inputNode
         playerNode = AVAudioPlayerNode()
+        
+        guard let playerNode = playerNode else {
+            throw AudioError.engineSetupFailed
+        }
         
         // Configure for 16kHz, 16-bit PCM (OpenAI Realtime API requirement)
         audioFormat = AVAudioFormat(
@@ -64,8 +82,8 @@ class AudioService {
         try audioSession.setActive(true)
         
         // Attach and connect player node for audio playback
-        engine.attach(playerNode!)
-        engine.connect(playerNode!, to: engine.mainMixerNode, format: format)
+        engine.attach(playerNode)
+        engine.connect(playerNode, to: engine.mainMixerNode, format: format)
         
         // Start audio engine
         try engine.start()

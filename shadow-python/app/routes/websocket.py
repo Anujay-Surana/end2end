@@ -109,10 +109,15 @@ async def realtime_websocket(websocket: WebSocket):
                     break
                 except Exception as e:
                     logger.error(f'Error handling client message: {str(e)}', userId=user_id)
-                    await websocket.send_json({
-                        'type': 'error',
-                        'message': f'Error processing message: {str(e)}'
-                    })
+                    # Only send error if WebSocket is still connected
+                    try:
+                        await websocket.send_json({
+                            'type': 'error',
+                            'message': f'Error processing message: {str(e)}'
+                        })
+                    except (WebSocketDisconnect, RuntimeError):
+                        # WebSocket already closed, break the loop
+                        break
         
         finally:
             receive_task.cancel()
