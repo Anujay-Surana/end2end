@@ -13,39 +13,12 @@ struct MeetingsResponse: Codable {
 }
 
 /// Pre-generated brief data attached to meetings
+/// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase which handles the conversion
 struct MeetingBriefData: Codable {
     let oneLiner: String?
     let briefReady: Bool?
     let generatedAt: String?
     let briefData: AnyCodable?
-    
-    enum CodingKeys: String, CodingKey {
-        case oneLiner = "one_liner"
-        case briefReady = "brief_ready"
-        case generatedAt = "generated_at"
-        case briefData = "brief_data"
-    }
-    
-    /// Custom decoder with debug logging
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        
-        // Debug: print all keys present in the container
-        print("🔍 MeetingBriefData decoding - available keys: \(container.allKeys.map { $0.stringValue })")
-        
-        // Decode each field with logging
-        self.oneLiner = try container.decodeIfPresent(String.self, forKey: .oneLiner)
-        print("   one_liner decoded: \(oneLiner ?? "nil")")
-        
-        self.briefReady = try container.decodeIfPresent(Bool.self, forKey: .briefReady)
-        print("   brief_ready decoded: \(briefReady?.description ?? "nil")")
-        
-        self.generatedAt = try container.decodeIfPresent(String.self, forKey: .generatedAt)
-        print("   generated_at decoded: \(generatedAt ?? "nil")")
-        
-        self.briefData = try container.decodeIfPresent(AnyCodable.self, forKey: .briefData)
-        print("   brief_data decoded: \(briefData != nil ? "present" : "nil")")
-    }
     
     /// Safely check if brief is ready
     var isReady: Bool {
@@ -66,6 +39,7 @@ struct MeetingBriefData: Codable {
 }
 
 /// Full brief data containing attendee research, document analysis, etc.
+/// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
 struct FullBriefData: Codable {
     let summary: String?
     let purpose: String?
@@ -76,19 +50,10 @@ struct FullBriefData: Codable {
     let actionItems: [String]?
     let attendees: [AttendeeResearch]?
     let stats: BriefStats?
-    
-    enum CodingKeys: String, CodingKey {
-        case summary, purpose, agenda
-        case emailAnalysis = "emailAnalysis"
-        case documentAnalysis = "documentAnalysis"
-        case recommendations
-        case actionItems = "actionItems"
-        case attendees
-        case stats
-    }
 }
 
 /// Attendee with research data
+/// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
 struct AttendeeResearch: Codable {
     let name: String?
     let email: String?
@@ -96,25 +61,14 @@ struct AttendeeResearch: Codable {
     let company: String?
     let keyFacts: [String]?
     let source: String?
-    
-    enum CodingKeys: String, CodingKey {
-        case name, email, title, company
-        case keyFacts = "keyFacts"
-        case source
-    }
 }
 
 /// Brief statistics
+/// Note: No CodingKeys needed - JSONDecoder uses .convertFromSnakeCase
 struct BriefStats: Codable {
     let emailCount: Int?
     let fileCount: Int?
     let attendeeCount: Int?
-    
-    enum CodingKeys: String, CodingKey {
-        case emailCount = "emailCount"
-        case fileCount = "fileCount"
-        case attendeeCount = "attendeeCount"
-    }
 }
 
 /// Meeting model
@@ -397,6 +351,12 @@ struct AnyCodable: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         
+        // Handle null first
+        if container.decodeNil() {
+            value = NSNull()
+            return
+        }
+        
         if let bool = try? container.decode(Bool.self) {
             value = bool
         } else if let int = try? container.decode(Int.self) {
@@ -410,7 +370,8 @@ struct AnyCodable: Codable {
         } else if let dictionary = try? container.decode([String: AnyCodable].self) {
             value = dictionary.mapValues { $0.value }
         } else {
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "AnyCodable value cannot be decoded")
+            // If all else fails, treat as empty dictionary (graceful fallback)
+            value = [String: Any]()
         }
     }
     
@@ -418,6 +379,8 @@ struct AnyCodable: Codable {
         var container = encoder.singleValueContainer()
         
         switch value {
+        case is NSNull:
+            try container.encodeNil()
         case let bool as Bool:
             try container.encode(bool)
         case let int as Int:
@@ -433,7 +396,7 @@ struct AnyCodable: Codable {
             let codableDictionary = dictionary.mapValues { AnyCodable($0) }
             try container.encode(codableDictionary)
         default:
-            throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: container.codingPath, debugDescription: "AnyCodable value cannot be encoded"))
+            try container.encodeNil()
         }
     }
 }
