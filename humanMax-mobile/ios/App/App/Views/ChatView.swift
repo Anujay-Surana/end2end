@@ -117,7 +117,7 @@ struct MessageBubble: View {
                     .foregroundColor(isUser ? .white : .primary)
                     .cornerRadius(16)
                 
-                if let createdAt = message.created_at {
+                if let createdAt = message.createdAt {
                     Text(formatDate(createdAt))
                         .font(.caption2)
                         .foregroundColor(.secondary)

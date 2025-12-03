@@ -17,7 +17,7 @@ struct MeetingBriefData: Codable {
     let oneLiner: String?
     let briefReady: Bool?
     let generatedAt: String?
-    let briefData: FullBriefData?
+    let briefData: AnyCodable?
     
     enum CodingKeys: String, CodingKey {
         case oneLiner = "one_liner"
@@ -29,6 +29,18 @@ struct MeetingBriefData: Codable {
     /// Safely check if brief is ready
     var isReady: Bool {
         return briefReady ?? false
+    }
+    
+    /// Get the full brief as FullBriefData (parsed from AnyCodable)
+    var fullBrief: FullBriefData? {
+        guard let briefData = briefData?.value as? [String: Any] else { return nil }
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: briefData)
+            return try JSONDecoder().decode(FullBriefData.self, from: jsonData)
+        } catch {
+            print("Error parsing full brief: \(error)")
+            return nil
+        }
     }
 }
 
@@ -120,7 +132,7 @@ struct Meeting: Codable, Identifiable {
     
     /// Get the full brief data
     var fullBrief: FullBriefData? {
-        return briefData?.briefData
+        return briefData?.fullBrief
     }
     
     /// Get attendees with research data
@@ -257,8 +269,44 @@ struct ChatMessagesResponse: Codable {
 struct ChatMessageSendResponse: Codable {
     let success: Bool
     let message: String?
-    let userMessage: ChatMessage
-    let assistantMessage: ChatMessage
+    let userMessage: ChatMessage?
+    let assistantMessage: ChatMessage?
+    let meetingId: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case success, message
+        case userMessage = "user_message"
+        case assistantMessage = "assistant_message"
+        case meetingId = "meeting_id"
+    }
+}
+
+/// Metadata for chat messages
+struct ChatMessageMetadata: Codable {
+    let meetingId: String?
+    let toolCalls: AnyCodable?
+    let rawRole: String?
+    let toolCallId: String?
+    let functionName: String?
+    let isToolResult: Bool?
+    
+    enum CodingKeys: String, CodingKey {
+        case meetingId = "meeting_id"
+        case toolCalls = "tool_calls"
+        case rawRole = "raw_role"
+        case toolCallId = "tool_call_id"
+        case functionName = "function_name"
+        case isToolResult = "is_tool_result"
+    }
+    
+    init(meetingId: String?, toolCalls: AnyCodable?, rawRole: String?, toolCallId: String?, functionName: String?, isToolResult: Bool?) {
+        self.meetingId = meetingId
+        self.toolCalls = toolCalls
+        self.rawRole = rawRole
+        self.toolCallId = toolCallId
+        self.functionName = functionName
+        self.isToolResult = isToolResult
+    }
 }
 
 /// Chat message model
@@ -266,16 +314,47 @@ struct ChatMessage: Codable, Identifiable {
     let id: String
     let role: String // "user", "assistant", "system"
     let content: String
-    let created_at: String?
-    let meeting_id: String?
-    let function_results: [FunctionResult]?
+    let createdAt: String?
+    let userId: String?
+    let metadata: ChatMessageMetadata?
+    let functionResults: [FunctionResult]?
     
     // Backend may include additional fields that we ignore
     enum CodingKeys: String, CodingKey {
         case id, role, content
-        case created_at
-        case meeting_id
-        case function_results
+        case createdAt = "created_at"
+        case userId = "user_id"
+        case metadata
+        case functionResults = "function_results"
+    }
+    
+    /// Get meeting_id from metadata
+    var meetingId: String? {
+        return metadata?.meetingId
+    }
+    
+    /// Convenience initializer for creating optimistic messages
+    init(id: String, role: String, content: String, createdAt: String? = nil, userId: String? = nil, meetingId: String? = nil) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.createdAt = createdAt
+        self.userId = userId
+        self.functionResults = nil
+        
+        // Create metadata with meeting_id if provided
+        if let meetingId = meetingId {
+            self.metadata = ChatMessageMetadata(
+                meetingId: meetingId,
+                toolCalls: nil,
+                rawRole: nil,
+                toolCallId: nil,
+                functionName: nil,
+                isToolResult: nil
+            )
+        } else {
+            self.metadata = nil
+        }
     }
 }
 

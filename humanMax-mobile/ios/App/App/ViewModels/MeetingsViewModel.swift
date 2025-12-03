@@ -35,6 +35,19 @@ class MeetingsViewModel: ObservableObject {
             
             print("✅ Valid meetings after filtering: \(validMeetings.count)")
             
+            // Debug: Print brief data for each meeting
+            for meeting in validMeetings {
+                print("📋 Meeting: \(meeting.summary)")
+                print("   ID: \(meeting.id)")
+                print("   Has briefData: \(meeting.briefData != nil)")
+                if let briefData = meeting.briefData {
+                    print("   Brief ready: \(briefData.isReady)")
+                    print("   One-liner: \(briefData.oneLiner ?? "nil")")
+                    print("   Generated at: \(briefData.generatedAt ?? "nil")")
+                }
+                print("   oneLiner property: \(meeting.oneLiner ?? "nil")")
+            }
+            
             if validMeetings.isEmpty && !response.meetings.isEmpty {
                 print("⚠️ All meetings were filtered out - checking first meeting structure:")
                 if let firstMeeting = response.meetings.first {

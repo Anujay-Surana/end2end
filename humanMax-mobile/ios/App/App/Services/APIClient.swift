@@ -375,8 +375,8 @@ class APIClient {
     struct MeetingChatResponse: Codable {
         let success: Bool
         let messages: [ChatMessage]
-        let meetingId: String
-        let briefAvailable: Bool
+        let meetingId: String?
+        let briefAvailable: Bool?
         let oneLiner: String?
         
         enum CodingKeys: String, CodingKey {

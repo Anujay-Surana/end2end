@@ -54,9 +54,8 @@ class ChatViewModel: ObservableObject {
             id: UUID().uuidString,
             role: "user",
             content: text,
-            created_at: ISO8601DateFormatter().string(from: Date()),
-            meeting_id: meetingId,
-            function_results: nil
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            meetingId: meetingId
         )
         messages.append(optimisticUserMessage)
         
@@ -72,14 +71,18 @@ class ChatViewModel: ObservableObject {
             }
             
             // Replace optimistic message with actual user message from backend
-            if let index = messages.firstIndex(where: { $0.id == optimisticUserMessage.id }) {
-                messages[index] = response.userMessage
-            } else {
-                messages.append(response.userMessage)
+            if let userMessage = response.userMessage {
+                if let index = messages.firstIndex(where: { $0.id == optimisticUserMessage.id }) {
+                    messages[index] = userMessage
+                } else {
+                    messages.append(userMessage)
+                }
             }
             
             // Add assistant message
-            messages.append(response.assistantMessage)
+            if let assistantMessage = response.assistantMessage {
+                messages.append(assistantMessage)
+            }
         } catch {
             errorMessage = error.localizedDescription
             // Remove optimistic message on error

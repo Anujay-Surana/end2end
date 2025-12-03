@@ -263,8 +263,17 @@ async def get_meetings_for_day(
                         brief.get('generated_at')
                     )
                     
-                    briefs_map[brief.get('meeting_id')] = {
-                        'one_liner': brief.get('one_liner_summary', ''),
+                    one_liner = brief.get('one_liner_summary', '')
+                    meeting_id = brief.get('meeting_id')
+                    
+                    # Debug logging to trace brief data
+                    logger.info(
+                        f'Brief data for meeting {meeting_id}: one_liner="{one_liner[:50] if one_liner else "EMPTY"}", generated_at={generated_at}',
+                        requestId=request_id
+                    )
+                    
+                    briefs_map[meeting_id] = {
+                        'one_liner': one_liner,
                         'brief_ready': True,
                         'generated_at': generated_at,
                         # Include full brief data for attendee info, document analysis, etc.
