@@ -325,6 +325,14 @@ async def get_meetings_for_day(
             briefsReady=briefs_ready_count
         )
 
+        # Debug: log the actual _brief data for a meeting with brief
+        for m in classified_meetings:
+            if m.get('_brief', {}).get('brief_ready'):
+                import json
+                brief_json = json.dumps(m.get('_brief', {}), default=str)
+                logger.info(f'Final _brief JSON for {m.get("id")}: {brief_json[:200]}', requestId=request_id)
+                break
+
         return {'meetings': classified_meetings}
 
     except HTTPException:
