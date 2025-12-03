@@ -18,6 +18,7 @@ from app.services.google_api import fetch_calendar_events
 from app.services.token_refresh import ensure_all_tokens_valid
 from app.services.apns_service import get_apns_service
 from app.db.connection import supabase
+from app.services.utils import get_meeting_datetime
 
 
 async def send_daily_summary_for_user(user_id: str) -> Dict[str, Any]:
@@ -85,14 +86,14 @@ async def send_daily_summary_for_user(user_id: str) -> Dict[str, Any]:
         # Filter to actual meetings
         meetings = []
         for meeting in all_meetings:
-            start = meeting.get('start') or meeting.get('start', {}).get('dateTime')
+            start = get_meeting_datetime(meeting, 'start')
             if start and 'T' in start:  # Has time component
                 attendees = meeting.get('attendees', [])
                 if len(attendees) > 0:
                     meetings.append(meeting)
         
         # Sort by start time
-        meetings.sort(key=lambda m: m.get('start', {}).get('dateTime', '') or m.get('start', ''))
+        meetings.sort(key=lambda m: get_meeting_datetime(m, 'start') or '')
         
         # Generate summary message
         if len(meetings) == 0:
@@ -100,7 +101,7 @@ async def send_daily_summary_for_user(user_id: str) -> Dict[str, Any]:
         elif len(meetings) == 1:
             meeting = meetings[0]
             title = meeting.get('summary', 'Untitled Meeting')
-            start_time = meeting.get('start', {}).get('dateTime', '') or meeting.get('start', '')
+            start_time = get_meeting_datetime(meeting, 'start') or ''
             # Format time
             try:
                 if 'T' in start_time:
@@ -116,7 +117,7 @@ async def send_daily_summary_for_user(user_id: str) -> Dict[str, Any]:
             summary_lines = [f"You have {len(meetings)} meetings today:\n"]
             for i, meeting in enumerate(meetings, 1):
                 title = meeting.get('summary', 'Untitled Meeting')
-                start_time = meeting.get('start', {}).get('dateTime', '') or meeting.get('start', '')
+                start_time = get_meeting_datetime(meeting, 'start') or ''
                 # Format time
                 try:
                     if 'T' in start_time:

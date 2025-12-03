@@ -44,6 +44,25 @@ def extract_keywords(title: str, description: str = '') -> List[str]:
     return list(dict.fromkeys(words))[:5]
 
 
+def get_meeting_datetime(meeting: Dict[str, Any], field: str = 'start') -> Optional[str]:
+    """
+    Safely extract datetime string from meeting start/end field.
+    Handles both dict format {'dateTime': '...'} and string format '2025-12-03'.
+    
+    Args:
+        meeting: Meeting dict
+        field: Field name ('start' or 'end')
+    Returns:
+        Datetime string or None
+    """
+    value = meeting.get(field)
+    if isinstance(value, dict):
+        return value.get('dateTime') or value.get('date')
+    elif isinstance(value, str):
+        return value
+    return None
+
+
 async def fetch_emails_from_all_accounts(
     accounts: List[Dict[str, Any]],
     attendees: List[Dict[str, Any]],
@@ -67,7 +86,7 @@ async def fetch_emails_from_all_accounts(
         logger.debug(f'   🔑 Extracted keywords: {", ".join(keywords)}')
 
     # Extract meeting date for temporal filtering (only use data BEFORE meeting)
-    meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
+    meeting_start = get_meeting_datetime(meeting, 'start')
     if meeting_start:
         meeting_date = datetime.fromisoformat(meeting_start.replace('Z', '+00:00'))
         # Ensure timezone-aware (if naive, assume UTC)
@@ -308,7 +327,7 @@ async def fetch_files_from_all_accounts(
     logger.info(f'📁 Fetching Drive files from {len(accounts)} account(s)...')
 
     # Extract meeting date for temporal filtering
-    meeting_start = meeting.get('start', {}).get('dateTime') or meeting.get('start', {}).get('date') or meeting.get('start')
+    meeting_start = get_meeting_datetime(meeting, 'start')
     if meeting_start:
         meeting_date = datetime.fromisoformat(meeting_start.replace('Z', '+00:00'))
         # Ensure timezone-aware (if naive, assume UTC)

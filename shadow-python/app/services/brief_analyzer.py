@@ -17,6 +17,7 @@ import asyncio
 from typing import Dict, List, Any, Optional
 from app.services.gpt_service import call_gpt, synthesize_results, safe_parse_json, craft_search_queries
 from app.services.logger import logger
+from app.services.utils import get_meeting_datetime
 
 
 class BriefAnalyzer:
@@ -540,7 +541,7 @@ Analyze the relationship dynamics."""
             }, {
                 'role': 'user',
                 'content': f"""Meeting: {meeting.get('summary') if meeting else 'Upcoming Meeting'}
-Time: {meeting.get('start', {}).get('dateTime') if meeting and meeting.get('start') else meeting.get('start', {}).get('date') if meeting and meeting.get('start') else 'Not specified'}
+Time: {get_meeting_datetime(meeting, 'start') if meeting else 'Not specified'}
 Attendees: {', '.join([a.get('name', 'Unknown') for a in (analyses.get('attendeesAnalysis') or [])]) if analyses.get('attendeesAnalysis') else 'Not specified'}
 
 Context Analysis:

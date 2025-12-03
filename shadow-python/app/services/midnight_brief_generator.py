@@ -15,6 +15,7 @@ from app.db.queries.meeting_briefs import create_meeting_brief, get_meeting_brie
 from app.services.google_api import fetch_calendar_events, ensure_valid_token
 from app.services.brief_analyzer import BriefAnalyzer
 from app.services.multi_account_fetcher import fetch_all_account_context
+from app.services.utils import get_meeting_datetime
 import os
 
 
@@ -92,7 +93,7 @@ async def generate_briefs_for_user(user_id: str) -> Dict[str, Any]:
         meetings_to_prep = []
         for meeting in all_meetings:
             # Only prep meetings with specific times (not all-day events)
-            start = meeting.get('start') or meeting.get('start', {}).get('dateTime')
+            start = get_meeting_datetime(meeting, 'start')
             if start and 'T' in start:  # Has time component
                 attendees = meeting.get('attendees', [])
                 # Only prep if has attendees (likely a meeting)

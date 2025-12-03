@@ -11,6 +11,7 @@ import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Callable
 from app.services.logger import logger
+from app.services.utils import get_meeting_datetime
 
 
 class ChatPanelService:
@@ -210,17 +211,21 @@ class ChatPanelService:
 
             meeting_list = []
             for idx, m in enumerate(meetings):
-                start_time = m.get('start', {}).get('dateTime') or m.get('start', {}).get('date')
+                start_time = get_meeting_datetime(m, 'start')
                 time_str = 'Time TBD'
                 
                 if start_time:
-                    if m.get('start', {}).get('dateTime'):
+                    start_obj = m.get('start')
+                    has_datetime = isinstance(start_obj, dict) and start_obj.get('dateTime')
+                    has_date_only = isinstance(start_obj, dict) and start_obj.get('date') and not start_obj.get('dateTime')
+                    
+                    if has_datetime or (isinstance(start_obj, str) and 'T' in start_obj):
                         try:
                             dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
                             time_str = dt.strftime('%I:%M %p')
                         except:
                             time_str = 'Time TBD'
-                    elif m.get('start', {}).get('date'):
+                    elif has_date_only:
                         time_str = 'All day'
                 
                 attendees = ', '.join([a.get('displayName') or a.get('email') for a in (m.get('attendees') or [])])
@@ -307,17 +312,21 @@ RULES:
         if meetings and len(meetings) > 0:
             prompt += "\n\nTODAY'S MEETINGS:\n"
             for idx, m in enumerate(meetings[:5]):  # Limit to 5 meetings to save tokens
-                start_time = m.get('start', {}).get('dateTime') or m.get('start', {}).get('date')
+                start_time = get_meeting_datetime(m, 'start')
                 time_str = 'TBD'
                 
                 if start_time:
-                    if m.get('start', {}).get('dateTime'):
+                    start_obj = m.get('start')
+                    has_datetime = isinstance(start_obj, dict) and start_obj.get('dateTime')
+                    has_date_only = isinstance(start_obj, dict) and start_obj.get('date') and not start_obj.get('dateTime')
+                    
+                    if has_datetime or (isinstance(start_obj, str) and 'T' in start_obj):
                         try:
                             dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
                             time_str = dt.strftime('%I:%M %p')
                         except:
                             pass
-                    elif m.get('start', {}).get('date'):
+                    elif has_date_only:
                         time_str = 'All day'
                 
                 attendees = ', '.join([a.get('displayName') or a.get('email') for a in (m.get('attendees') or [])[:3]]) or 'No attendees'

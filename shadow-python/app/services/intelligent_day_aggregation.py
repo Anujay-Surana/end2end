@@ -9,6 +9,7 @@ import json
 from typing import Dict, List, Any
 from app.services.gpt_service import call_gpt, safe_parse_json
 from app.services.logger import logger
+from app.services.utils import get_meeting_datetime
 
 
 async def detect_cross_conflicts(briefs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -172,10 +173,11 @@ async def detect_dependencies(meetings: List[Dict[str, Any]]) -> Dict[str, Any]:
     
     meeting_summaries = []
     for index, m in enumerate(meetings):
+        meeting_obj = m.get('meeting', {})
         meeting_summaries.append({
             'index': index,
-            'title': m.get('meeting', {}).get('summary') or m.get('meeting', {}).get('title') or f'Meeting {index + 1}',
-            'time': m.get('meeting', {}).get('start', {}).get('dateTime') or m.get('meeting', {}).get('start', {}).get('date'),
+            'title': meeting_obj.get('summary') or meeting_obj.get('title') or f'Meeting {index + 1}',
+            'time': get_meeting_datetime(meeting_obj, 'start'),
             'attendees': [a.get('name') or a.get('email') for a in (m.get('attendees') or [])],
             'topics': m.get('context', {}).get('broaderNarrative', '') or m.get('summary', ''),
             'actionItems': m.get('context', {}).get('actionItems', [])
@@ -353,7 +355,7 @@ def merge_timelines(timeline_arrays: List[List[Dict[str, Any]]]) -> List[Dict[st
         unique.append(event)
     
     # Sort by date (most recent first)
-    unique.sort(key=lambda e: e.get('date') or e.get('start', {}).get('dateTime') or '', reverse=True)
+    unique.sort(key=lambda e: e.get('date') or get_meeting_datetime(e, 'start') or '', reverse=True)
     
     return unique[:50]  # Limit to 50 most relevant events
 

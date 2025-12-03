@@ -17,6 +17,7 @@ from app.db.connection import supabase
 from app.services.google_api import fetch_calendar_events
 from app.services.token_refresh import ensure_all_tokens_valid
 from app.services.apns_service import get_apns_service
+from app.services.utils import get_meeting_datetime
 
 
 async def send_meeting_reminders(user_id: str, user_timezone_str: str = 'UTC') -> Dict[str, Any]:
@@ -81,7 +82,7 @@ async def send_meeting_reminders(user_id: str, user_timezone_str: str = 'UTC') -
         # Filter to actual meetings
         meetings_to_remind = []
         for meeting in all_meetings:
-            start = meeting.get('start') or meeting.get('start', {}).get('dateTime')
+            start = get_meeting_datetime(meeting, 'start')
             if start and 'T' in start:  # Has time component
                 attendees = meeting.get('attendees', [])
                 if len(attendees) > 0:
@@ -106,7 +107,7 @@ async def send_meeting_reminders(user_id: str, user_timezone_str: str = 'UTC') -
             meeting_title = meeting.get('summary', 'Untitled Meeting')
             
             # Format meeting time
-            start_time = meeting.get('start', {}).get('dateTime', '') or meeting.get('start', '')
+            start_time = get_meeting_datetime(meeting, 'start') or ''
             try:
                 if 'T' in start_time:
                     dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))

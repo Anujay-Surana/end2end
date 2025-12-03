@@ -11,6 +11,7 @@ from app.services.gpt_service import call_gpt
 from app.services.logger import logger
 from app.services.user_context import get_user_context
 from app.services.intelligent_day_aggregation import intelligently_aggregate
+from app.services.utils import get_meeting_datetime
 
 
 def extract_section(text: str, start_marker: str, end_marker: str) -> str:
@@ -58,7 +59,7 @@ async def synthesize_day_prep(
         for meeting, brief in zip(meetings, briefs + [None] * (len(meetings) - len(briefs))):
             if not isinstance(meeting, dict):
                 continue
-            start_time = meeting.get('start', {}).get('dateTime') if isinstance(meeting.get('start'), dict) else (meeting.get('start', {}).get('date') if isinstance(meeting.get('start'), dict) else meeting.get('start'))
+            start_time = get_meeting_datetime(meeting, 'start')
             if not start_time:
                 continue
 
@@ -299,7 +300,7 @@ Attendees: {', '.join([format_attendee(a) for a in m.get('attendees', []) if isi
         # Build timeline events string
         timeline_events = aggregated_context.get('timeline', [])[:10]
         timeline_events_str = '\n'.join([
-            f"{idx + 1}. [{event.get('date') or (event.get('start', {}).get('dateTime') if isinstance(event.get('start'), dict) else '') or 'Date unknown'}] {event.get('type', 'event')}: {event.get('title') or event.get('summary') or 'Untitled'}"
+            f"{idx + 1}. [{event.get('date') or get_meeting_datetime(event, 'start') or 'Date unknown'}] {event.get('type', 'event')}: {event.get('title') or event.get('summary') or 'Untitled'}"
             for idx, event in enumerate(timeline_events)
             if isinstance(event, dict)
         ]) if timeline_events else 'No timeline events available.'

@@ -19,6 +19,7 @@ from app.services.day_prep_synthesizer import synthesize_day_prep
 from app.services.calendar_event_classifier import classify_calendar_event, should_prep_event
 from app.services.user_context import get_user_context
 from app.services.logger import logger
+from app.services.utils import get_meeting_datetime
 import httpx
 
 router = APIRouter()
@@ -505,7 +506,7 @@ async def day_prep(
                 'prep': [
                     {
                         'meetingTitle': r['meeting'].get('summary') or r['meeting'].get('title'),
-                        'meetingDate': r['meeting'].get('start', {}).get('dateTime') or r['meeting'].get('start', {}).get('date') if isinstance(r['meeting'].get('start'), dict) else r['meeting'].get('start'),
+                        'meetingDate': get_meeting_datetime(r['meeting'], 'start'),
                         'summary': r['brief'].get('summary') if r.get('brief') else '',
                         'sections': []  # Can be populated if needed
                     }
