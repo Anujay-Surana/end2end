@@ -27,7 +27,7 @@ class AudioService: ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var inputNode: AVAudioInputNode?
     private var playerNode: AVAudioPlayerNode?
-    private var mixerNode: AVAudioMixerNode?
+    // NOTE: Removed custom mixerNode - connect directly to mainMixerNode instead
     
     private var apiFormat: AVAudioFormat?
     private var formatConverter: AVAudioConverter?
@@ -39,9 +39,6 @@ class AudioService: ObservableObject {
     
     // Audio capture callback - called from audio processing queue
     var onAudioData: ((Data) -> Void)?
-    
-    // Serial queue for thread-safe UI updates (NOT main thread)
-    private let audioProcessingQueue = DispatchQueue(label: "com.kordn8.shadow.audio.processing", qos: .userInteractive)
     
     private init() {}
     
@@ -83,11 +80,10 @@ class AudioService: ObservableObject {
         // Get input node (always exists on engine)
         inputNode = engine.inputNode
         
-        // Create player and mixer nodes
+        // Create player node only (no custom mixer needed)
         playerNode = AVAudioPlayerNode()
-        mixerNode = AVAudioMixerNode()
         
-        guard let player = playerNode, let mixer = mixerNode else {
+        guard let player = playerNode else {
             throw AudioError.engineSetupFailed
         }
         
@@ -103,11 +99,10 @@ class AudioService: ObservableObject {
             throw AudioError.invalidFormat
         }
         
-        // ONLY attach nodes here - do NOT connect yet
+        // ONLY attach playerNode - connect directly to mainMixerNode later
         engine.attach(player)
-        engine.attach(mixer)
         
-        print("✅ AudioService: Engine created, nodes attached")
+        print("✅ AudioService: Engine created, playerNode attached")
     }
     
     // MARK: - Step 4, 5, 6, 7: Install Tap, Connect, Prepare, Start
@@ -117,34 +112,46 @@ class AudioService: ObservableObject {
         guard let engine = audioEngine,
               let input = inputNode,
               let player = playerNode,
-              let mixer = mixerNode,
               let apiFormat = apiFormat else {
             throw AudioError.engineSetupFailed
         }
         
-        // Get hardware format from input node
-        hardwareFormat = input.inputFormat(forBus: 0)
+        // FIX #3: Get hardware format with retry logic for Bluetooth/delayed devices
+        var hwFormat: AVAudioFormat?
+        for attempt in 1...5 {
+            let format = input.inputFormat(forBus: 0)
+            if format.sampleRate > 0 && format.channelCount > 0 {
+                hwFormat = format
+                break
+            }
+            print("⏳ AudioService: Waiting for valid input format (attempt \(attempt)/5)")
+            usleep(50000) // 50ms delay
+        }
         
-        guard let hwFormat = hardwareFormat, hwFormat.sampleRate > 0 else {
+        guard let hardwareFormat = hwFormat, hardwareFormat.sampleRate > 0 else {
+            print("❌ AudioService: Failed to get valid hardware format after retries")
             throw AudioError.invalidFormat
         }
         
-        print("📊 AudioService: Hardware format - \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount) ch")
+        self.hardwareFormat = hardwareFormat
+        print("📊 AudioService: Hardware format - \(hardwareFormat.sampleRate)Hz, \(hardwareFormat.channelCount) ch, \(hardwareFormat.commonFormat.rawValue)")
         
-        // Create format converter if needed
-        if hwFormat.sampleRate != apiFormat.sampleRate || hwFormat.channelCount != apiFormat.channelCount {
-            formatConverter = AVAudioConverter(from: hwFormat, to: apiFormat)
-            print("🔄 AudioService: Format converter created")
+        // Create format converter (hardware is always Float32, we need PCM16)
+        formatConverter = AVAudioConverter(from: hardwareFormat, to: apiFormat)
+        if formatConverter != nil {
+            print("🔄 AudioService: Format converter created: \(hardwareFormat.sampleRate)Hz Float32 → \(apiFormat.sampleRate)Hz PCM16")
+        } else {
+            print("⚠️ AudioService: Failed to create format converter")
         }
         
         // Calculate buffer size
-        let bufferSize = AVAudioFrameCount(hwFormat.sampleRate * (AudioConfig.bufferDurationMs / 1000.0))
+        let bufferSize = AVAudioFrameCount(hardwareFormat.sampleRate * (AudioConfig.bufferDurationMs / 1000.0))
         
         // STEP 4: Install input tap BEFORE starting engine
         let converter = formatConverter
         let targetFormat = apiFormat
         
-        input.installTap(onBus: 0, bufferSize: bufferSize, format: hwFormat) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: bufferSize, format: hardwareFormat) { [weak self] buffer, _ in
             // ⚠️ CRITICAL: This runs on real-time audio thread
             // NO async, NO Task, NO MainActor - process synchronously
             self?.processAudioBufferOnAudioThread(buffer, converter: converter, targetFormat: targetFormat)
@@ -153,6 +160,7 @@ class AudioService: ObservableObject {
         print("🎤 AudioService: Input tap installed")
         
         // STEP 5: Connect nodes AFTER tap installed
+        // FIX #1: Connect playerNode directly to mainMixerNode (no custom mixer)
         let playbackFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: AudioConfig.sampleRate,
@@ -160,10 +168,9 @@ class AudioService: ObservableObject {
             interleaved: false
         )!
         
-        engine.connect(player, to: mixer, format: playbackFormat)
-        engine.connect(mixer, to: engine.mainMixerNode, format: playbackFormat)
+        engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
         
-        print("🔗 AudioService: Nodes connected")
+        print("🔗 AudioService: PlayerNode connected directly to mainMixerNode")
         
         // STEP 6: Prepare engine
         engine.prepare()
@@ -179,6 +186,7 @@ class AudioService: ObservableObject {
     
     /// Process audio buffer synchronously on audio thread
     /// ⚠️ This must NOT use async, Task, or MainActor
+    /// FIX #2: Always expect Float32 from hardware - that's what iOS always provides
     private nonisolated func processAudioBufferOnAudioThread(
         _ buffer: AVAudioPCMBuffer,
         converter: AVAudioConverter?,
@@ -186,37 +194,37 @@ class AudioService: ObservableObject {
     ) {
         guard buffer.frameLength > 0 else { return }
         
-        // Calculate levels and extract waveform on audio thread
-        var inputLevelValue: Float = 0
-        var waveformData: [Float] = []
-        var audioData: Data?
-        
-        // Process based on buffer format
-        if let floatData = buffer.floatChannelData {
-            // Float32 format
-            var sum: Float = 0
-            let frameLength = Int(buffer.frameLength)
-            
-            for i in 0..<frameLength {
-                let sample = floatData[0][i]
-                sum += sample * sample
-            }
-            
-            let rms = sqrt(sum / Float(frameLength))
-            inputLevelValue = min(1.0, rms * 3)
-            
-            // Extract waveform samples
-            let sampleCount = 64
-            let step = max(1, frameLength / sampleCount)
-            for i in stride(from: 0, to: min(frameLength, sampleCount * step), by: step) {
-                waveformData.append(abs(floatData[0][i]))
-            }
-            while waveformData.count < sampleCount {
-                waveformData.append(0)
-            }
+        // Hardware audio is ALWAYS Float32 - no need for dual-format handling
+        guard let floatData = buffer.floatChannelData else {
+            print("⚠️ AudioService: Unexpected buffer format - no Float32 data")
+            return
         }
         
-        // Convert to API format
+        let frameLength = Int(buffer.frameLength)
+        
+        // Calculate input level from Float32 samples
+        var sum: Float = 0
+        for i in 0..<frameLength {
+            let sample = floatData[0][i]
+            sum += sample * sample
+        }
+        let rms = sqrt(sum / Float(frameLength))
+        let inputLevelValue = min(1.0, rms * 3) // Amplify for visual feedback
+        
+        // Extract waveform samples from Float32
+        var waveformData: [Float] = []
+        let sampleCount = 64
+        let step = max(1, frameLength / sampleCount)
+        for i in stride(from: 0, to: min(frameLength, sampleCount * step), by: step) {
+            waveformData.append(abs(floatData[0][i]))
+        }
+        while waveformData.count < sampleCount {
+            waveformData.append(0)
+        }
+        
+        // Convert Float32 to PCM16 for API
+        var audioData: Data?
+        
         if let converter = converter {
             let ratio = targetFormat.sampleRate / buffer.format.sampleRate
             let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 100
@@ -241,61 +249,22 @@ class AudioService: ObservableObject {
             }
             
             if error == nil, convertedBuffer.frameLength > 0, let channelData = convertedBuffer.int16ChannelData {
-                let frameLength = Int(convertedBuffer.frameLength)
-                audioData = Data(bytes: channelData.pointee, count: frameLength * MemoryLayout<Int16>.size)
-                
-                // Update waveform from converted buffer
-                waveformData = []
-                let sampleCount = 64
-                let step = max(1, frameLength / sampleCount)
-                for i in stride(from: 0, to: min(frameLength, sampleCount * step), by: step) {
-                    let normalizedSample = Float(channelData.pointee[i]) / Float(Int16.max)
-                    waveformData.append(abs(normalizedSample))
-                }
-                while waveformData.count < sampleCount {
-                    waveformData.append(0)
-                }
-            }
-        } else if let int16Data = buffer.int16ChannelData {
-            // No conversion needed - already in target format
-            let frameLength = Int(buffer.frameLength)
-            audioData = Data(bytes: int16Data.pointee, count: frameLength * MemoryLayout<Int16>.size)
-            
-            // Calculate level from int16 data
-            var sum: Float = 0
-            for i in 0..<frameLength {
-                let sample = Float(int16Data[0][i]) / Float(Int16.max)
-                sum += sample * sample
-            }
-            let rms = sqrt(sum / Float(frameLength))
-            inputLevelValue = min(1.0, rms * 3)
-            
-            // Extract waveform
-            waveformData = []
-            let sampleCount = 64
-            let step = max(1, frameLength / sampleCount)
-            for i in stride(from: 0, to: min(frameLength, sampleCount * step), by: step) {
-                let normalizedSample = Float(int16Data[0][i]) / Float(Int16.max)
-                waveformData.append(abs(normalizedSample))
-            }
-            while waveformData.count < sampleCount {
-                waveformData.append(0)
+                let convertedFrameLength = Int(convertedBuffer.frameLength)
+                audioData = Data(bytes: channelData.pointee, count: convertedFrameLength * MemoryLayout<Int16>.size)
             }
         }
         
-        // Send updates via processing queue (NOT main thread for audio callback)
+        // Send updates to main thread
         sendUIUpdates(level: inputLevelValue, waveform: waveformData, audio: audioData)
     }
     
-    /// Send UI updates from audio processing queue to main thread
+    /// Send UI updates from audio thread to main thread
     private nonisolated func sendUIUpdates(level: Float, waveform: [Float], audio: Data?) {
-        // Use DispatchQueue.main.async for UI updates - this is safe from audio thread
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.inputLevel = level
             self.waveformSamples = waveform
             
-            // Call audio callback
             if let audioData = audio {
                 self.onAudioData?(audioData)
             }
@@ -361,12 +330,11 @@ class AudioService: ObservableObject {
         if audioEngine == nil {
             try setupAudioSession()
             try createEngineAndAttachNodes()
-            
-            // For playback-only, we still need to connect nodes
-            guard let engine = audioEngine,
-                  let player = playerNode,
-                  let mixer = mixerNode else {
-                throw AudioError.engineSetupFailed
+        
+            // For playback-only, connect player directly to mainMixerNode
+        guard let engine = audioEngine,
+                  let player = playerNode else {
+            throw AudioError.engineSetupFailed
             }
             
             let playbackFormat = AVAudioFormat(
@@ -376,21 +344,24 @@ class AudioService: ObservableObject {
                 interleaved: false
             )!
             
-            engine.connect(player, to: mixer, format: playbackFormat)
-            engine.connect(mixer, to: engine.mainMixerNode, format: playbackFormat)
+            // FIX #1: Connect directly to mainMixerNode (no custom mixer)
+            engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
             
             engine.prepare()
-            try engine.start()
+                    try engine.start()
             isEngineRunning = true
         }
         
-        guard let player = playerNode else {
-            throw AudioError.engineSetupFailed
+        guard let player = playerNode, let engine = audioEngine else {
+                throw AudioError.engineSetupFailed
         }
         
-        // VALIDATION: Verify player node is connected before playing
-        guard player.outputFormat(forBus: 0).sampleRate > 0 else {
-            print("❌ AudioService: PlayerNode not connected - cannot play")
+        // FIX #4: Comprehensive validation - check format AND engine connection state
+        let format = player.outputFormat(forBus: 0)
+        guard format.channelCount > 0,
+              format.sampleRate > 0,
+              engine.outputNode.engine != nil else {
+            print("❌ AudioService: PlayerNode not properly connected - channelCount: \(format.channelCount), sampleRate: \(format.sampleRate), engineConnected: \(engine.outputNode.engine != nil)")
             throw AudioError.playbackFailed
         }
         
@@ -403,10 +374,13 @@ class AudioService: ObservableObject {
     /// Play PCM16 audio data (24kHz, mono)
     @MainActor
     func playAudio(_ audioData: Data) {
-        guard isPlaying, let player = playerNode else { return }
+        guard isPlaying, let player = playerNode, let engine = audioEngine else { return }
         
-        // Verify player is still connected
-        guard player.outputFormat(forBus: 0).sampleRate > 0 else {
+        // FIX #4: Comprehensive validation before playing
+        let format = player.outputFormat(forBus: 0)
+        guard format.channelCount > 0,
+              format.sampleRate > 0,
+              engine.outputNode.engine != nil else {
             print("⚠️ AudioService: PlayerNode disconnected, skipping audio")
             return
         }
@@ -441,8 +415,9 @@ class AudioService: ObservableObject {
         
         guard let floatData = buffer.floatChannelData else { return nil }
         
-        data.withUnsafeBytes { bytes in
-            let int16Pointer = bytes.bindMemory(to: Int16.self)
+        // Convert PCM16 to Float32 for playback
+            data.withUnsafeBytes { bytes in
+                let int16Pointer = bytes.bindMemory(to: Int16.self)
             for i in 0..<frameCount {
                 floatData[0][i] = Float(int16Pointer[i]) / Float(Int16.max)
             }
@@ -494,7 +469,6 @@ class AudioService: ObservableObject {
         audioEngine = nil
         inputNode = nil
         playerNode = nil
-        mixerNode = nil
         formatConverter = nil
         hardwareFormat = nil
         isEngineRunning = false

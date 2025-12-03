@@ -30,6 +30,7 @@ class RealtimeService:
         self.openai_ws: Optional[websockets.WebSocketClientProtocol] = None
         self.is_connected = False
         self.conversation_id: Optional[str] = None
+        self._keepalive_interval = 20  # seconds
     
     async def connect(self, user_id: str, conversation_id: Optional[str] = None) -> bool:
         """
@@ -68,12 +69,31 @@ class RealtimeService:
     async def disconnect(self):
         """Disconnect from OpenAI Realtime API"""
         try:
+            self.is_connected = False  # Set first to stop keepalive
             if self.openai_ws:
                 await self.openai_ws.close()
-            self.is_connected = False
             logger.info('Disconnected from OpenAI Realtime API')
         except Exception as e:
             logger.error(f'Error disconnecting: {str(e)}')
+    
+    async def keepalive(self):
+        """
+        Send periodic pings to OpenAI to keep connection alive.
+        OpenAI Realtime requires pings every ~30 seconds or connection drops.
+        """
+        while self.is_connected and self.openai_ws:
+            try:
+                await asyncio.sleep(self._keepalive_interval)
+                if self.is_connected and self.openai_ws:
+                    await self.openai_ws.ping()
+                    logger.debug('Sent keepalive ping to OpenAI')
+            except ConnectionClosed:
+                logger.info('OpenAI connection closed during keepalive')
+                self.is_connected = False
+                break
+            except Exception as e:
+                logger.error(f'Keepalive error: {str(e)}')
+                break
     
     async def send_audio(self, audio_data: bytes):
         """
@@ -90,9 +110,9 @@ class RealtimeService:
             # Convert audio to base64
             audio_base64 = base64.b64encode(audio_data).decode('utf-8')
             
-            # Send audio.input event
+            # FIX #1: Use correct event name (NOT conversation.item.input_audio_buffer.append)
             message = {
-                "type": "conversation.item.input_audio_buffer.append",
+                "type": "input_audio_buffer.append",
                 "audio": audio_base64
             }
             
@@ -102,9 +122,77 @@ class RealtimeService:
             logger.error(f'Error sending audio: {str(e)}')
             raise
     
+    async def commit_audio_buffer(self):
+        """
+        Commit the current audio buffer to trigger VAD/transcription.
+        Call this after sending audio when using manual turn detection.
+        """
+        if not self.is_connected or not self.openai_ws:
+            return
+        
+        try:
+            await self.openai_ws.send(json.dumps({
+                "type": "input_audio_buffer.commit"
+            }))
+            logger.debug('Committed audio buffer')
+        except Exception as e:
+            logger.error(f'Error committing audio buffer: {str(e)}')
+    
+    async def clear_audio_buffer(self):
+        """
+        Clear the input audio buffer.
+        FIX #2: Should be called after response.done to prevent buffer overflow.
+        """
+        if not self.is_connected or not self.openai_ws:
+            return
+        
+        try:
+            await self.openai_ws.send(json.dumps({
+                "type": "input_audio_buffer.clear"
+            }))
+            logger.debug('Cleared audio buffer')
+        except Exception as e:
+            logger.error(f'Error clearing audio buffer: {str(e)}')
+    
+    async def cancel_response(self):
+        """
+        Cancel an in-progress response from the assistant.
+        Useful for interruption handling.
+        """
+        if not self.is_connected or not self.openai_ws:
+            return
+        
+        try:
+            await self.openai_ws.send(json.dumps({
+                "type": "response.cancel"
+            }))
+            logger.debug('Cancelled response')
+        except Exception as e:
+            logger.error(f'Error cancelling response: {str(e)}')
+    
+    async def create_response(self):
+        """
+        Explicitly request a response from the assistant.
+        Useful when not using VAD or after manual commit.
+        """
+        if not self.is_connected or not self.openai_ws:
+            return
+        
+        try:
+            await self.openai_ws.send(json.dumps({
+                "type": "response.create"
+            }))
+            logger.debug('Requested response creation')
+        except Exception as e:
+            logger.error(f'Error creating response: {str(e)}')
+    
     async def send_text(self, text: str):
         """
         Send text input to OpenAI Realtime API
+        
+        NOTE (FIX #3): This uses the legacy conversation.item.create syntax.
+        The new protocol supports {"type": "input_text", "text": "..."} directly,
+        but the legacy format is stable and widely supported. Keeping for compatibility.
         
         Args:
             text: Text to send
@@ -114,6 +202,8 @@ class RealtimeService:
             return
         
         try:
+            # LEGACY SYNTAX (stable, widely supported)
+            # New syntax would be: {"type": "input_text", "text": text}
             message = {
                 "type": "conversation.item.create",
                 "item": {
@@ -273,4 +363,3 @@ class RealtimeService:
         except Exception as e:
             logger.error(f'Error processing audio chunk: {str(e)}')
             return None
-

@@ -2,7 +2,7 @@
 WebSocket Routes
 
 WebSocket endpoints for real-time communication with OpenAI Realtime API
-Optimized for low-latency binary audio streaming
+Optimized for low-latency binary audio streaming with proper buffering
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
@@ -17,24 +17,72 @@ import asyncio
 
 router = APIRouter()
 
-# Message type constants for binary protocol
-BINARY_MSG_AUDIO = 0x01  # Audio data frame
 
+# =============================================================================
+# Audio Buffer for batching small audio deltas into playable chunks
+# =============================================================================
+
+class AudioBuffer:
+    """
+    Buffer audio deltas until we have enough for smooth playback.
+    OpenAI sends 10-20ms chunks; we buffer to ~100-200ms for AVAudioEngine.
+    """
+    
+    def __init__(self, target_frames: int = 4800):
+        """
+        Args:
+            target_frames: Target buffer size in frames (4800 = 200ms @ 24kHz)
+        """
+        self.buffer = bytearray()
+        self.target_bytes = target_frames * 2  # PCM16 = 2 bytes per frame
+    
+    def add(self, data: bytes) -> Optional[bytes]:
+        """
+        Add audio data to buffer. Returns buffered data when target reached.
+        
+        Args:
+            data: Raw PCM16 audio bytes
+            
+        Returns:
+            Buffered audio bytes when target reached, None otherwise
+        """
+        self.buffer.extend(data)
+        if len(self.buffer) >= self.target_bytes:
+            result = bytes(self.buffer)
+            self.buffer.clear()
+            return result
+        return None
+    
+    def flush(self) -> Optional[bytes]:
+        """Flush remaining buffer contents."""
+        if len(self.buffer) > 0:
+            result = bytes(self.buffer)
+            self.buffer.clear()
+            return result
+        return None
+
+
+# =============================================================================
+# Main WebSocket Endpoint
+# =============================================================================
 
 @router.websocket('/realtime')
 async def realtime_websocket(websocket: WebSocket):
     """
     WebSocket endpoint for OpenAI Realtime API voice conversation
     
-    Handles bidirectional audio streaming and function calls
+    Protocol:
+    1. Client connects
+    2. Client sends init message: {"type": "init", "audio_format": "pcm16", "sample_rate": 24000}
+    3. Server connects to OpenAI and sends ready message
+    4. Bidirectional audio/text streaming begins
     """
     await websocket.accept()
     
-    # Try to get user from query params or headers (for authentication)
     user_id = 'anonymous'
     user = None
     
-    # Check for auth token in query params or headers
+    # Authenticate user from query params or headers
     query_params = dict(websocket.query_params)
     auth_token = query_params.get('token') or websocket.headers.get('authorization', '').replace('Bearer ', '')
     
@@ -43,7 +91,6 @@ async def realtime_websocket(websocket: WebSocket):
             from app.db.queries.sessions import find_session_by_token
             from app.db.queries.users import find_user_by_id
             
-            # Verify session token
             session_obj = await find_session_by_token(auth_token)
             if session_obj:
                 user_id_from_session = session_obj.get('user_id')
@@ -54,15 +101,32 @@ async def realtime_websocket(websocket: WebSocket):
                         user_id = user.get('id', 'anonymous')
         except Exception as e:
             logger.debug(f'WebSocket auth failed: {str(e)}', userId='anonymous')
-            pass  # Continue as anonymous if auth fails
     
     logger.info('Realtime WebSocket connection established', userId=user_id)
     
     realtime_service = None
     function_executor = None
+    keepalive_task = None
+    receive_task = None
+    audio_buffer = AudioBuffer(target_frames=4800)  # 200ms @ 24kHz
     
     try:
-        # Initialize realtime service
+        # STEP 1: Wait for optional init message (with timeout)
+        # This allows client to declare audio format, but we don't require it for backwards compat
+        client_config = {'audio_format': 'pcm16', 'sample_rate': 24000}
+        try:
+            first_msg = await asyncio.wait_for(websocket.receive(), timeout=2.0)
+            if 'text' in first_msg:
+                data = json.loads(first_msg['text'])
+                if data.get('type') == 'init':
+                    client_config['audio_format'] = data.get('audio_format', 'pcm16')
+                    client_config['sample_rate'] = data.get('sample_rate', 24000)
+                    logger.info(f'Client init: {client_config}', userId=user_id)
+        except asyncio.TimeoutError:
+            # No init message, continue with defaults
+            pass
+        
+        # STEP 2: Initialize realtime service and connect to OpenAI
         realtime_service = RealtimeService()
         connected = await realtime_service.connect(user_id)
         
@@ -74,62 +138,64 @@ async def realtime_websocket(websocket: WebSocket):
             await websocket.close()
             return
         
-        # Initialize function executor if user is authenticated
+        # Initialize function executor if authenticated
         if user:
             function_executor = FunctionExecutor(user_id, user)
         
-        # Create session
+        # Create OpenAI session
         await realtime_service.create_session(user_id)
         
-        # Send ready message
-        await websocket.send_json({
-            'type': 'realtime_ready',
-            'message': 'Connected to OpenAI Realtime API'
-        })
-        
-        # Start receiving messages from OpenAI Realtime API
-        receive_task = asyncio.create_task(
-            _forward_openai_messages(realtime_service, websocket, user_id, function_executor)
+        # STEP 3: Start keepalive task to ping OpenAI
+        keepalive_task = asyncio.create_task(
+            realtime_service.keepalive()
         )
         
-        # Handle messages from client
-        try:
-            while True:
-                # Receive message from client
-                try:
-                    message = await websocket.receive()
-                    
-                    if 'text' in message:
-                        data = json.loads(message['text'])
-                        await _handle_client_message(
-                            data, realtime_service, websocket, function_executor, user_id
-                        )
-                    elif 'bytes' in message:
-                        # Binary audio data
-                        audio_data = message['bytes']
-                        await realtime_service.send_audio(audio_data)
-                    
-                except WebSocketDisconnect:
-                    break
-                except Exception as e:
-                    logger.error(f'Error handling client message: {str(e)}', userId=user_id)
-                    # Only send error if WebSocket is still connected
-                    try:
-                        await websocket.send_json({
-                            'type': 'error',
-                            'message': f'Error processing message: {str(e)}'
-                        })
-                    except (WebSocketDisconnect, RuntimeError):
-                        # WebSocket already closed, break the loop
-                        break
+        # Send ready message to client
+        await websocket.send_json({
+            'type': 'realtime_ready',
+            'message': 'Connected to OpenAI Realtime API',
+            'config': client_config
+        })
         
-        finally:
-            receive_task.cancel()
+        # STEP 4: Start receiving messages from OpenAI
+        receive_task = asyncio.create_task(
+            _forward_openai_messages(realtime_service, websocket, user_id, function_executor, audio_buffer)
+        )
+        
+        # STEP 5: Handle messages from client with timeout for clean shutdown
+        running = True
+        while running:
             try:
-                await receive_task
-            except asyncio.CancelledError:
-                pass
-            
+                # Use timeout to allow checking if we should exit
+                message = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+                
+                if 'text' in message:
+                    data = json.loads(message['text'])
+                    await _handle_client_message(
+                        data, realtime_service, websocket, function_executor, user_id
+                    )
+                elif 'bytes' in message:
+                    # Binary audio data - forward directly to OpenAI
+                    audio_data = message['bytes']
+                    await realtime_service.send_audio(audio_data)
+                    
+            except asyncio.TimeoutError:
+                # No message received, check if we should continue
+                if not realtime_service.is_connected:
+                    running = False
+                continue
+            except WebSocketDisconnect:
+                running = False
+            except Exception as e:
+                logger.error(f'Error handling client message: {str(e)}', userId=user_id)
+                try:
+                    await websocket.send_json({
+                        'type': 'error',
+                        'message': f'Error processing message: {str(e)}'
+                    })
+                except:
+                    running = False
+        
     except WebSocketDisconnect:
         logger.info('Client WebSocket disconnected', userId=user_id)
     except Exception as e:
@@ -142,29 +208,99 @@ async def realtime_websocket(websocket: WebSocket):
         except:
             pass
     finally:
+        # Clean up tasks
+        if keepalive_task:
+            keepalive_task.cancel()
+            try:
+                await keepalive_task
+            except asyncio.CancelledError:
+                pass
+        
+        if receive_task:
+            receive_task.cancel()
+            try:
+                await receive_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Flush any remaining audio buffer
+        if audio_buffer:
+            remaining = audio_buffer.flush()
+            if remaining:
+                try:
+                    await websocket.send_bytes(remaining)
+                except:
+                    pass
+        
         if realtime_service:
             await realtime_service.disconnect()
+        
         logger.info('Realtime WebSocket connection closed', userId=user_id)
 
+
+# =============================================================================
+# Forward OpenAI Messages to Client
+# =============================================================================
 
 async def _forward_openai_messages(
     realtime_service: RealtimeService,
     websocket: WebSocket,
     user_id: str,
-    function_executor: Optional[FunctionExecutor] = None
+    function_executor: Optional[FunctionExecutor],
+    audio_buffer: AudioBuffer
 ):
-    """Forward messages from OpenAI Realtime API to client
+    """
+    Forward messages from OpenAI Realtime API to client.
     
-    Audio is sent as raw binary for low latency.
+    Audio is buffered and sent as raw binary for low latency.
     Text/control messages are sent as JSON.
     """
     try:
         async for message in realtime_service.receive_messages():
             msg_type = message.get('type', '')
             
-            # Handle different message types
-            if msg_type == 'conversation.item.input_audio_transcription.completed':
-                # Transcript from user speech
+            # =================================================================
+            # AUDIO HANDLING (with buffering)
+            # =================================================================
+            
+            if msg_type == 'response.audio.delta':
+                # Audio chunk from AI - buffer before sending
+                audio_base64 = message.get('delta', '')
+                if audio_base64:
+                    try:
+                        audio_bytes = base64.b64decode(audio_base64)
+                        # Buffer audio until we have enough for smooth playback
+                        buffered = audio_buffer.add(audio_bytes)
+                        if buffered:
+                            await websocket.send_bytes(buffered)
+                    except Exception as e:
+                        logger.error(f'Error decoding audio delta: {str(e)}', userId=user_id)
+            
+            elif msg_type == 'response.audio.done':
+                # Audio stream complete - flush buffer
+                remaining = audio_buffer.flush()
+                if remaining:
+                    await websocket.send_bytes(remaining)
+                await websocket.send_json({'type': 'realtime_audio_done'})
+            
+            # Handle second audio type: conversation.item.output_audio.added
+            elif msg_type == 'conversation.item.output_audio.added':
+                item = message.get('item', {})
+                audio_base64 = item.get('audio', '')
+                if audio_base64:
+                    try:
+                        audio_bytes = base64.b64decode(audio_base64)
+                        # This is typically a complete audio file, send directly
+                        await websocket.send_bytes(audio_bytes)
+                    except Exception as e:
+                        logger.error(f'Error decoding output audio: {str(e)}', userId=user_id)
+            
+            # =================================================================
+            # TRANSCRIPT HANDLING
+            # =================================================================
+            
+            elif msg_type == 'conversation.item.input_audio_transcription.completed':
+                # User speech transcript
                 transcript = message.get('transcript', '')
                 await websocket.send_json({
                     'type': 'realtime_transcript',
@@ -173,18 +309,8 @@ async def _forward_openai_messages(
                     'source': 'user'
                 })
             
-            elif msg_type == 'response.audio.delta':
-                # Audio chunk from AI - send as raw binary for low latency
-                audio_base64 = message.get('delta', '')
-                if audio_base64:
-                    try:
-                        audio_bytes = base64.b64decode(audio_base64)
-                        await websocket.send_bytes(audio_bytes)
-                    except Exception as e:
-                        logger.error(f'Error decoding audio: {str(e)}', userId=user_id)
-            
             elif msg_type == 'response.audio_transcript.delta':
-                # Partial transcript of AI response (for live captions)
+                # Partial AI transcript (live captions)
                 delta = message.get('delta', '')
                 if delta:
                     await websocket.send_json({
@@ -195,7 +321,7 @@ async def _forward_openai_messages(
                     })
             
             elif msg_type == 'response.audio_transcript.done':
-                # Final transcript of AI response
+                # Final AI transcript
                 transcript = message.get('transcript', '')
                 await websocket.send_json({
                     'type': 'realtime_transcript',
@@ -204,41 +330,131 @@ async def _forward_openai_messages(
                     'source': 'assistant'
                 })
             
+            # =================================================================
+            # VAD / INPUT BUFFER EVENTS (forward all input_audio_buffer.*)
+            # =================================================================
+            
             elif msg_type == 'input_audio_buffer.speech_started':
-                # User started speaking (VAD detected)
                 await websocket.send_json({
                     'type': 'realtime_speech_started',
                     'audio_start_ms': message.get('audio_start_ms', 0)
                 })
             
             elif msg_type == 'input_audio_buffer.speech_stopped':
-                # User stopped speaking (VAD detected)
                 await websocket.send_json({
                     'type': 'realtime_speech_stopped',
                     'audio_end_ms': message.get('audio_end_ms', 0)
                 })
             
-            elif msg_type == 'response.done':
-                # Response completed
+            elif msg_type == 'input_audio_buffer.committed':
                 await websocket.send_json({
-                    'type': 'realtime_response_done'
+                    'type': 'realtime_input_committed',
+                    'item_id': message.get('item_id', '')
+                })
+            
+            elif msg_type == 'input_audio_buffer.cleared':
+                await websocket.send_json({
+                    'type': 'realtime_input_cleared'
+                })
+            
+            # =================================================================
+            # RESPONSE EVENTS (forward all response.*)
+            # =================================================================
+            
+            elif msg_type == 'response.created':
+                await websocket.send_json({
+                    'type': 'realtime_response_created',
+                    'response_id': message.get('response', {}).get('id', '')
+                })
+            
+            elif msg_type == 'response.done':
+                # Flush any remaining audio before signaling done
+                remaining = audio_buffer.flush()
+                if remaining:
+                    await websocket.send_bytes(remaining)
+                await websocket.send_json({
+                    'type': 'realtime_response_done',
+                    'response': message.get('response', {})
+                })
+                
+                # FIX #2: Clear input buffer after response completes
+                # This prevents double buffer commits and buffer overflow issues
+                await realtime_service.clear_audio_buffer()
+            
+            elif msg_type == 'response.output_item.added':
+                await websocket.send_json({
+                    'type': 'realtime_output_item_added',
+                    'item': message.get('item', {})
+                })
+            
+            elif msg_type == 'response.output_item.done':
+                await websocket.send_json({
+                    'type': 'realtime_output_item_done',
+                    'item': message.get('item', {})
+                })
+            
+            elif msg_type == 'response.content_part.added':
+                await websocket.send_json({
+                    'type': 'realtime_content_part_added',
+                    'part': message.get('part', {})
+                })
+            
+            elif msg_type == 'response.content_part.done':
+                await websocket.send_json({
+                    'type': 'realtime_content_part_done',
+                    'part': message.get('part', {})
+                })
+            
+            elif msg_type == 'response.text.delta':
+                await websocket.send_json({
+                    'type': 'realtime_text_delta',
+                    'delta': message.get('delta', '')
+                })
+            
+            elif msg_type == 'response.text.done':
+                await websocket.send_json({
+                    'type': 'realtime_text_done',
+                    'text': message.get('text', '')
+                })
+            
+            # =================================================================
+            # CONVERSATION ITEM EVENTS (forward all conversation.item.*)
+            # =================================================================
+            
+            elif msg_type == 'conversation.item.created':
+                await websocket.send_json({
+                    'type': 'realtime_item_created',
+                    'item': message.get('item', {})
+                })
+            
+            elif msg_type == 'conversation.item.truncated':
+                await websocket.send_json({
+                    'type': 'realtime_item_truncated',
+                    'item_id': message.get('item_id', '')
+                })
+            
+            elif msg_type == 'conversation.item.deleted':
+                await websocket.send_json({
+                    'type': 'realtime_item_deleted',
+                    'item_id': message.get('item_id', '')
                 })
             
             elif msg_type == 'conversation.item.output_item.added':
-                # New output item
                 item = message.get('item', {})
                 if item.get('type') == 'message':
                     content = item.get('content', [])
                     for part in content:
                         if part.get('type') == 'output_text':
-                            text = part.get('text', '')
                             await websocket.send_json({
                                 'type': 'realtime_response',
-                                'text': text
+                                'text': part.get('text', '')
                             })
             
+            # =================================================================
+            # FUNCTION CALL HANDLING
+            # =================================================================
+            
             elif msg_type == 'response.function_call_arguments_partial':
-                # Function call in progress
                 await websocket.send_json({
                     'type': 'realtime_function_call',
                     'function_name': message.get('name', ''),
@@ -247,7 +463,6 @@ async def _forward_openai_messages(
                 })
             
             elif msg_type == 'response.function_call_arguments_done':
-                # Function call complete - execute it
                 function_name = message.get('name', '')
                 arguments_str = message.get('arguments', '{}')
                 
@@ -255,11 +470,9 @@ async def _forward_openai_messages(
                     arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
                     tool_call_id = message.get('call_id', '')
                     
-                    # Execute function if executor is available
                     if function_executor:
                         result = await function_executor.execute(function_name, arguments, tool_call_id)
                         
-                        # Send function result back to OpenAI
                         await realtime_service.openai_ws.send(json.dumps({
                             'type': 'response.function_call_output',
                             'call_id': tool_call_id,
@@ -287,24 +500,40 @@ async def _forward_openai_messages(
                         'message': str(e)
                     })
             
+            # =================================================================
+            # ERROR HANDLING
+            # =================================================================
+            
             elif msg_type == 'error':
-                # Forward errors to client
                 await websocket.send_json({
                     'type': 'realtime_error',
                     'error': message.get('error', {})
                 })
             
-            # Don't forward all other events to reduce noise
-            # Only forward session events and rate limits
-            elif msg_type in ['session.created', 'session.updated', 'rate_limits.updated']:
+            # =================================================================
+            # SESSION EVENTS
+            # =================================================================
+            
+            elif msg_type in ['session.created', 'session.updated']:
                 await websocket.send_json({
-                    'type': 'realtime_event',
-                    'event': message
+                    'type': 'realtime_session',
+                    'event_type': msg_type,
+                    'session': message.get('session', {})
+                })
+            
+            elif msg_type == 'rate_limits.updated':
+                await websocket.send_json({
+                    'type': 'realtime_rate_limits',
+                    'rate_limits': message.get('rate_limits', [])
                 })
                 
     except Exception as e:
         logger.error(f'Error forwarding OpenAI messages: {str(e)}', userId=user_id)
 
+
+# =============================================================================
+# Handle Client Messages
+# =============================================================================
 
 async def _handle_client_message(
     data: Dict[str, Any],
@@ -313,11 +542,11 @@ async def _handle_client_message(
     function_executor: Optional[FunctionExecutor],
     user_id: str
 ):
-    """Handle messages from client"""
+    """Handle JSON messages from client"""
     msg_type = data.get('type', '')
     
+    # Audio data (base64 encoded - legacy support)
     if msg_type == 'audio':
-        # Audio data from client
         audio_base64 = data.get('audio', '')
         if audio_base64:
             try:
@@ -326,22 +555,65 @@ async def _handle_client_message(
             except Exception as e:
                 logger.error(f'Error sending audio: {str(e)}', userId=user_id)
     
+    # Text message
     elif msg_type == 'text':
-        # Text message from client
         text = data.get('text', '')
         if text:
             await realtime_service.send_text(text)
     
-    elif msg_type == 'stop':
-        # Stop generation
+    # =================================================================
+    # CRITICAL: Forward control messages to OpenAI
+    # =================================================================
+    
+    elif msg_type == 'input_audio_buffer.commit':
+        # Client wants to commit audio buffer and trigger response
+        await realtime_service.openai_ws.send(json.dumps({
+            'type': 'input_audio_buffer.commit'
+        }))
+    
+    elif msg_type == 'input_audio_buffer.clear':
+        # Client wants to clear audio buffer
+        await realtime_service.openai_ws.send(json.dumps({
+            'type': 'input_audio_buffer.clear'
+        }))
+    
+    elif msg_type == 'response.create':
+        # Client explicitly requests AI to respond
+        response_config = data.get('response', {})
+        await realtime_service.openai_ws.send(json.dumps({
+            'type': 'response.create',
+            'response': response_config
+        }))
+    
+    elif msg_type == 'response.cancel':
+        # Cancel current response
         await realtime_service.openai_ws.send(json.dumps({
             'type': 'response.cancel'
         }))
     
+    # Legacy stop command
+    elif msg_type == 'stop':
+        await realtime_service.openai_ws.send(json.dumps({
+            'type': 'response.cancel'
+        }))
+    
+    # Ping/pong for keepalive
     elif msg_type == 'ping':
-        # Keep-alive ping
         await websocket.send_json({'type': 'pong'})
     
+    # Session update
+    elif msg_type == 'session.update':
+        await realtime_service.openai_ws.send(json.dumps(data))
+    
+    # Conversation item operations
+    elif msg_type == 'conversation.item.create':
+        await realtime_service.openai_ws.send(json.dumps(data))
+    
+    elif msg_type == 'conversation.item.truncate':
+        await realtime_service.openai_ws.send(json.dumps(data))
+    
+    elif msg_type == 'conversation.item.delete':
+        await realtime_service.openai_ws.send(json.dumps(data))
+    
     else:
-        logger.warning(f'Unknown message type: {msg_type}', userId=user_id)
-
+        logger.debug(f'Unhandled client message type: {msg_type}', userId=user_id)
