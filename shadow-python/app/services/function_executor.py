@@ -138,11 +138,16 @@ class FunctionExecutor:
                 except Exception as e:
                     logger.warning(f'Failed to extract timezone from calendar: {str(e)}', userId=self.user_id)
             
-            # Format meetings for response with timezone conversion
+            # Format meetings for response - PRESERVE RAW GOOGLE STRUCTURE
+            # This is critical for GPT to properly index and reference meetings
             formatted_meetings = []
-            for m in all_meetings[:20]:  # Limit to 20 meetings
+            for idx, m in enumerate(all_meetings[:20]):  # Limit to 20 meetings
                 try:
-                    # Handle start time - convert to user's timezone
+                    # Start with the FULL RAW Google Calendar event
+                    # This preserves start/end as dicts and attendees as objects
+                    meeting = {**m}
+                    
+                    # Add human-readable formatted times (additive, not replacing)
                     start_obj = m.get('start', {})
                     start_iso = None
                     start_formatted = ''
@@ -152,33 +157,19 @@ class FunctionExecutor:
                     elif isinstance(start_obj, dict):
                         start_iso = start_obj.get('dateTime') or start_obj.get('date', '')
                     
-                    # Convert to user's timezone if we have a datetime
                     if start_iso and 'T' in start_iso:
                         try:
-                            # Parse UTC datetime
                             dt_utc = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
                             if dt_utc.tzinfo is None:
                                 dt_utc = dt_utc.replace(tzinfo=pytz.UTC)
-                            
-                            # Convert to user's timezone
                             dt_user = dt_utc.astimezone(self.tz)
                             start_formatted = dt_user.strftime('%I:%M %p %Z')
-                            logger.debug(
-                                f'Converted meeting time',
-                                userId=self.user_id,
-                                meeting_id=m.get('id'),
-                                utc_time=start_iso,
-                                user_timezone=self.user_timezone,
-                                converted_time=start_formatted
-                            )
                         except Exception as e:
                             logger.warning(f'Error converting start time: {str(e)}', meeting_id=m.get('id'))
                             start_formatted = start_iso
                     elif start_iso:
-                        # All-day event
-                        start_formatted = start_iso
+                        start_formatted = start_iso  # All-day event
                     
-                    # Handle end time - convert to user's timezone
                     end_obj = m.get('end', {})
                     end_iso = None
                     end_formatted = ''
@@ -201,27 +192,18 @@ class FunctionExecutor:
                     elif end_iso:
                         end_formatted = end_iso
                     
-                    # Handle attendees - ensure they're dicts
-                    attendees_list = m.get('attendees', [])
-                    attendee_emails = []
-                    for a in attendees_list:
-                        if isinstance(a, dict):
-                            email = a.get('email', '')
-                            if email:
-                                attendee_emails.append(email)
-                        elif isinstance(a, str):
-                            attendee_emails.append(a)
+                    # Add formatted fields (ADDITIVE - do not replace original structure)
+                    meeting['_index'] = idx + 1  # 1-based index for "prep me for the 3rd one"
+                    meeting['start_formatted'] = start_formatted
+                    meeting['end_formatted'] = end_formatted
+                    meeting['_timezone'] = self.user_timezone
                     
-                    formatted_meetings.append({
-                        'id': m.get('id'),
-                        'summary': m.get('summary', 'Untitled'),
-                        'start': start_formatted or start_iso or '',
-                        'start_iso': start_iso,  # Keep original for reference
-                        'end': end_formatted or end_iso or '',
-                        'end_iso': end_iso,  # Keep original for reference
-                        'timezone': self.user_timezone,  # Include timezone info
-                        'attendees': attendee_emails
-                    })
+                    # Ensure summary has a default
+                    if not meeting.get('summary'):
+                        meeting['summary'] = 'Untitled Meeting'
+                    
+                    formatted_meetings.append(meeting)
+                    
                 except Exception as e:
                     logger.warning(f'Error formatting meeting: {str(e)}', meeting_id=m.get('id'))
                     continue
