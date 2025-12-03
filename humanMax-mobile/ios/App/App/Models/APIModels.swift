@@ -26,6 +26,27 @@ struct MeetingBriefData: Codable {
         case briefData = "brief_data"
     }
     
+    /// Custom decoder with debug logging
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Debug: print all keys present in the container
+        print("🔍 MeetingBriefData decoding - available keys: \(container.allKeys.map { $0.stringValue })")
+        
+        // Decode each field with logging
+        self.oneLiner = try container.decodeIfPresent(String.self, forKey: .oneLiner)
+        print("   one_liner decoded: \(oneLiner ?? "nil")")
+        
+        self.briefReady = try container.decodeIfPresent(Bool.self, forKey: .briefReady)
+        print("   brief_ready decoded: \(briefReady?.description ?? "nil")")
+        
+        self.generatedAt = try container.decodeIfPresent(String.self, forKey: .generatedAt)
+        print("   generated_at decoded: \(generatedAt ?? "nil")")
+        
+        self.briefData = try container.decodeIfPresent(AnyCodable.self, forKey: .briefData)
+        print("   brief_data decoded: \(briefData != nil ? "present" : "nil")")
+    }
+    
     /// Safely check if brief is ready
     var isReady: Bool {
         return briefReady ?? false

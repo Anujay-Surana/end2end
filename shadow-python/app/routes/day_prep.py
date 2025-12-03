@@ -292,10 +292,17 @@ async def get_meetings_for_day(
                 )
         
         # Add brief data to each meeting
+        # Debug: log all meeting IDs and briefs_map keys
+        logger.info(f'briefs_map keys: {list(briefs_map.keys())}', requestId=request_id)
+        
         for meeting in classified_meetings:
             meeting_id = meeting.get('id')
+            logger.info(f'Checking meeting_id={meeting_id}, in briefs_map={meeting_id in briefs_map}', requestId=request_id)
+            
             if meeting_id and meeting_id in briefs_map:
-                meeting['_brief'] = briefs_map[meeting_id]
+                brief_to_attach = briefs_map[meeting_id]
+                logger.info(f'Attaching brief to {meeting_id}: one_liner={brief_to_attach.get("one_liner", "")[:30] if brief_to_attach.get("one_liner") else "NONE"}', requestId=request_id)
+                meeting['_brief'] = brief_to_attach
             else:
                 meeting['_brief'] = {
                     'one_liner': None,
