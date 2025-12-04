@@ -48,20 +48,30 @@ class AudioService {
         // Optimize audio session for low latency
         let audioSession = AVAudioSession.sharedInstance()
         
-        // Use voiceChat mode for lowest latency
+        // Use voiceChat mode to enable system AEC/AGC/NS
         try audioSession.setCategory(
             .playAndRecord,
             mode: .voiceChat,
-            options: [.defaultToSpeaker, .allowBluetooth]
+            options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
         )
         
-        // Set preferred buffer duration to 5ms for ultra-low latency (default is ~23ms)
-        try audioSession.setPreferredIOBufferDuration(0.005)
+        // Set preferred buffer duration to ~10ms for stability on speaker
+        try audioSession.setPreferredIOBufferDuration(0.01)
         
         // Set preferred sample rate
         try audioSession.setPreferredSampleRate(16000)
         
         try audioSession.setActive(true)
+        
+        // Enable voice processing on the input node (keeps mic open but uses AEC)
+        if let input = inputNode, input.isVoiceProcessingEnabled == false {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+            } catch {
+                // Voice processing may not be available on all devices; continue with best effort
+                print("Warning: Voice processing enable failed: \(error)")
+            }
+        }
         
         // Attach and connect player node for audio playback
         engine.attach(playerNode!)
