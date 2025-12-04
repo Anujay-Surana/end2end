@@ -246,10 +246,14 @@ class ConversationManager:
             Created message dict
         """
         try:
+            # Extract meeting_id from metadata if present
+            meeting_id = metadata.get('meeting_id') if metadata else None
+            
             message = await create_chat_message(
                 user_id=user_id,
                 role=role,
                 content=content,
+                meeting_id=meeting_id,
                 metadata=metadata
             )
             

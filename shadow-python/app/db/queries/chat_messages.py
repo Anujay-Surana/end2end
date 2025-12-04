@@ -14,6 +14,7 @@ async def create_chat_message(
     user_id: str,
     role: str,
     content: str,
+    meeting_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
@@ -22,6 +23,7 @@ async def create_chat_message(
         user_id: User UUID
         role: Message role ('user', 'assistant', 'system', 'tool')
         content: Message content
+        meeting_id: Optional meeting ID (Google Calendar event ID)
         metadata: Optional metadata dict
     Returns:
         Created message
@@ -31,6 +33,9 @@ async def create_chat_message(
         'role': role,
         'content': content
     }
+    
+    if meeting_id:
+        message_data['meeting_id'] = meeting_id
     
     if metadata:
         # Ensure metadata is properly formatted as a dict
@@ -253,7 +258,7 @@ async def create_meeting_chat_message(
     Returns:
         Created message
     """
-    # Ensure meeting_id is in metadata
+    # Ensure meeting_id is in metadata for backwards compat
     msg_metadata = metadata.copy() if metadata else {}
     msg_metadata['meeting_id'] = meeting_id
     
@@ -261,6 +266,7 @@ async def create_meeting_chat_message(
         user_id=user_id,
         role=role,
         content=content,
+        meeting_id=meeting_id,
         metadata=msg_metadata
     )
 

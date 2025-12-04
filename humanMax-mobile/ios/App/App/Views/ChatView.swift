@@ -38,8 +38,8 @@ struct ChatView: View {
                             if chatViewModel.isRecording {
                                 await chatViewModel.stopVoiceRecording()
                             } else {
-                                // Pass meeting ID for context injection
-                                await chatViewModel.startVoiceRecording(meetingId: chatViewModel.selectedMeeting?.id)
+                                // Don't pass meetingId - use currentMeetingId set by prepMeeting()
+                                await chatViewModel.startVoiceRecording()
                             }
                         }
                     }) {

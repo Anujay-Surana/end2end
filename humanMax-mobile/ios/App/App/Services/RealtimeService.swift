@@ -468,34 +468,27 @@ class RealtimeService: ObservableObject {
             }
         
         case "realtime_content_part_done":
+            // Log but don't trigger onTranscript - already handled by realtime_transcript
             if let part = json["part"] as? [String: Any],
                let partType = part["type"] as? String {
                 if partType == "text", let text = part["text"] as? String, !text.isEmpty {
-                    assistantTranscript = text
                     print("📝 Content part done (text): \(text.prefix(50))...")
-                    onTranscript?(text, true, "assistant")
                 } else if partType == "audio", let transcript = part["transcript"] as? String, !transcript.isEmpty {
-                    assistantTranscript = transcript
                     print("📝 Content part done (audio transcript): \(transcript.prefix(50))...")
-                    onTranscript?(transcript, true, "assistant")
                 }
             }
         
-        // Handle output items which may contain transcripts
+        // Handle output items - log but don't trigger onTranscript (already handled by realtime_transcript)
         case "realtime_output_item_done":
             if let item = json["item"] as? [String: Any] {
-                // Check for transcript in the item
+                // Log for debugging, but don't call onTranscript (would be duplicate)
                 if let content = item["content"] as? [[String: Any]] {
                     for part in content {
                         if let partType = part["type"] as? String {
                             if partType == "audio", let transcript = part["transcript"] as? String, !transcript.isEmpty {
-                                assistantTranscript = transcript
                                 print("📝 Output item transcript: \(transcript.prefix(50))...")
-                                onTranscript?(transcript, true, "assistant")
                             } else if partType == "text", let text = part["text"] as? String, !text.isEmpty {
-                                assistantTranscript = text
                                 print("📝 Output item text: \(text.prefix(50))...")
-                                onTranscript?(text, true, "assistant")
                             }
                         }
                     }

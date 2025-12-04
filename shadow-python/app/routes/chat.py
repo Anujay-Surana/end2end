@@ -328,11 +328,12 @@ async def save_chat_message_only(
         if request_body.role not in ['user', 'assistant']:
             raise HTTPException(status_code=400, detail='Role must be "user" or "assistant"')
         
-        # Save message with meeting_id in metadata
+        # Save message with meeting_id column AND in metadata for backwards compat
         saved_message = await create_chat_message(
             user_id=user_id,
             role=request_body.role,
             content=request_body.message,
+            meeting_id=request_body.meeting_id,
             metadata={'meeting_id': request_body.meeting_id, 'source': 'voice_realtime'}
         )
         

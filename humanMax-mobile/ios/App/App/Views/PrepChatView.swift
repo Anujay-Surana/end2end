@@ -55,7 +55,8 @@ struct PrepChatView: View {
                             if chatViewModel.isRecording {
                                 await chatViewModel.stopVoiceRecording()
                             } else {
-                                await chatViewModel.startVoiceRecording()
+                                // Pass meeting.id for context injection
+                                await chatViewModel.startVoiceRecording(meetingId: meeting.id)
                             }
                         }
                     }) {
