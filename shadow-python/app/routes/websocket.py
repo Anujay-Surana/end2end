@@ -185,6 +185,7 @@ async def realtime_websocket(websocket: WebSocket):
     meeting_id = query_params.get('meeting_id')
     
     logger.info('Realtime WebSocket connection established', userId=user_id, meetingId=meeting_id)
+    logger.info(f'🔌 WebSocket params: token={bool(auth_token)}, meeting_id={meeting_id}', userId=user_id)
     
     realtime_service = None
     function_executor = None
@@ -211,20 +212,26 @@ async def realtime_websocket(websocket: WebSocket):
         # STEP 1.5: Fetch meeting context if meeting_id provided
         realtime_context = None
         if meeting_id and user:
+            logger.info(f'📋 Fetching meeting context for meeting_id={meeting_id}', userId=user_id)
             try:
                 brief = await get_brief_by_meeting_id(user_id, meeting_id)
                 chat_history = await get_meeting_chat_messages(user_id, meeting_id, limit=20)
                 realtime_context = build_realtime_context(brief, chat_history)
                 logger.info(
-                    f'Built realtime context for meeting',
+                    f'✅ Built realtime context for meeting',
                     userId=user_id,
                     meetingId=meeting_id,
                     briefFound=brief is not None,
                     chatHistoryCount=len(chat_history),
                     contextLength=len(realtime_context) if realtime_context else 0
                 )
+                # Log first 500 chars of context for debugging
+                if realtime_context:
+                    logger.debug(f'📝 Context preview: {realtime_context[:500]}...', userId=user_id)
             except Exception as e:
-                logger.warning(f'Failed to build meeting context: {str(e)}', userId=user_id, meetingId=meeting_id)
+                logger.warning(f'❌ Failed to build meeting context: {str(e)}', userId=user_id, meetingId=meeting_id)
+        else:
+            logger.info(f'⚠️ No meeting context: meeting_id={meeting_id}, user_authenticated={user is not None}', userId=user_id)
         
         # STEP 2: Initialize realtime service and connect to OpenAI
         realtime_service = RealtimeService()
@@ -359,6 +366,10 @@ async def _forward_openai_messages(
         async for message in realtime_service.receive_messages():
             msg_type = message.get('type', '')
             
+            # Log all non-audio messages for debugging
+            if msg_type and not msg_type.startswith('response.audio.delta'):
+                logger.debug(f'📨 OpenAI → Client: {msg_type}', userId=user_id, messageKeys=list(message.keys()))
+            
             # =================================================================
             # AUDIO HANDLING (with buffering)
             # =================================================================
@@ -402,6 +413,7 @@ async def _forward_openai_messages(
             elif msg_type == 'conversation.item.input_audio_transcription.completed':
                 # User speech transcript
                 transcript = message.get('transcript', '')
+                logger.info(f'🎤 User transcript: "{transcript[:100]}..."' if len(transcript) > 100 else f'🎤 User transcript: "{transcript}"', userId=user_id)
                 await websocket.send_json({
                     'type': 'realtime_transcript',
                     'text': transcript,
@@ -423,6 +435,7 @@ async def _forward_openai_messages(
             elif msg_type == 'response.audio_transcript.done':
                 # Final AI transcript
                 transcript = message.get('transcript', '')
+                logger.info(f'🤖 Assistant transcript: "{transcript[:100]}..."' if len(transcript) > 100 else f'🤖 Assistant transcript: "{transcript}"', userId=user_id)
                 await websocket.send_json({
                     'type': 'realtime_transcript',
                     'text': transcript,
@@ -488,9 +501,17 @@ async def _forward_openai_messages(
                 })
             
             elif msg_type == 'response.output_item.done':
+                item = message.get('item', {})
+                # Log any transcript found in the output item
+                content = item.get('content', [])
+                for part in content:
+                    if part.get('type') == 'audio' and part.get('transcript'):
+                        logger.info(f'🤖 Output item transcript: "{part["transcript"][:100]}..."' if len(part.get('transcript', '')) > 100 else f'🤖 Output item transcript: "{part.get("transcript", "")}"', userId=user_id)
+                    elif part.get('type') == 'text' and part.get('text'):
+                        logger.info(f'🤖 Output item text: "{part["text"][:100]}..."' if len(part.get('text', '')) > 100 else f'🤖 Output item text: "{part.get("text", "")}"', userId=user_id)
                 await websocket.send_json({
                     'type': 'realtime_output_item_done',
-                    'item': message.get('item', {})
+                    'item': item
                 })
             
             elif msg_type == 'response.content_part.added':
@@ -500,9 +521,15 @@ async def _forward_openai_messages(
                 })
             
             elif msg_type == 'response.content_part.done':
+                part = message.get('part', {})
+                # Log any transcript or text in content part
+                if part.get('type') == 'audio' and part.get('transcript'):
+                    logger.info(f'🤖 Content part transcript: "{part["transcript"][:100]}..."' if len(part.get('transcript', '')) > 100 else f'🤖 Content part transcript: "{part.get("transcript", "")}"', userId=user_id)
+                elif part.get('type') == 'text' and part.get('text'):
+                    logger.info(f'🤖 Content part text: "{part["text"][:100]}..."' if len(part.get('text', '')) > 100 else f'🤖 Content part text: "{part.get("text", "")}"', userId=user_id)
                 await websocket.send_json({
                     'type': 'realtime_content_part_done',
-                    'part': message.get('part', {})
+                    'part': part
                 })
             
             elif msg_type == 'response.text.delta':

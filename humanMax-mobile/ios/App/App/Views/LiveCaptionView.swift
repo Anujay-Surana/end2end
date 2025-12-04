@@ -137,37 +137,7 @@ enum CaptionSource {
     case assistant
 }
 
-/// Typing indicator animation
-struct TypingIndicator: View {
-    @State private var dotOpacities: [Double] = [0.3, 0.3, 0.3]
-    
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(Color.primary)
-                    .frame(width: 6, height: 6)
-                    .opacity(dotOpacities[index])
-            }
-        }
-        .onAppear {
-            animateDots()
-        }
-    }
-    
-    private func animateDots() {
-        for index in 0..<3 {
-            withAnimation(
-                Animation
-                    .easeInOut(duration: 0.4)
-                    .repeatForever()
-                    .delay(Double(index) * 0.2)
-            ) {
-                dotOpacities[index] = 1.0
-            }
-        }
-    }
-}
+// TypingIndicator is defined in PrepChatView.swift
 
 /// Compact caption view (single line with scroll)
 struct CompactCaptionView: View {
@@ -234,19 +204,7 @@ struct TranscriptHistoryView: View {
     }
 }
 
-/// Transcript message model
-struct TranscriptMessage: Identifiable {
-    let id = UUID()
-    let text: String
-    let isUser: Bool
-    let timestamp: Date
-    
-    init(text: String, isUser: Bool, timestamp: Date = Date()) {
-        self.text = text
-        self.isUser = isUser
-        self.timestamp = timestamp
-    }
-}
+// TranscriptMessage is defined in Models/VoiceModels.swift
 
 // MARK: - Previews
 

@@ -369,6 +369,9 @@ class RealtimeService: ObservableObject {
                let isFinal = json["is_final"] as? Bool {
                 let source = json["source"] as? String ?? "user"
                 
+                // Log transcript for debugging
+                print("📝 Transcript [\(source)] final=\(isFinal): \(transcriptText.prefix(50))...")
+                
                 // Update published transcripts for live captions
                 if source == "user" {
                     if isFinal {
@@ -378,11 +381,17 @@ class RealtimeService: ObservableObject {
                         partialTranscript = transcriptText
                     }
                 } else if source == "assistant" {
+                    // Set responding flag when we start receiving assistant transcripts
+                    if !isResponding {
+                        isResponding = true
+                        print("🤖 Assistant started responding (from transcript)")
+                    }
+                    
                     if isFinal {
                         assistantTranscript = transcriptText
                         partialTranscript = ""
                     } else {
-                        // Accumulate partial assistant transcript
+                        // For partial transcripts, accumulate the delta text
                         partialTranscript += transcriptText
                     }
                 }
@@ -429,10 +438,89 @@ class RealtimeService: ObservableObject {
                     isResponding = true
                 }
             }
+        
+        // Handle text deltas (alternative to audio transcript)
+        case "realtime_text_delta":
+            if let delta = json["delta"] as? String, !delta.isEmpty {
+                if !isResponding {
+                    isResponding = true
+                    print("🤖 Assistant started responding (from text delta)")
+                }
+                partialTranscript += delta
+                print("📝 Text delta: \(delta)")
+            }
+        
+        case "realtime_text_done":
+            if let text = json["text"] as? String, !text.isEmpty {
+                assistantTranscript = text
+                partialTranscript = ""
+                print("📝 Text done: \(text.prefix(50))...")
+                onTranscript?(text, true, "assistant")
+            }
+        
+        // Handle content parts which may contain text
+        case "realtime_content_part_added":
+            if let part = json["part"] as? [String: Any],
+               let partType = part["type"] as? String {
+                if partType == "text", let text = part["text"] as? String {
+                    print("📝 Content part text: \(text.prefix(50))...")
+                }
+            }
+        
+        case "realtime_content_part_done":
+            if let part = json["part"] as? [String: Any],
+               let partType = part["type"] as? String {
+                if partType == "text", let text = part["text"] as? String, !text.isEmpty {
+                    assistantTranscript = text
+                    print("📝 Content part done (text): \(text.prefix(50))...")
+                    onTranscript?(text, true, "assistant")
+                } else if partType == "audio", let transcript = part["transcript"] as? String, !transcript.isEmpty {
+                    assistantTranscript = transcript
+                    print("📝 Content part done (audio transcript): \(transcript.prefix(50))...")
+                    onTranscript?(transcript, true, "assistant")
+                }
+            }
+        
+        // Handle output items which may contain transcripts
+        case "realtime_output_item_done":
+            if let item = json["item"] as? [String: Any] {
+                // Check for transcript in the item
+                if let content = item["content"] as? [[String: Any]] {
+                    for part in content {
+                        if let partType = part["type"] as? String {
+                            if partType == "audio", let transcript = part["transcript"] as? String, !transcript.isEmpty {
+                                assistantTranscript = transcript
+                                print("📝 Output item transcript: \(transcript.prefix(50))...")
+                                onTranscript?(transcript, true, "assistant")
+                            } else if partType == "text", let text = part["text"] as? String, !text.isEmpty {
+                                assistantTranscript = text
+                                print("📝 Output item text: \(text.prefix(50))...")
+                                onTranscript?(text, true, "assistant")
+                            }
+                        }
+                    }
+                }
+            }
+            isResponding = false
+        
+        // Handle response completion
+        case "realtime_response_created":
+            isResponding = true
+            print("🎬 Response started")
+        
+        case "realtime_audio_done":
+            // Audio finished, but transcript might still come
+            print("🔊 Audio done")
+        
+        // Informational messages (reduce log noise)
+        case "realtime_session", "realtime_input_committed", "realtime_input_cleared",
+             "realtime_item_created", "realtime_output_item_added", "realtime_rate_limits":
+            // These are informational, no action needed
+            break
             
         default:
             // Log unknown message types for debugging
-            print("📨 RealtimeService: Unknown message type: \(type)")
+            print("📨 RealtimeService: Unknown message type: \(type) - keys: \(json.keys.sorted())")
         }
     }
     

@@ -28,6 +28,10 @@ struct MeetingPrepView: View {
                     }
                 }
             }
+            .onAppear {
+                // Set the selected meeting for voice context injection
+                chatViewModel.selectedMeeting = meeting
+            }
             .task {
                 await chatViewModel.prepMeeting(meeting)
             }

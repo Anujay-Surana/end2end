@@ -6,30 +6,27 @@ struct User: Codable, Identifiable {
     let email: String
     let name: String?
     let picture: String?
-    let created_at: String?
-    let updated_at: String?
+    let createdAt: String?
+    let updatedAt: String?
 }
 
 /// Authentication response from backend
 struct AuthResponse: Codable {
     let success: Bool
     let user: User?
-    let access_token: String?
+    let accessToken: String?
     let session: Session?
     let error: String?
+    let tokenExpiresAt: String?
 }
 
 /// Session model
+/// Note: Using automatic snake_case conversion from JSONDecoder
+/// So userId maps from "user_id", expiresAt from "expires_at" automatically
 struct Session: Codable {
     let token: String
     let expiresAt: String?
-    let userId: String
-    
-    enum CodingKeys: String, CodingKey {
-        case token
-        case expiresAt = "expires_at"
-        case userId = "user_id"
-    }
+    let userId: String?  // Made optional for safety
 }
 
 /// OAuth callback request
@@ -60,4 +57,3 @@ struct Account: Codable, Identifiable {
     let isPrimary: Bool
     let createdAt: String?
 }
-

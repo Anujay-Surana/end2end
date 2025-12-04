@@ -34,6 +34,16 @@
 		4438119C2EDFAF6300875454 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811832EDFAF6300875454 /* SettingsView.swift */; };
 		4438119D2EDFAF6300875454 /* VoicePrepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811842EDFAF6300875454 /* VoicePrepView.swift */; };
 		4438119E2EDFAF6300875454 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811C52EDFB0C500875454 /* Constants.swift */; };
+		443811A02EDFAF6300875454 /* VoiceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811C72EDFB0C500875454 /* VoiceModels.swift */; };
+		443811A12EDFAF6300875454 /* LiveCaptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811C82EDFB0C500875454 /* LiveCaptionView.swift */; };
+		443811DA2EE0F72400875454 /* TimelineTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811D62EE0F72400875454 /* TimelineTabView.swift */; };
+		443811DB2EE0F72400875454 /* ParticipantsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811D52EE0F72400875454 /* ParticipantsTabView.swift */; };
+		443811DC2EE0F72400875454 /* VUMeterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811D82EE0F72400875454 /* VUMeterView.swift */; };
+		443811DD2EE0F72400875454 /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811D92EE0F72400875454 /* WaveformView.swift */; };
+		443811DE2EE0F72400875454 /* VoiceConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443811D72EE0F72400875454 /* VoiceConversationView.swift */; };
+		443811E02EDFB0C500875454 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 443811B12EDFB0C500875454 /* Assets.xcassets */; };
+		443811E12EDFB0C500875454 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 443811B32EDFB0C500875454 /* LaunchScreen.storyboard */; };
+		443811E22EDFB0C500875454 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 443811B52EDFB0C500875454 /* Main.storyboard */; };
 		B931273957743C2A71AE5CAD /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1950F51798DACA824467B023 /* Pods_App.framework */; };
 		CEDBEBC5534E13CF0CF642FA /* MeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1BFD4C71FA0D84B972E6B33 /* MeetingDetailView.swift */; };
 		E8F1D80CE4909D3835030D2C /* NotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3102FA749B8D9891C33F3CE /* NotesView.swift */; };
@@ -74,6 +84,13 @@
 		443811C22EDFB0C500875454 /* RealtimeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeService.swift; sourceTree = "<group>"; };
 		443811C32EDFB0C500875454 /* VoiceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceService.swift; sourceTree = "<group>"; };
 		443811C52EDFB0C500875454 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
+		443811C72EDFB0C500875454 /* VoiceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceModels.swift; sourceTree = "<group>"; };
+		443811C82EDFB0C500875454 /* LiveCaptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCaptionView.swift; sourceTree = "<group>"; };
+		443811D52EE0F72400875454 /* ParticipantsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParticipantsTabView.swift; sourceTree = "<group>"; };
+		443811D62EE0F72400875454 /* TimelineTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTabView.swift; sourceTree = "<group>"; };
+		443811D72EE0F72400875454 /* VoiceConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceConversationView.swift; sourceTree = "<group>"; };
+		443811D82EE0F72400875454 /* VUMeterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VUMeterView.swift; sourceTree = "<group>"; };
+		443811D92EE0F72400875454 /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8599F4B97FC61AAA6070F851 /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
 		A36CE1A24DE5BDC420D4D0A0 /* HomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -108,6 +125,11 @@
 		443811852EDFAF6300875454 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				443811D52EE0F72400875454 /* ParticipantsTabView.swift */,
+				443811D62EE0F72400875454 /* TimelineTabView.swift */,
+				443811D72EE0F72400875454 /* VoiceConversationView.swift */,
+				443811D82EE0F72400875454 /* VUMeterView.swift */,
+				443811D92EE0F72400875454 /* WaveformView.swift */,
 				4438117D2EDFAF6300875454 /* AuthView.swift */,
 				4438117E2EDFAF6300875454 /* CalendarView.swift */,
 				4438117F2EDFAF6300875454 /* ChatView.swift */,
@@ -121,6 +143,7 @@
 				0D9D9FB80E480A9645A7E183 /* PrepChatView.swift */,
 				E1DE875FF51B48A3D6950BA0 /* ListeningView.swift */,
 				F3102FA749B8D9891C33F3CE /* NotesView.swift */,
+				443811C82EDFB0C500875454 /* LiveCaptionView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -139,6 +162,7 @@
 			children = (
 				443811B82EDFB0C500875454 /* APIModels.swift */,
 				443811B92EDFB0C500875454 /* AuthModels.swift */,
+				443811C72EDFB0C500875454 /* VoiceModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -281,6 +305,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				443811E02EDFB0C500875454 /* Assets.xcassets in Resources */,
+				443811E12EDFB0C500875454 /* LaunchScreen.storyboard in Resources */,
+				443811E22EDFB0C500875454 /* Main.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -320,6 +347,8 @@
 				443811872EDFAF6300875454 /* AppDelegate.swift in Sources */,
 				443811882EDFAF6300875454 /* APIModels.swift in Sources */,
 				443811892EDFAF6300875454 /* AuthModels.swift in Sources */,
+				443811A02EDFAF6300875454 /* VoiceModels.swift in Sources */,
+				443811A12EDFAF6300875454 /* LiveCaptionView.swift in Sources */,
 				4438118A2EDFAF6300875454 /* APIClient.swift in Sources */,
 				4438118B2EDFAF6300875454 /* AudioService.swift in Sources */,
 				4438118C2EDFAF6300875454 /* AuthService.swift in Sources */,
@@ -344,6 +373,11 @@
 				3010676322CE75973347CE4B /* HomeView.swift in Sources */,
 				CEDBEBC5534E13CF0CF642FA /* MeetingDetailView.swift in Sources */,
 				F01536CE314F4EBD54D9C8FC /* PrepChatView.swift in Sources */,
+				443811DA2EE0F72400875454 /* TimelineTabView.swift in Sources */,
+				443811DB2EE0F72400875454 /* ParticipantsTabView.swift in Sources */,
+				443811DC2EE0F72400875454 /* VUMeterView.swift in Sources */,
+				443811DD2EE0F72400875454 /* WaveformView.swift in Sources */,
+				443811DE2EE0F72400875454 /* VoiceConversationView.swift in Sources */,
 				3EC0A978644573278DD2C132 /* ListeningView.swift in Sources */,
 				E8F1D80CE4909D3835030D2C /* NotesView.swift in Sources */,
 			);
@@ -496,11 +530,13 @@
 			baseConfigurationReference = 8599F4B97FC61AAA6070F851 /* Pods-App.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6ND664QW27;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -525,11 +561,13 @@
 			baseConfigurationReference = DD644E365E1CFB90F191964F /* Pods-App.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6ND664QW27;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (

@@ -218,7 +218,7 @@ class AuthService: NSObject, ObservableObject {
             _ = keychainService.storeSessionToken(sessionToken)
         }
         
-        if let accessToken = response.access_token {
+        if let accessToken = response.accessToken {
             _ = keychainService.storeAccessToken(accessToken)
         }
         
