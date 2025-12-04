@@ -239,12 +239,25 @@ class RealtimeService:
             await self.connect(user_id)
         
         try:
+            tool_guidance = (
+                "When you are missing meeting date, time, location, attendees, or agenda, "
+                "call tools instead of guessing:\n"
+                "- Use list_calendar_events with date or start/end + timezone to see meetings.\n"
+                "- Use get_calendar_event when you have an event ID to retrieve exact details (time, location, link).\n"
+                "- Use parallel_search when you need external info or context.\n"
+                "- DO NOT call generate_meeting_brief if a meeting_id/brief is already provided; only use it as a fallback when no brief exists.\n"
+                "Keep answers concise and cite which tool you used."
+            )
+
+            instructions_text = instructions or "You are Shadow, an executive assistant. Be concise and helpful."
+            instructions_text = f"{instructions_text}\n\nTOOLING GUIDANCE:\n{tool_guidance}"
+
             # Create session with 24kHz PCM16 audio format
             session_config = {
                 "type": "session.update",
                 "session": {
                     "modalities": ["text", "audio"],
-                    "instructions": instructions or "You are Shadow, an executive assistant. Be concise and helpful.",
+                    "instructions": instructions_text,
                     "voice": "alloy",
                     "input_audio_format": "pcm16",
                     "output_audio_format": "pcm16",
@@ -260,6 +273,34 @@ class RealtimeService:
                     "tools": [
                         {
                             "type": "function",
+                            "name": "list_calendar_events",
+                            "description": "List calendar events within a date/time window",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "start_iso": {"type": "string", "description": "Start datetime in ISO8601"},
+                                    "end_iso": {"type": "string", "description": "End datetime in ISO8601"},
+                                    "date": {"type": "string", "description": "Date in YYYY-MM-DD (uses timezone)"},
+                                    "timezone": {"type": "string", "description": "IANA timezone, e.g. America/New_York"},
+                                    "limit": {"type": "integer", "description": "Max events to return (1-100)", "minimum": 1, "maximum": 100}
+                                }
+                            }
+                        },
+                        {
+                            "type": "function",
+                            "name": "get_calendar_event",
+                            "description": "Fetch a single calendar event by ID",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "event_id": {"type": "string", "description": "Google Calendar event ID"},
+                                    "timezone": {"type": "string", "description": "IANA timezone for formatting (optional)"}
+                                },
+                                "required": ["event_id"]
+                            }
+                        },
+                        {
+                            "type": "function",
                             "name": "get_calendar_by_date",
                             "description": "Get calendar events for a specific date",
                             "parameters": {
@@ -268,9 +309,29 @@ class RealtimeService:
                                     "date": {
                                         "type": "string",
                                         "description": "Date in YYYY-MM-DD format"
+                                    },
+                                    "timezone": {
+                                        "type": "string",
+                                        "description": "IANA timezone, e.g. America/Los_Angeles"
                                     }
                                 },
                                 "required": ["date"]
+                            }
+                        },
+                        {
+                            "type": "function",
+                            "name": "parallel_search",
+                            "description": "Search the web for information using Parallel AI",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "objective": {"type": "string", "description": "Goal of the search"},
+                                    "search_queries": {"type": "array", "items": {"type": "string"}, "description": "List of search queries to run"},
+                                    "max_results": {"type": "integer", "description": "Max results to return", "minimum": 1, "maximum": 20},
+                                    "max_chars_per_result": {"type": "integer", "description": "Character limit per result", "minimum": 500, "maximum": 5000},
+                                    "processor": {"type": "string", "description": "Parallel processor to use", "default": "base"}
+                                },
+                                "required": ["objective", "search_queries"]
                             }
                         },
                         {
