@@ -6,7 +6,8 @@ import Combine
 private enum AudioConfig {
     static let sampleRate: Double = 24000 // 24kHz for OpenAI Realtime API
     static let channels: UInt32 = 1 // Mono
-    static let bufferDurationMs: Double = 100 // 100ms buffer chunks
+    // Temporarily use a larger buffer to ensure tap stability while debugging capture
+    static let bufferDurationMs: Double = 50 // ~50ms chunks
 }
 
 /// Service for audio capture and playback using AVAudioEngine
@@ -37,6 +38,11 @@ class AudioService: ObservableObject, @unchecked Sendable {
     private var isRecording = false
     private var isPlaying = false
     private var isEngineRunning = false
+    private var tapLogCount = 0
+    private var tapTotalCount = 0
+    private var firstNonZeroRmsLogged = false
+    private var tapDebugTimer: DispatchSourceTimer?
+    private var tapDebugTicks = 0
     
     // Audio capture callback - called from audio processing queue
     var onAudioData: ((Data) -> Void)?
@@ -55,7 +61,6 @@ class AudioService: ObservableObject, @unchecked Sendable {
             .playAndRecord,
             mode: .voiceChat,
             options: [
-                .defaultToSpeaker,
                 .allowBluetooth,
                 .allowBluetoothA2DP,
                 .allowAirPlay
@@ -131,6 +136,25 @@ class AudioService: ObservableObject, @unchecked Sendable {
             throw AudioError.engineSetupFailed
         }
         
+        // Enable hardware voice processing (AEC/AGC/NS) if available
+        if input.isVoiceProcessingEnabled == false {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+                print("✅ AudioService: Voice processing enabled on input node")
+            } catch {
+                print("⚠️ AudioService: Voice processing not available: \(error.localizedDescription)")
+            }
+        }
+        
+        let route = AVAudioSession.sharedInstance().currentRoute
+        let outputs = route.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        let inputs = route.inputs.map { $0.portType.rawValue }.joined(separator: ",")
+        print("📡 AudioService: Current route inputs=\(inputs) outputs=\(outputs) voiceProc=\(input.isVoiceProcessingEnabled)")
+        
+        // Ensure volumes are at unity
+        input.volume = 1.0
+        engine.mainMixerNode.outputVolume = 1.0
+        
         // FIX #3: Get hardware format with retry logic for Bluetooth/delayed devices
         var hwFormat: AVAudioFormat?
         for attempt in 1...5 {
@@ -194,7 +218,7 @@ class AudioService: ObservableObject, @unchecked Sendable {
         try engine.start()
         isEngineRunning = true
         
-        print("▶️ AudioService: Engine started")
+        print("▶️ AudioService: Engine started (isRunning=\(engine.isRunning))")
     }
     
     // MARK: - Audio Processing (runs on audio thread - NO async!)
@@ -208,6 +232,13 @@ class AudioService: ObservableObject, @unchecked Sendable {
         targetFormat: AVAudioFormat
     ) {
         guard buffer.frameLength > 0 else { return }
+        
+        // Temporary debug: log first few tap frame lengths to confirm capture
+        tapTotalCount += 1
+        if tapLogCount < 5 {
+            tapLogCount += 1
+            print("🎛️ AudioService: tap frameLength=\(buffer.frameLength)")
+        }
         
         // Hardware audio is ALWAYS Float32 - no need for dual-format handling
         guard let floatData = buffer.floatChannelData else {
@@ -225,6 +256,10 @@ class AudioService: ObservableObject, @unchecked Sendable {
         }
         let rms = sqrt(sum / Float(frameLength))
         let inputLevelValue = min(1.0, rms * 3) // Amplify for visual feedback
+        if !firstNonZeroRmsLogged && rms > 0 {
+            firstNonZeroRmsLogged = true
+            print("📈 AudioService: first RMS > 0 detected (rms=\(rms), tapCount=\(tapTotalCount))")
+        }
         
         // Extract waveform samples from Float32
         var waveformData: [Float] = []
@@ -314,6 +349,7 @@ class AudioService: ObservableObject, @unchecked Sendable {
         try startEngineWithTap()
         
         isRecording = true
+        startTapDebugTimer()
         print("🎙️ AudioService: Recording started")
     }
     
@@ -323,6 +359,8 @@ class AudioService: ObservableObject, @unchecked Sendable {
         guard isRecording else { return }
         
         isRecording = false
+        tapDebugTimer?.cancel()
+        tapDebugTimer = nil
         
         // Remove tap first
         inputNode?.removeTap(onBus: 0)
@@ -480,6 +518,8 @@ class AudioService: ObservableObject, @unchecked Sendable {
                 engine.stop()
             }
         }
+        tapDebugTimer?.cancel()
+        tapDebugTimer = nil
         
         audioEngine = nil
         inputNode = nil
@@ -507,6 +547,30 @@ class AudioService: ObservableObject, @unchecked Sendable {
     @MainActor
     func isCurrentlyPlaying() -> Bool {
         return isPlaying
+    }
+    
+    /// Whether voice processing is active on the input node
+    func isVoiceProcessingActive() -> Bool {
+        return inputNode?.isVoiceProcessingEnabled ?? false
+    }
+    
+    // MARK: - Debug helpers
+    
+    private func startTapDebugTimer() {
+        tapDebugTimer?.cancel()
+        tapDebugTimer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
+        tapDebugTicks = 0
+        tapDebugTimer?.schedule(deadline: .now() + 0.5, repeating: 0.5)
+        tapDebugTimer?.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.tapDebugTicks += 1
+            print("🟢 AudioService: tapTotalCount=\(self.tapTotalCount) firstRmsLogged=\(self.firstNonZeroRmsLogged)")
+            if self.tapDebugTicks >= 4 {
+                self.tapDebugTimer?.cancel()
+                self.tapDebugTimer = nil
+            }
+        }
+        tapDebugTimer?.resume()
     }
 }
 
