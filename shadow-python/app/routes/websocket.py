@@ -702,7 +702,7 @@ async def _forward_openai_messages(
                         await realtime_service.openai_ws.send(json.dumps({
                             'type': 'response.function_call_output',
                             'call_id': tool_call_id,
-                            'output': json.dumps(result.get('result', {}))
+                            'output': result.get('result', {})
                         }))
 
                         logger.info(

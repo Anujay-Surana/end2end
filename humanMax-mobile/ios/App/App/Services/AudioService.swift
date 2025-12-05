@@ -47,6 +47,9 @@ class AudioService: ObservableObject, @unchecked Sendable {
     private var tapDebugTimer: DispatchSourceTimer?
     private var tapDebugTicks = 0
     private var isReconfiguringRoute = false
+    private var lastRouteSignature: String?
+    private var lastRouteChangeTime: Date?
+    private let routeDebounceInterval: TimeInterval = 1.0
     
     // Audio capture callback - called from audio processing queue
     var onAudioData: ((Data) -> Void)?
@@ -72,6 +75,8 @@ class AudioService: ObservableObject, @unchecked Sendable {
         // Adjust targets based on route
         targetSampleRate = hasHFP ? AudioConfig.btSampleRate : AudioConfig.defaultSampleRate
         targetBufferDurationMs = hasHFP ? AudioConfig.btBufferMs : AudioConfig.defaultBufferMs
+        lastRouteSignature = routeSignature(for: route)
+        lastRouteChangeTime = Date()
         
         // Use voiceChat mode for hardware echo cancellation, noise suppression, and AGC
         try audioSession.setCategory(
@@ -184,7 +189,7 @@ class AudioService: ObservableObject, @unchecked Sendable {
         input.volume = 1.0
         engine.mainMixerNode.outputVolume = 1.0
         
-        // FIX #3: Get hardware format with retry logic for Bluetooth/delayed devices
+        // Get hardware format with retry logic for Bluetooth/delayed devices
         var hwFormat: AVAudioFormat?
         for attempt in 1...5 {
             let format = input.inputFormat(forBus: 0)
@@ -192,12 +197,12 @@ class AudioService: ObservableObject, @unchecked Sendable {
                 hwFormat = format
                 break
             }
-            print("⏳ AudioService: Waiting for valid input format (attempt \(attempt)/5)")
+            if attempt == 5 { break }
             usleep(50000) // 50ms delay
         }
         
         guard let hardwareFormat = hwFormat, hardwareFormat.sampleRate > 0 else {
-            print("❌ AudioService: Failed to get valid hardware format after retries")
+            print("❌ AudioService: Failed to get valid hardware format; stopping without reconfigure loop")
             throw AudioError.invalidFormat
         }
         
@@ -606,18 +611,41 @@ class AudioService: ObservableObject, @unchecked Sendable {
     
     private func handleRouteChange(notification: Notification) {
         guard !isReconfiguringRoute else { return }
-        isReconfiguringRoute = true
-        defer { isReconfiguringRoute = false }
         
         let audioSession = AVAudioSession.sharedInstance()
         let route = audioSession.currentRoute
-        let outputs = route.outputs.map { $0.portType.rawValue }.joined(separator: ",")
-        let inputs = route.inputs.map { $0.portType.rawValue }.joined(separator: ",")
+        let signature = routeSignature(for: route)
+        let now = Date()
+        if let lastSig = lastRouteSignature,
+           lastSig == signature,
+           let lastTime = lastRouteChangeTime,
+           now.timeIntervalSince(lastTime) < routeDebounceInterval {
+            return
+        }
+        lastRouteSignature = signature
+        lastRouteChangeTime = now
+        
+        // If not active, just update targets and return
+        if !isRecording && !isPlaying {
+            updateTargets(for: route)
+            return
+        }
+        
+        // Only reconfigure if material change (inputs/outputs or HFP presence)
         let hasHFP = route.inputs.contains(where: { $0.portType == .bluetoothHFP }) ||
             route.outputs.contains(where: { $0.portType == .bluetoothHFP })
+        let targetsChanged = (hasHFP && targetSampleRate != AudioConfig.btSampleRate) ||
+            (!hasHFP && targetSampleRate != AudioConfig.defaultSampleRate)
+        if !targetsChanged {
+            return
+        }
         
-        targetSampleRate = hasHFP ? AudioConfig.btSampleRate : AudioConfig.defaultSampleRate
-        targetBufferDurationMs = hasHFP ? AudioConfig.btBufferMs : AudioConfig.defaultBufferMs
+        isReconfiguringRoute = true
+        defer { isReconfiguringRoute = false }
+        let outputs = route.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        let inputs = route.inputs.map { $0.portType.rawValue }.joined(separator: ",")
+        
+        updateTargets(for: route)
         
         print("🔄 AudioService: Route change detected inputs=\(inputs) outputs=\(outputs) hfp=\(hasHFP) targetSR=\(targetSampleRate) bufferMs=\(targetBufferDurationMs)")
         
@@ -628,9 +656,25 @@ class AudioService: ObservableObject, @unchecked Sendable {
         }
     }
     
+    private func routeSignature(for route: AVAudioSessionRouteDescription) -> String {
+        let inSig = route.inputs.map { $0.portType.rawValue }.sorted().joined(separator: "|")
+        let outSig = route.outputs.map { $0.portType.rawValue }.sorted().joined(separator: "|")
+        return "\(inSig)->\(outSig)"
+    }
+    
+    private func updateTargets(for route: AVAudioSessionRouteDescription) {
+        let hasHFP = route.inputs.contains(where: { $0.portType == .bluetoothHFP }) ||
+            route.outputs.contains(where: { $0.portType == .bluetoothHFP })
+        targetSampleRate = hasHFP ? AudioConfig.btSampleRate : AudioConfig.defaultSampleRate
+        targetBufferDurationMs = hasHFP ? AudioConfig.btBufferMs : AudioConfig.defaultBufferMs
+    }
+    
     private func reconfigureForCurrentRouteIfActive() throws {
         let wasRecording = isRecording
         let wasPlaying = isPlaying
+        
+        tapDebugTimer?.cancel()
+        tapDebugTimer = nil
         
         // Stop current engine
         audioEngine?.stop()
