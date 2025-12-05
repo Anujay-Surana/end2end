@@ -398,6 +398,7 @@ async def _forward_openai_messages(
     try:
         raw_dump_limit = 15
         raw_dump_bytes = 2000
+        arg_accumulators: Dict[str, str] = {}
 
         async for message in realtime_service.receive_messages():
             msg_type = message.get('type', '')
@@ -646,6 +647,19 @@ async def _forward_openai_messages(
             # FUNCTION CALL HANDLING
             # =================================================================
             
+            elif msg_type == 'response.function_call_arguments.delta':
+                call_id = message.get('call_id', '')
+                delta = message.get('delta', '')
+                if call_id:
+                    existing = arg_accumulators.get(call_id, '')
+                    arg_accumulators[call_id] = existing + delta
+                logger.info(
+                    'Function call args delta',
+                    userId=user_id,
+                    callId=call_id,
+                    deltaPreview=str(delta)[:300]
+                )
+            
             elif msg_type == 'response.function_call_arguments_partial':
                 await websocket.send_json({
                     'type': 'realtime_function_call',
@@ -657,10 +671,15 @@ async def _forward_openai_messages(
             elif msg_type == 'response.function_call_arguments_done':
                 function_name = message.get('name', '')
                 arguments_str = message.get('arguments', '{}')
+                call_id = message.get('call_id', '')
+                
+                # Prefer accumulated deltas if present
+                if call_id and call_id in arg_accumulators:
+                    arguments_str = arg_accumulators.pop(call_id)
                 
                 try:
                     arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
-                    tool_call_id = message.get('call_id', '')
+                    tool_call_id = call_id or message.get('call_id', '')
                     
                     if function_executor:
                         logger.info(
