@@ -4,10 +4,11 @@ import Combine
 
 /// Audio configuration constants
 private enum AudioConfig {
-    static let sampleRate: Double = 24000 // 24kHz for OpenAI Realtime API
     static let channels: UInt32 = 1 // Mono
-    // Temporarily use a larger buffer to ensure tap stability while debugging capture
-    static let bufferDurationMs: Double = 50 // ~50ms chunks
+    static let defaultSampleRate: Double = 24000
+    static let defaultBufferMs: Double = 50
+    static let btSampleRate: Double = 16000 // HFP SCO link
+    static let btBufferMs: Double = 20
 }
 
 /// Service for audio capture and playback using AVAudioEngine
@@ -38,37 +39,65 @@ class AudioService: ObservableObject, @unchecked Sendable {
     private var isRecording = false
     private var isPlaying = false
     private var isEngineRunning = false
+    private var targetSampleRate: Double = AudioConfig.defaultSampleRate
+    private var targetBufferDurationMs: Double = AudioConfig.defaultBufferMs
     private var tapLogCount = 0
     private var tapTotalCount = 0
     private var firstNonZeroRmsLogged = false
     private var tapDebugTimer: DispatchSourceTimer?
     private var tapDebugTicks = 0
+    private var isReconfiguringRoute = false
     
     // Audio capture callback - called from audio processing queue
     var onAudioData: ((Data) -> Void)?
     
-    private init() {}
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleRouteChange(notification: notification)
+        }
+    }
     
     // MARK: - Audio Session Setup
     
     /// Setup audio session for voice chat with echo cancellation
     private func setupAudioSession() throws {
         let audioSession = AVAudioSession.sharedInstance()
+        let route = audioSession.currentRoute
+        let hasHFP = route.inputs.contains(where: { $0.portType == .bluetoothHFP }) || route.outputs.contains(where: { $0.portType == .bluetoothHFP })
+        
+        // Adjust targets based on route
+        targetSampleRate = hasHFP ? AudioConfig.btSampleRate : AudioConfig.defaultSampleRate
+        targetBufferDurationMs = hasHFP ? AudioConfig.btBufferMs : AudioConfig.defaultBufferMs
         
         // Use voiceChat mode for hardware echo cancellation, noise suppression, and AGC
-        // Include all Bluetooth and AirPlay options for best echo cancellation on speaker
         try audioSession.setCategory(
             .playAndRecord,
             mode: .voiceChat,
             options: [
-                .allowBluetooth,
-                .allowBluetoothA2DP,
+                .allowBluetoothHFP,   // hands-free profile (duplex)
                 .allowAirPlay
             ]
         )
         
-        try audioSession.setPreferredSampleRate(AudioConfig.sampleRate)
-        try audioSession.setPreferredIOBufferDuration(AudioConfig.bufferDurationMs / 1000.0)
+        // Keep preferred hardware/output rate at 24k for correct playback pitch
+        try audioSession.setPreferredSampleRate(AudioConfig.defaultSampleRate)
+        try audioSession.setPreferredIOBufferDuration(targetBufferDurationMs / 1000.0)
+        
+        // Prefer Bluetooth input/output when available (e.g., AirPods)
+        if let btInput = audioSession.availableInputs?.first(where: { input in
+            input.portType == .bluetoothHFP || input.portType == .bluetoothLE
+        }) {
+            do {
+                try audioSession.setPreferredInput(btInput)
+                print("🎧 AudioService: Preferred BT input set: \(btInput.portName) [\(btInput.portType.rawValue)]")
+            } catch {
+                print("⚠️ AudioService: Failed to set preferred BT input: \(error)")
+            }
+        }
         
         try audioSession.setActive(true)
     }
@@ -107,10 +136,10 @@ class AudioService: ObservableObject, @unchecked Sendable {
             throw AudioError.engineSetupFailed
         }
         
-        // Create API format: 24kHz, 16-bit PCM, mono
+        // Create API format: target sample rate, 16-bit PCM, mono
         apiFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: AudioConfig.sampleRate,
+            sampleRate: targetSampleRate,
             channels: AudioConfig.channels,
             interleaved: true
         )
@@ -184,7 +213,7 @@ class AudioService: ObservableObject, @unchecked Sendable {
         }
         
         // Calculate buffer size
-        let bufferSize = AVAudioFrameCount(hardwareFormat.sampleRate * (AudioConfig.bufferDurationMs / 1000.0))
+        let bufferSize = AVAudioFrameCount(hardwareFormat.sampleRate * (targetBufferDurationMs / 1000.0))
         
         // STEP 4: Install input tap BEFORE starting engine
         let converter = formatConverter
@@ -202,7 +231,7 @@ class AudioService: ObservableObject, @unchecked Sendable {
         // FIX #1: Connect playerNode directly to mainMixerNode (no custom mixer)
         let playbackFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
-            sampleRate: AudioConfig.sampleRate,
+            sampleRate: AudioConfig.defaultSampleRate,
             channels: AudioConfig.channels,
             interleaved: false
         )!
@@ -392,7 +421,7 @@ class AudioService: ObservableObject, @unchecked Sendable {
             
             let playbackFormat = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
-                sampleRate: AudioConfig.sampleRate,
+                sampleRate: AudioConfig.defaultSampleRate,
                 channels: AudioConfig.channels,
                 interleaved: false
             )!
@@ -452,7 +481,7 @@ class AudioService: ObservableObject, @unchecked Sendable {
     private func createPlaybackBuffer(from data: Data) -> AVAudioPCMBuffer? {
         let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
-            sampleRate: AudioConfig.sampleRate,
+            sampleRate: AudioConfig.defaultSampleRate,
             channels: AudioConfig.channels,
             interleaved: false
         )!
@@ -571,6 +600,70 @@ class AudioService: ObservableObject, @unchecked Sendable {
             }
         }
         tapDebugTimer?.resume()
+    }
+    
+    // MARK: - Route change handling
+    
+    private func handleRouteChange(notification: Notification) {
+        guard !isReconfiguringRoute else { return }
+        isReconfiguringRoute = true
+        defer { isReconfiguringRoute = false }
+        
+        let audioSession = AVAudioSession.sharedInstance()
+        let route = audioSession.currentRoute
+        let outputs = route.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        let inputs = route.inputs.map { $0.portType.rawValue }.joined(separator: ",")
+        let hasHFP = route.inputs.contains(where: { $0.portType == .bluetoothHFP }) ||
+            route.outputs.contains(where: { $0.portType == .bluetoothHFP })
+        
+        targetSampleRate = hasHFP ? AudioConfig.btSampleRate : AudioConfig.defaultSampleRate
+        targetBufferDurationMs = hasHFP ? AudioConfig.btBufferMs : AudioConfig.defaultBufferMs
+        
+        print("🔄 AudioService: Route change detected inputs=\(inputs) outputs=\(outputs) hfp=\(hasHFP) targetSR=\(targetSampleRate) bufferMs=\(targetBufferDurationMs)")
+        
+        do {
+            try reconfigureForCurrentRouteIfActive()
+        } catch {
+            print("⚠️ AudioService: Route reconfigure failed: \(error)")
+        }
+    }
+    
+    private func reconfigureForCurrentRouteIfActive() throws {
+        let wasRecording = isRecording
+        let wasPlaying = isPlaying
+        
+        // Stop current engine
+        audioEngine?.stop()
+        audioEngine = nil
+        inputNode = nil
+        playerNode = nil
+        apiFormat = nil
+        formatConverter = nil
+        hardwareFormat = nil
+        tapLogCount = 0
+        tapTotalCount = 0
+        firstNonZeroRmsLogged = false
+        
+        // Re-apply session and engine
+        try setupAudioSession()
+        try createEngineAndAttachNodes()
+        
+        if wasRecording {
+            try startEngineWithTap()
+            isRecording = true
+            print("🔄 AudioService: Reconfigured while recording (sr=\(targetSampleRate), bufferMs=\(targetBufferDurationMs))")
+            
+            if wasPlaying {
+                isPlaying = false
+                Task { @MainActor in
+                    do {
+                        try self.startPlayback()
+                    } catch {
+                        print("⚠️ AudioService: Failed to restart playback after route change: \(error)")
+                    }
+                }
+            }
+        }
     }
 }
 

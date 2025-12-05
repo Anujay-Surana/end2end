@@ -63,7 +63,6 @@ struct CircularWaveformView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
             let radius = min(geometry.size.width, geometry.size.height) / 2 - lineWidth
             
             ZStack {
