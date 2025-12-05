@@ -629,6 +629,12 @@ async def _forward_openai_messages(
                         }
                         await realtime_service.openai_ws.send(json.dumps(tool_envelope))
                         logger.info('Sent function_call_output (conversation.item.create)', userId=user_id, functionName=function_name, toolCallId=tool_call_id, outputSize=len(tool_output_str))
+
+                        # Immediately request assistant response to continue the turn
+                        await realtime_service.openai_ws.send(json.dumps({
+                            "type": "response.create"
+                        }))
+                        logger.info('Sent response.create after tool output', userId=user_id, functionName=function_name, toolCallId=tool_call_id)
                         
                         await websocket.send_json({
                             'type': 'realtime_function_result',
