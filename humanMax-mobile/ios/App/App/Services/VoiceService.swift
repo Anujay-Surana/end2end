@@ -33,6 +33,25 @@ class VoiceService: ObservableObject {
     private let realtimeService: RealtimeService
     private var cancellables = Set<AnyCancellable>()
     
+    // Playback-aware suppression (keep mic open, gate what we send)
+    private var isPlaybackSuppressionActive = false
+    private var suppressionEndsAt: Date?
+    private let suppressionTail: TimeInterval = 0.15 // shorter tail after TTS
+    private let playbackSampleRate: Double = 24_000
+    private let vadBreakThreshold: Float = 0.015 // lower threshold to allow barge-in sooner
+    
+    // Local ducking to reduce bleed during user speech
+    private let duckThreshold: Float = 0.015
+    private let duckedVolume: Float = 0.3  // gentler ducking
+    private let duckRecoveryTail: TimeInterval = 0.35
+    private var duckRestoreWorkItem: DispatchWorkItem?
+    
+    // Lightweight diagnostics
+    private var framesSent = 0
+    private var framesDropped = 0
+    private var lastDebugLog = Date.distantPast
+    private var suppressedFrameCounter = 0
+    
     // Callbacks
     var onTranscript: ((String, Bool, String) -> Void)? // (text, isFinal, source)
     var onResponse: ((String) -> Void)?
@@ -101,7 +120,11 @@ class VoiceService: ObservableObject {
         // Handle audio data from microphone -> send to realtime service
         audioService.onAudioData = { [weak self] audioData in
             Task { @MainActor in
-                try? await self?.realtimeService.sendAudio(audioData)
+                guard let self else { return }
+                // Temporary: bypass suppression/ducking to verify capture path
+                self.framesSent += 1
+                try? await self.realtimeService.sendAudio(audioData)
+                self.logAudioDebugIfNeeded(rms: self.rmsLevel(from: audioData))
             }
         }
         
@@ -122,7 +145,9 @@ class VoiceService: ObservableObject {
         // Handle audio playback from AI
         realtimeService.onAudio = { [weak self] audioData in
             Task { @MainActor in
-                self?.audioService.playAudio(audioData)
+                guard let self else { return }
+                // Temporary: do not suppress mic during playback while verifying capture path
+                self.audioService.playAudio(audioData)
             }
         }
         
@@ -158,9 +183,8 @@ class VoiceService: ObservableObject {
         // Attenuate playback volume when user is speaking to prevent echo feedback
         realtimeService.onSpeechStarted = { [weak self] in
             Task { @MainActor in
-                // Reduce output volume to 5% when user starts speaking
-                // This helps echo cancellation by reducing speaker bleed into mic
-                self?.audioService.setOutputVolume(0.05)
+                // Temporary: disable ducking while verifying capture path
+                self?.audioService.setOutputVolume(1.0)
             }
         }
         
@@ -207,6 +231,13 @@ class VoiceService: ObservableObject {
             try audioService.startPlayback()
         } catch {
             print("⚠️ VoiceService: Failed to setup audio playback: \(error)")
+        }
+        
+        // One-time zero buffer send to verify WS audio path
+        if isConnected {
+            let zeroData = Data(count: 320) // ~160 samples PCM16
+            try? await realtimeService.sendAudio(zeroData)
+            print("🧪 VoiceService: sent zero-buffer test frame")
         }
     }
     
@@ -282,6 +313,110 @@ class VoiceService: ObservableObject {
         case .failed(let reason):
             return "Failed: \(reason)"
         }
+    }
+    
+    // MARK: - Playback-aware mic gating (keeps mic open)
+    
+    private func playbackDuration(for audioData: Data) -> TimeInterval {
+        let frameCount = audioData.count / MemoryLayout<Int16>.size
+        let duration = Double(frameCount) / playbackSampleRate
+        return max(duration, 0.05) // cover tiny chunks
+    }
+    
+    private func activatePlaybackSuppression(for duration: TimeInterval) {
+        let end = Date().addingTimeInterval(duration + suppressionTail)
+        suppressionEndsAt = end
+        isPlaybackSuppressionActive = true
+        suppressedFrameCounter = 0
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + suppressionTail) { [weak self] in
+            self?.refreshSuppressionState()
+        }
+    }
+    
+    private func refreshSuppressionState() {
+        if let end = suppressionEndsAt, Date() >= end {
+            suppressionEndsAt = nil
+            isPlaybackSuppressionActive = false
+            suppressedFrameCounter = 0
+            print("🎚️ VoiceService: suppression cleared")
+        }
+    }
+    
+    private func shouldSendAudio(rms: Float?) -> Bool {
+        // Outside suppression window, always send
+        guard isPlaybackSuppressionActive,
+              let end = suppressionEndsAt,
+              Date() < end else {
+            return true
+        }
+        
+        guard let rms = rms else {
+            // No RMS computed; allow periodic send-through to avoid full drop
+            suppressedFrameCounter += 1
+            return suppressedFrameCounter % 3 == 0
+        }
+        
+        if rms >= vadBreakThreshold {
+            // User is speaking loudly enough; drop suppression immediately
+            suppressionEndsAt = nil
+            isPlaybackSuppressionActive = false
+            suppressedFrameCounter = 0
+            return true
+        }
+        
+        // Allow every 3rd frame during suppression to keep speech flowing
+        suppressedFrameCounter += 1
+        return suppressedFrameCounter % 3 == 0
+    }
+    
+    private func rmsLevel(from audioData: Data) -> Float? {
+        let sampleCount = audioData.count / MemoryLayout<Int16>.size
+        guard sampleCount > 0 else { return nil }
+        
+        var sum: Float = 0
+        audioData.withUnsafeBytes { rawBuffer in
+            let buffer = rawBuffer.bindMemory(to: Int16.self)
+            for i in 0..<sampleCount {
+                let normalized = Float(buffer[i]) / Float(Int16.max)
+                sum += normalized * normalized
+            }
+        }
+        
+        let mean = sum / Float(sampleCount)
+        return sqrt(mean)
+    }
+    
+    // MARK: - Local ducking during user speech
+    
+    private func maybeHandleDucking(rms: Float?) {
+        guard let rms = rms else { return }
+        
+        if rms >= duckThreshold {
+            audioService.setOutputVolume(duckedVolume)
+            print("🔉 VoiceService: ducking output (rms=\(rms))")
+            
+            duckRestoreWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.audioService.setOutputVolume(1.0)
+                print("🔉 VoiceService: ducking released")
+            }
+            duckRestoreWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + duckRecoveryTail, execute: workItem)
+        }
+    }
+    
+    // MARK: - Debug logging
+    
+    private func logAudioDebugIfNeeded(rms: Float?) {
+        let now = Date()
+        guard now.timeIntervalSince(lastDebugLog) > 1 else { return }
+        
+        let suppressionActive = isPlaybackSuppressionActive
+        let rmsDisplay = rms.map { String(format: "%.4f", $0) } ?? "nil"
+        let voiceProc = audioService.isVoiceProcessingActive()
+        print("🔈 VoiceService: sent=\(framesSent) dropped=\(framesDropped) suppression=\(suppressionActive) rms=\(rmsDisplay) voiceProc=\(voiceProc)")
+        lastDebugLog = now
     }
 }
 
