@@ -631,6 +631,13 @@ async def _forward_openai_messages(
                     tool_call_id = message.get('call_id', '')
                     
                     if function_executor:
+                        logger.info(
+                            'Received function call',
+                            userId=user_id,
+                            functionName=function_name,
+                            toolCallId=tool_call_id,
+                            argumentsPreview=str(arguments)[:500]
+                        )
                         result = await function_executor.execute(function_name, arguments, tool_call_id)
 
                         has_error = isinstance(result.get('result'), dict) and bool(result.get('result', {}).get('error'))
@@ -646,6 +653,14 @@ async def _forward_openai_messages(
                             'call_id': tool_call_id,
                             'output': json.dumps(result.get('result', {}))
                         }))
+
+                        logger.info(
+                            'Sent function_call_output to OpenAI',
+                            userId=user_id,
+                            functionName=function_name,
+                            toolCallId=tool_call_id,
+                            hasError=has_error
+                        )
                         
                         await websocket.send_json({
                             'type': 'realtime_function_result',

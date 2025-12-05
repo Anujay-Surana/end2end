@@ -240,13 +240,14 @@ class RealtimeService:
         
         try:
             tool_guidance = (
-                "When you are missing meeting date, time, location, attendees, or agenda, "
-                "call tools instead of guessing:\n"
-                "- Use list_calendar_events with date or start/end + timezone to see meetings.\n"
-                "- Use get_calendar_event when you have an event ID to retrieve exact details (time, location, link).\n"
-                "- Use parallel_search when you need external info or context.\n"
+                "Tool policy (mandatory):\n"
+                "- If the user asks for research, web search, \"find out\", or latest info, you MUST call parallel_search with a clear objective and 2-3 focused queries before responding. "
+                "If the tool fails, report the tool error; do NOT say you cannot search without calling the tool.\n"
+                "- If the user asks about their calendar (today/this date/what other events/what else today), you MUST call list_calendar_events using the user timezone; use date or start/end if provided; limit 20. "
+                "Answer from the tool results.\n"
+                "- If you have an event ID and need details, call get_calendar_event.\n"
                 "- DO NOT call generate_meeting_brief if a meeting_id/brief is already provided; only use it as a fallback when no brief exists.\n"
-                "Keep answers concise and cite which tool you used."
+                "Always cite which tool you used and base answers on tool outputs."
             )
 
             instructions_text = instructions or "You are Shadow, an executive assistant. Be concise and helpful."

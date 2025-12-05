@@ -60,7 +60,11 @@ class AudioService: ObservableObject, @unchecked Sendable {
         try audioSession.setCategory(
             .playAndRecord,
             mode: .voiceChat,
-            options: []
+            options: [
+                .allowBluetooth,
+                .allowBluetoothA2DP,
+                .allowAirPlay
+            ]
         )
         
         try audioSession.setPreferredSampleRate(AudioConfig.sampleRate)
