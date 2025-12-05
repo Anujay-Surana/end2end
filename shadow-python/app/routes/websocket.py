@@ -647,7 +647,7 @@ async def _forward_openai_messages(
             # FUNCTION CALL HANDLING
             # =================================================================
             
-            elif msg_type == 'response.function_call_arguments.delta':
+            elif msg_type in ['response.function_call_arguments.delta', 'response.function_call_arguments_delta']:
                 call_id = message.get('call_id', '')
                 delta = message.get('delta', '')
                 if call_id:
@@ -660,7 +660,7 @@ async def _forward_openai_messages(
                     deltaPreview=str(delta)[:300]
                 )
             
-            elif msg_type == 'response.function_call_arguments_partial':
+            elif msg_type in ['response.function_call_arguments_partial', 'response.function_call_arguments.partial']:
                 await websocket.send_json({
                     'type': 'realtime_function_call',
                     'function_name': message.get('name', ''),
@@ -668,7 +668,7 @@ async def _forward_openai_messages(
                     'status': 'partial'
                 })
             
-            elif msg_type == 'response.function_call_arguments_done':
+            elif msg_type in ['response.function_call_arguments_done', 'response.function_call_arguments.done']:
                 function_name = message.get('name', '')
                 arguments_str = message.get('arguments', '{}')
                 call_id = message.get('call_id', '')
