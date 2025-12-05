@@ -396,12 +396,44 @@ async def _forward_openai_messages(
     Text/control messages are sent as JSON.
     """
     try:
+        raw_dump_limit = 15
+        raw_dump_bytes = 2000
+
         async for message in realtime_service.receive_messages():
             msg_type = message.get('type', '')
-            
-            # Log all non-audio messages for debugging
+
+            # Verbose inbound logging with previews for critical types
             if msg_type and not msg_type.startswith('response.audio.delta'):
-                logger.debug(f'📨 OpenAI → Client: {msg_type}', userId=user_id, messageKeys=list(message.keys()))
+                preview = {
+                    'type': msg_type,
+                    'keys': list(message.keys())[:10],
+                }
+                if msg_type in [
+                    'response.function_call_arguments_partial',
+                    'response.function_call_arguments_done',
+                    'error',
+                    'response.created',
+                    'response.done'
+                ]:
+                    args_val = message.get('arguments')
+                    if args_val is not None:
+                        arg_str = args_val if isinstance(args_val, str) else str(args_val)
+                        preview['arguments_preview'] = arg_str[:300] + ('...' if len(arg_str) > 300 else '')
+                    err_val = message.get('error')
+                    if err_val is not None:
+                        err_str = err_val if isinstance(err_val, str) else str(err_val)
+                        preview['error_preview'] = err_str[:300] + ('...' if len(err_str) > 300 else '')
+                logger.info('OpenAI→Server message', userId=user_id, **preview)
+
+                # Optional raw dump (capped) for early messages
+                if raw_dump_limit > 0:
+                    raw_text = json.dumps(message)
+                    logger.debug(
+                        'OpenAI→Server raw',
+                        userId=user_id,
+                        raw=raw_text[:raw_dump_bytes] + ('...' if len(raw_text) > raw_dump_bytes else '')
+                    )
+                    raw_dump_limit -= 1
             
             # =================================================================
             # AUDIO HANDLING (with buffering)

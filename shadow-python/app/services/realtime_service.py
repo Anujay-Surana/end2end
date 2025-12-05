@@ -239,6 +239,20 @@ class RealtimeService:
             await self.connect(user_id)
         
         try:
+            # Log tool availability for diagnostics (calendar tokens handled in executor; log Parallel here)
+            from app.services.parallel_client import get_parallel_client
+            parallel_available = False
+            try:
+                pc = get_parallel_client()
+                parallel_available = bool(pc and pc.is_available())
+            except Exception:
+                parallel_available = False
+            logger.info(
+                'Realtime session tool availability',
+                userId=user_id,
+                parallelAvailable=parallel_available
+            )
+
             tool_guidance = (
                 "Tool policy (mandatory):\n"
                 "- If the user asks for research, web search, \"find out\", or latest info, you MUST call parallel_search with a clear objective and 2-3 focused queries before responding. "

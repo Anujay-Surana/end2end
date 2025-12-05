@@ -232,13 +232,6 @@ class VoiceService: ObservableObject {
         } catch {
             print("⚠️ VoiceService: Failed to setup audio playback: \(error)")
         }
-        
-        // One-time zero buffer send to verify WS audio path
-        if isConnected {
-            let zeroData = Data(count: 320) // ~160 samples PCM16
-            try? await realtimeService.sendAudio(zeroData)
-            print("🧪 VoiceService: sent zero-buffer test frame")
-        }
     }
     
     /// Stop voice recording
