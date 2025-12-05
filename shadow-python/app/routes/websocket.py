@@ -22,94 +22,63 @@ import asyncio
 # Context Builder for Realtime Session
 # =============================================================================
 
-def build_realtime_context(brief: Optional[Dict], chat_history: List[Dict], user_timezone: Optional[str] = None) -> str:
+def build_realtime_context(brief: Optional[Dict], chat_history: List[Dict]) -> str:
     """
     Build system instructions for OpenAI Realtime session from brief and chat history
     
     Args:
         brief: Meeting brief data (from database)
         chat_history: Previous chat messages for this meeting
-        user_timezone: Optional IANA timezone string for formatting/display
         
     Returns:
         System instructions string
     """
     instructions = "You are Shadow, an executive assistant helping prepare for a meeting. Be concise, helpful, and conversational.\n\n"
-
-    if user_timezone:
-        instructions += f"USER TIMEZONE: {user_timezone}\n\n"
-
+    
     if brief:
         brief_data = brief.get('brief_data', {})
         one_liner = brief.get('one_liner_summary', '')
-
-        instructions += "MEETING CONTEXT (precomputed brief — do NOT regenerate):\n"
-
+        
+        instructions += "MEETING CONTEXT:\n"
+        
         if one_liner:
             instructions += f"- Quick Summary: {one_liner}\n"
-
+        
         if brief_data.get('summary'):
-            instructions += f"- Overview: {brief_data['summary'][:1000]}\n"
-
+            instructions += f"- Overview: {brief_data['summary'][:500]}\n"
+        
         if brief_data.get('purpose'):
             instructions += f"- Purpose: {brief_data['purpose']}\n"
-
+        
         if brief_data.get('agenda'):
             agenda = brief_data['agenda']
             if isinstance(agenda, list):
-                instructions += f"- Agenda: {'; '.join(str(item)[:200] for item in agenda[:10])}\n"
+                instructions += f"- Agenda: {'; '.join(str(item) for item in agenda[:5])}\n"
             else:
-                instructions += f"- Agenda: {str(agenda)[:800]}\n"
-
+                instructions += f"- Agenda: {agenda[:300]}\n"
+        
         if brief_data.get('attendees'):
             attendees = brief_data['attendees']
-            attendee_lines = []
-            for a in attendees[:15]:
-                name = a.get('name') or a.get('displayName') or a.get('email') or 'Unknown'
-                title = a.get('title') or a.get('jobTitle') or ''
-                company = a.get('company') or a.get('organization') or ''
-                email = a.get('email') or a.get('emailAddress') or ''
-                affiliation = a.get('affiliation') or ''
-                key_facts = a.get('keyFacts') or []
-                facts_str = "; ".join(str(fact) for fact in key_facts[:3]) if key_facts else ''
-                line_parts = [name]
+            attendee_info = []
+            for a in attendees[:5]:
+                name = a.get('name', 'Unknown')
+                title = a.get('title', '')
+                company = a.get('company', '')
+                info = name
                 if title:
-                    line_parts.append(title)
+                    info += f" ({title})"
                 if company:
-                    line_parts.append(f"@ {company}")
-                if affiliation:
-                    line_parts.append(f"({affiliation})")
-                if email:
-                    line_parts.append(f"[{email}]")
-                if facts_str:
-                    line_parts.append(f"Facts: {facts_str}")
-                attendee_lines.append(" ".join(line_parts))
-            if attendee_lines:
-                instructions += f"- Attendees ({len(attendees)}): " + " | ".join(attendee_lines) + "\n"
-
-        if brief_data.get('emailAnalysis'):
-            instructions += f"- Email Context: {brief_data['emailAnalysis'][:1200]}\n"
-
-        if brief_data.get('documentAnalysis'):
-            instructions += f"- Document Analysis: {brief_data['documentAnalysis'][:1200]}\n"
-
+                    info += f" at {company}"
+                attendee_info.append(info)
+            instructions += f"- Attendees: {', '.join(attendee_info)}\n"
+        
         if brief_data.get('recommendations'):
             recs = brief_data['recommendations']
             if isinstance(recs, list):
-                instructions += f"- Key Points: {'; '.join(str(r)[:200] for r in recs[:6])}\n"
-
-        if brief_data.get('actionItems'):
-            actions = brief_data['actionItems']
-            if isinstance(actions, list):
-                instructions += f"- Action Items: {'; '.join(str(a)[:200] for a in actions[:6])}\n"
-
-        if brief_data.get('stats'):
-            stats = brief_data['stats']
-            stat_parts = []
-            for k, v in stats.items():
-                stat_parts.append(f"{k}: {v}")
-            if stat_parts:
-                instructions += f"- Stats: {', '.join(stat_parts)}\n"
+                instructions += f"- Key Points: {'; '.join(str(r)[:100] for r in recs[:3])}\n"
+        
+        if brief_data.get('emailAnalysis'):
+            instructions += f"- Email Context: {brief_data['emailAnalysis'][:300]}\n"
     
     if chat_history:
         instructions += "\nPREVIOUS CONVERSATION:\n"
@@ -191,7 +160,6 @@ async def realtime_websocket(websocket: WebSocket):
     
     user_id = 'anonymous'
     user = None
-    user_timezone = 'UTC'
     
     # Authenticate user from query params or headers
     query_params = dict(websocket.query_params)
@@ -210,7 +178,6 @@ async def realtime_websocket(websocket: WebSocket):
                     if user_obj:
                         user = user_obj
                         user_id = user.get('id', 'anonymous')
-                        user_timezone = user.get('timezone', 'UTC') or 'UTC'
         except Exception as e:
             logger.debug(f'WebSocket auth failed: {str(e)}', userId='anonymous')
     
@@ -249,7 +216,7 @@ async def realtime_websocket(websocket: WebSocket):
             try:
                 brief = await get_brief_by_meeting_id(user_id, meeting_id)
                 chat_history = await get_meeting_chat_messages(user_id, meeting_id, limit=20)
-                realtime_context = build_realtime_context(brief, chat_history, user_timezone)
+                realtime_context = build_realtime_context(brief, chat_history)
                 logger.info(
                     f'✅ Built realtime context for meeting',
                     userId=user_id,
@@ -280,7 +247,7 @@ async def realtime_websocket(websocket: WebSocket):
         
         # Initialize function executor if authenticated
         if user:
-            function_executor = FunctionExecutor(user_id, user, user_timezone)
+            function_executor = FunctionExecutor(user_id, user)
         
         # Create OpenAI session with meeting context (if available)
         await realtime_service.create_session(user_id, instructions=realtime_context)
@@ -396,45 +363,14 @@ async def _forward_openai_messages(
     Text/control messages are sent as JSON.
     """
     try:
-        raw_dump_limit = 15
-        raw_dump_bytes = 2000
         arg_accumulators: Dict[str, str] = {}
 
         async for message in realtime_service.receive_messages():
             msg_type = message.get('type', '')
-
-            # Verbose inbound logging with previews for critical types
+            
+            # Log all non-audio messages for debugging
             if msg_type and not msg_type.startswith('response.audio.delta'):
-                preview = {
-                    'type': msg_type,
-                    'keys': list(message.keys())[:10],
-                }
-                if msg_type in [
-                    'response.function_call_arguments_partial',
-                    'response.function_call_arguments_done',
-                    'error',
-                    'response.created',
-                    'response.done'
-                ]:
-                    args_val = message.get('arguments')
-                    if args_val is not None:
-                        arg_str = args_val if isinstance(args_val, str) else str(args_val)
-                        preview['arguments_preview'] = arg_str[:300] + ('...' if len(arg_str) > 300 else '')
-                    err_val = message.get('error')
-                    if err_val is not None:
-                        err_str = err_val if isinstance(err_val, str) else str(err_val)
-                        preview['error_preview'] = err_str[:300] + ('...' if len(err_str) > 300 else '')
-                logger.info('OpenAI→Server message', userId=user_id, **preview)
-
-                # Optional raw dump (capped) for early messages
-                if raw_dump_limit > 0:
-                    raw_text = json.dumps(message)
-                    logger.debug(
-                        'OpenAI→Server raw',
-                        userId=user_id,
-                        raw=raw_text[:raw_dump_bytes] + ('...' if len(raw_text) > raw_dump_bytes else '')
-                    )
-                    raw_dump_limit -= 1
+                logger.debug(f'📨 OpenAI → Client: {msg_type}', userId=user_id, messageKeys=list(message.keys()))
             
             # =================================================================
             # AUDIO HANDLING (with buffering)
@@ -653,12 +589,7 @@ async def _forward_openai_messages(
                 if call_id:
                     existing = arg_accumulators.get(call_id, '')
                     arg_accumulators[call_id] = existing + delta
-                logger.info(
-                    'Function call args delta',
-                    userId=user_id,
-                    callId=call_id,
-                    deltaPreview=str(delta)[:300]
-                )
+                logger.info('Function call args delta', userId=user_id, callId=call_id, deltaPreview=str(delta)[:200])
             
             elif msg_type in ['response.function_call_arguments_partial', 'response.function_call_arguments.partial']:
                 await websocket.send_json({
@@ -682,36 +613,22 @@ async def _forward_openai_messages(
                     tool_call_id = call_id or message.get('call_id', '')
                     
                     if function_executor:
-                        logger.info(
-                            'Received function call',
-                            userId=user_id,
-                            functionName=function_name,
-                            toolCallId=tool_call_id,
-                            argumentsPreview=str(arguments)[:500]
-                        )
+                        logger.info('Received function call', userId=user_id, functionName=function_name, toolCallId=tool_call_id, argumentsPreview=str(arguments)[:400])
                         result = await function_executor.execute(function_name, arguments, tool_call_id)
-
-                        has_error = isinstance(result.get('result'), dict) and bool(result.get('result', {}).get('error'))
-                        logger.info(
-                            f'Function call executed: {function_name}',
-                            userId=user_id,
-                            toolCallId=tool_call_id,
-                            hasError=has_error
-                        )
                         
-                        await realtime_service.openai_ws.send(json.dumps({
-                            'type': 'response.function_call_output',
-                            'call_id': tool_call_id,
-                            'output': result.get('result', {})
-                        }))
-
-                        logger.info(
-                            'Sent function_call_output to OpenAI',
-                            userId=user_id,
-                            functionName=function_name,
-                            toolCallId=tool_call_id,
-                            hasError=has_error
-                        )
+                        # Send tool result via conversation.item.create (recommended)
+                        tool_output_obj = result.get('result', {}) or {}
+                        tool_output_str = json.dumps(tool_output_obj)
+                        tool_envelope = {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "function_call_output",
+                                "call_id": tool_call_id,
+                                "output": tool_output_str
+                            }
+                        }
+                        await realtime_service.openai_ws.send(json.dumps(tool_envelope))
+                        logger.info('Sent function_call_output (conversation.item.create)', userId=user_id, functionName=function_name, toolCallId=tool_call_id, outputSize=len(tool_output_str))
                         
                         await websocket.send_json({
                             'type': 'realtime_function_result',
@@ -739,6 +656,7 @@ async def _forward_openai_messages(
             # =================================================================
             
             elif msg_type == 'error':
+                logger.info('OpenAI error event', userId=user_id, error=message.get('error', {}))
                 await websocket.send_json({
                     'type': 'realtime_error',
                     'error': message.get('error', {})
