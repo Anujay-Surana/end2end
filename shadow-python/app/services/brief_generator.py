@@ -205,6 +205,7 @@ async def generate_brief_with_one_liner(
                 None,
                 user_context,
                 attendees,
+                None,
                 request_id
             )
             brief['documentAnalysis'] = document_analysis

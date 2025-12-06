@@ -36,6 +36,7 @@ async def _filter_file_batch(
     meeting_context: Optional[Dict[str, Any]],
     user_context: Optional[Dict[str, Any]],
     attendees: List[Dict[str, Any]],
+    purpose_result: Optional[Dict[str, Any]],
     request_id: str
 ) -> Dict[str, Any]:
     """Filter a batch of files for relevance"""
@@ -60,6 +61,21 @@ MEETING CONTEXT:
 - Is Specific Meeting: {"yes" if meeting_context.get("isSpecificMeeting") else "no"}
 - Confidence: {meeting_context.get("confidence", "unknown")}
 - Reasoning: {meeting_context.get("reasoning", "")}'''
+
+    purpose_section = ''
+    if purpose_result:
+        purpose = purpose_result.get('purpose')
+        agenda = purpose_result.get('agenda', [])
+        confidence = purpose_result.get('confidence', 'low')
+        source = purpose_result.get('source', 'unknown')
+        purpose_section = f'''
+
+DETECTED MEETING PURPOSE (HIGH PRIORITY - USE THIS TO GUIDE FILTERING):
+- Purpose: {purpose if purpose else "Not detected"}
+- Agenda Items: {", ".join(agenda[:5]) if agenda else "None"}
+- Confidence: {confidence}
+- Source: {source}
+- IMPORTANT: Prioritize files that support this purpose/agenda; de-prioritize unrelated documents.'''
 
     confidence = meeting_context.get('confidence', 'low') if meeting_context else 'low'
     key_entities_str = ', '.join(meeting_context.get('keyEntities', [])) if meeting_context else 'none'
@@ -120,7 +136,7 @@ FILTERING STRICTNESS (HIGH CONFIDENCE):
     
     file_relevance_check = await call_gpt([{
         'role': 'system',
-        'content': f'{user_context_prefix}You are filtering files for meeting prep. Meeting: "{meeting_title}"{meeting_date_context}{meeting_context_section}\n\n'
+        'content': f'{user_context_prefix}You are filtering files for meeting prep. Meeting: "{meeting_title}"{meeting_date_context}{meeting_context_section}{purpose_section}\n\n'
         f'{user_context_note}'
         f'✅ INCLUDE IF:\n'
         f'1. File name/content type suggests relevance to understood meeting purpose\n'
@@ -251,6 +267,7 @@ async def analyze_documents(
     meeting_context: Optional[Dict[str, Any]],
     user_context: Optional[Dict[str, Any]],
     attendees: List[Dict[str, Any]],
+    purpose_result: Optional[Dict[str, Any]] = None,
     request_id: str = 'unknown'
 ) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
     """
@@ -263,6 +280,7 @@ async def analyze_documents(
         meeting_context: Meeting context understanding (optional)
         user_context: User context object (optional)
         attendees: List of attendee objects
+        purpose_result: Detected meeting purpose result (optional)
         request_id: Request ID for logging
     
     Returns:
@@ -323,7 +341,7 @@ async def analyze_documents(
 
     # ===== FILE RELEVANCE FILTERING (METADATA-ONLY) =====
     original_file_count = len(files_with_content)
-    if files_with_content and meeting_context:
+    if files_with_content and (meeting_context or purpose_result):
         logger.info(f'  🔍 Filtering {len(files_with_content)} files for meeting relevance...', requestId=request_id)
 
         file_batch_size = 50
@@ -340,7 +358,7 @@ async def analyze_documents(
         file_relevance_promises = [
             _filter_file_batch(
                 batch, i, len(file_batches), meeting_title, meeting_date_context,
-                meeting_context, user_context, attendees, request_id
+                meeting_context, user_context, attendees, purpose_result, request_id
             )
             for i, batch in enumerate(file_batches)
         ]
@@ -379,8 +397,8 @@ async def analyze_documents(
         else:
             files_with_content = []
             logger.info(f'  ⚠️  No relevant files found after filtering', requestId=request_id)
-    elif files_with_content and not meeting_context:
-        logger.info(f'  ⚠️  Skipping file relevance filtering (no meeting context available), analyzing all {len(files_with_content)} files', requestId=request_id)
+    elif files_with_content and not (meeting_context or purpose_result):
+        logger.info(f'  ⚠️  Skipping file relevance filtering (no meeting context or purpose available), analyzing all {len(files_with_content)} files', requestId=request_id)
 
     if files_with_content:
         logger.info(f'  📊 Deep analysis of {len(files_with_content)} relevant documents...', requestId=request_id)
@@ -456,6 +474,14 @@ async def analyze_documents(
             if user_context:
                 user_context_prefix = f'You are preparing a brief for {user_context["formattedName"]} ({user_context["formattedEmail"]}). '
 
+            purpose_section = ''
+            if purpose_result:
+                purpose = purpose_result.get('purpose')
+                agenda = purpose_result.get('agenda', [])
+                confidence = purpose_result.get('confidence', 'low')
+                source = purpose_result.get('source', 'unknown')
+                purpose_section = f'\n\nDETECTED MEETING PURPOSE:\n- Purpose: {purpose if purpose else "Not detected"}\n- Agenda: {", ".join(agenda[:5]) if agenda else "None"}\n- Confidence: {confidence}\n- Source: {source}\nUse this to prioritize and frame the narrative.'
+
             # Include staleness warnings in prompt
             staleness_warning = ''
             if stale_documents:
@@ -469,7 +495,7 @@ async def analyze_documents(
             perspective_owner = "the user's" if not user_context else f"{user_context['formattedName']}'s"
             doc_narrative = await call_gpt([{
                 'role': 'system',
-                'content': f'{user_context_prefix}You are creating a comprehensive document analysis for meeting prep. Synthesize these document insights into a detailed paragraph (6-12 sentences) from {perspective_owner} perspective.{staleness_warning}\n\n'
+                'content': f'{user_context_prefix}You are creating a comprehensive document analysis for meeting prep. Synthesize these document insights into a detailed paragraph (6-12 sentences) from {perspective_owner} perspective.{staleness_warning}{purpose_section}\n\n'
                 f'Document Insights:\n'
                 f'{json.dumps(all_insights, indent=2)}\n\n'
                 f'Guidelines:\n'

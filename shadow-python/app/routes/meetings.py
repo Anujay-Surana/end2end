@@ -562,6 +562,7 @@ async def _generate_prep_response(
                     None,
                     user_context,
                     attendees,
+                    purpose_result,
                     request_id
                 )
             except Exception as doc_error:
