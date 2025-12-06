@@ -2,17 +2,17 @@
 Meeting Purpose Detection Pipeline
 
 Multi-stage detection of meeting purpose and agenda:
-1. Direct inference from calendar event
-2. Attendee-matching to find context email
-3. LLM-based educated guess
+1. LLM inference from calendar event
+2. Attendee-matching to find context emails (LLM extracted)
+3. Final LLM aggregation of stage outputs
 4. User confirmation/correction (if uncertain)
 """
 
+import asyncio
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from app.services.gpt_service import call_gpt, safe_parse_json
 from app.services.logger import logger
-from app.services.email_relevance import filter_relevant_emails
 
 
 async def detect_meeting_purpose(
@@ -38,7 +38,7 @@ async def detect_meeting_purpose(
         - agenda: List[str] (itemized agenda if found)
         - confidence: 'high', 'medium', 'low'
         - source: 'calendar', 'email', 'llm', 'uncertain'
-        - contextEmail: Optional email that provided context
+        - contextEmail: Optional email(s) that provided context
     """
     result = {
         'purpose': None,
@@ -47,130 +47,106 @@ async def detect_meeting_purpose(
         'source': 'uncertain',
         'contextEmail': None
     }
-    
-    # Stage 1: Direct inference from calendar event
-    calendar_result = _infer_from_calendar(meeting)
-    if calendar_result['confidence'] == 'high':
+
+    # Run calendar + email stages in parallel
+    calendar_task = asyncio.create_task(_llm_infer_from_calendar(meeting, attendees, request_id))
+    email_task = asyncio.create_task(_find_context_email(meeting, attendees, emails, user_context, request_id))
+
+    calendar_result, email_result = await asyncio.gather(calendar_task, email_task, return_exceptions=True)
+
+    # Handle possible exceptions
+    if isinstance(calendar_result, Exception):
+        logger.warn(f'Calendar purpose inference failed: {calendar_result}', requestId=request_id)
+        calendar_result = {'purpose': None, 'agenda': [], 'confidence': 'low', 'source': 'calendar', 'contextEmail': None}
+    if isinstance(email_result, Exception):
+        logger.warn(f'Email purpose inference failed: {email_result}', requestId=request_id)
+        email_result = {'purpose': None, 'agenda': [], 'confidence': 'low', 'source': 'email', 'contextEmail': None}
+
+    # Final aggregation using both stage outputs
+    final_result = await _final_llm_aggregation(meeting, calendar_result, email_result, request_id)
+
+    # If final LLM returns something meaningful, prefer it
+    if final_result.get('purpose'):
         logger.info(
-            'Purpose detected from calendar event',
+            'Purpose detected via final aggregation',
             requestId=request_id,
-            purpose=calendar_result['purpose'],
-            confidence=calendar_result['confidence']
+            purpose=final_result.get('purpose'),
+            confidence=final_result.get('confidence'),
+            source=final_result.get('source')
         )
+        return {**result, **final_result}
+
+    # Fallbacks: prefer email result, then calendar
+    if email_result.get('purpose'):
+        return {**result, **email_result, 'source': 'email'}
+    if calendar_result.get('purpose'):
         return {**result, **calendar_result, 'source': 'calendar'}
-    
-    # Stage 2: Attendee-matching to find context email
-    if emails and attendees:
-        email_result = await _find_context_email(
-            meeting,
-            attendees,
-            emails,
-            user_context,
-            request_id
-        )
-        if email_result['confidence'] in ['high', 'medium']:
-            logger.info(
-                'Purpose detected from context email',
-                requestId=request_id,
-                purpose=email_result['purpose'],
-                confidence=email_result['confidence']
-            )
-            return {**result, **email_result, 'source': 'email'}
-    
-    # Stage 3: LLM-based educated guess
-    llm_result = await _llm_educated_guess(
-        meeting,
-        attendees,
-        emails[:10] if emails else [],  # Limit to top 10 emails for speed
-        request_id
-    )
-    
-    if llm_result['confidence'] == 'high':
-        logger.info(
-            'Purpose detected via LLM',
-            requestId=request_id,
-            purpose=llm_result['purpose'],
-            confidence=llm_result['confidence']
-        )
-        return {**result, **llm_result, 'source': 'llm'}
-    
-    # If still uncertain, return uncertain result
-    if llm_result['purpose']:
-        return {**result, **llm_result, 'source': 'llm', 'confidence': 'low'}
-    
+
     return {**result, 'source': 'uncertain'}
 
 
-def _infer_from_calendar(meeting: Dict[str, Any]) -> Dict[str, Any]:
+async def _llm_infer_from_calendar(
+    meeting: Dict[str, Any],
+    attendees: List[Dict[str, Any]],
+    request_id: str = None
+) -> Dict[str, Any]:
     """
-    Stage 1: Direct inference from calendar event title/description
-    
-    Returns:
-        Dict with purpose, agenda, confidence
+    Stage 1: LLM inference from calendar event (title/description/attendees)
     """
     summary = (meeting.get('summary') or meeting.get('title') or '').strip()
     description = (meeting.get('description') or '').strip()
-    
-    if not summary:
+
+    if not summary and not description:
         return {'purpose': None, 'agenda': [], 'confidence': 'low'}
-    
-    # Check for explicit agenda markers
-    agenda_items = []
-    if description:
-        # Look for numbered lists, bullet points, or "Agenda:" markers
-        lines = description.split('\n')
-        in_agenda_section = False
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Detect agenda section
-            if 'agenda' in line.lower() and ':' in line:
-                in_agenda_section = True
-                continue
-            
-            # Extract agenda items (numbered or bulleted)
-            if in_agenda_section or line.startswith(('-', '*', '•', '1.', '2.', '3.')):
-                # Clean up the line
-                cleaned = line.lstrip('-*•0123456789. ').strip()
-                if cleaned and len(cleaned) > 3:
-                    agenda_items.append(cleaned)
-                    in_agenda_section = True
-    
-    # Extract purpose from title (simple heuristics)
-    purpose = None
-    confidence = 'low'
-    
-    # Common meeting patterns
-    if any(word in summary.lower() for word in ['standup', 'stand-up', 'daily sync']):
-        purpose = 'Daily standup/sync'
-        confidence = 'high'
-    elif any(word in summary.lower() for word in ['1:1', 'one-on-one', 'one on one']):
-        purpose = '1-on-1 meeting'
-        confidence = 'high'
-    elif any(word in summary.lower() for word in ['review', 'retrospective', 'retro']):
-        purpose = 'Review/retrospective'
-        confidence = 'high'
-    elif any(word in summary.lower() for word in ['planning', 'planning meeting']):
-        purpose = 'Planning meeting'
-        confidence = 'high'
-    elif any(word in summary.lower() for word in ['interview', 'screening']):
-        purpose = 'Interview'
-        confidence = 'high'
-    elif any(word in summary.lower() for word in ['demo', 'demonstration']):
-        purpose = 'Product demo'
-        confidence = 'high'
-    else:
-        # Use title as purpose if it's descriptive
-        if len(summary) > 10 and len(summary) < 100:
-            purpose = summary
-            confidence = 'medium'
-    
+
+    attendee_names = []
+    for att in attendees[:5]:
+        if isinstance(att, dict):
+            name = att.get('displayName') or att.get('name') or att.get('email')
+            if name:
+                attendee_names.append(name)
+
+    attendee_context = ', '.join(attendee_names) if attendee_names else 'Unknown attendees'
+
+    try:
+        response = await call_gpt([
+            {
+                'role': 'system',
+                'content': """You are analyzing a calendar event to determine meeting purpose and agenda.
+Return compact JSON:
+{"purpose":"...", "agenda":["..."], "confidence":"high|medium|low"}
+- Do NOT fabricate agenda items; only include if explicitly present.
+- Purpose should be concise and actionable.
+- Confidence high only when purpose is clear from provided text."""
+            },
+            {
+                'role': 'user',
+                'content': f"""Calendar Title: {summary or "(none)"}
+Description: {description or "(none)"}
+Attendees: {attendee_context}
+
+Return JSON only."""
+            }
+        ], max_tokens=400)
+
+        parsed = safe_parse_json(response)
+        if isinstance(parsed, dict):
+            return {
+                'purpose': parsed.get('purpose'),
+                'agenda': (parsed.get('agenda') or [])[:10],
+                'confidence': parsed.get('confidence', 'low'),
+                'source': 'calendar'
+            }
+    except Exception as e:
+        logger.warn(f'LLM calendar inference failed: {str(e)}', requestId=request_id)
+
+    # Fallback: use title as low-confidence purpose
+    fallback_purpose = summary if summary else None
     return {
-        'purpose': purpose,
-        'agenda': agenda_items[:10],  # Limit to 10 items
-        'confidence': confidence
+        'purpose': fallback_purpose,
+        'agenda': [],
+        'confidence': 'low',
+        'source': 'calendar'
     }
 
 
@@ -182,7 +158,7 @@ async def _find_context_email(
     request_id: str = None
 ) -> Dict[str, Any]:
     """
-    Stage 2: Find context email using attendee overlap
+    Stage 2: Find context emails using attendee overlap and LLM extraction
     
     Uses strict overlap criteria:
     - <=4 attendees: require 100% overlap (ALL attendees must match)
@@ -237,55 +213,76 @@ async def _find_context_email(
     
     # Sort by overlap ratio (highest first), then by date (most recent first)
     matching_emails.sort(key=lambda x: (-x['overlap'], _get_email_date(x['email'])), reverse=False)
-    
-    # Use the best matching email
-    best_match = matching_emails[0]['email']
-    
-    # Extract purpose and agenda from email
+
+    # Use up to top 5 overlapping emails for LLM context
+    selected = matching_emails[:5]
+    email_blocks = []
+    context_emails_meta = []
+    for idx, item in enumerate(selected):
+        email_obj = item['email']
+        subject = (email_obj.get('subject') or '').strip()
+        body = (email_obj.get('body') or email_obj.get('snippet') or '').strip()
+        trimmed_body = body[:1200]  # cap to keep prompt light
+        email_blocks.append(
+            f"Email {idx + 1} | overlap={item['overlap']:.2f}, matching={item['matching_count']}\n"
+            f"Subject: {subject or '(no subject)'}\n"
+            f"Body:\n{trimmed_body or '(no body)'}"
+        )
+        context_emails_meta.append({
+            'id': email_obj.get('id'),
+            'subject': subject,
+            'date': email_obj.get('date'),
+            'overlap': item['overlap'],
+            'matchingCount': item['matching_count']
+        })
+
+    email_context = "\n\n".join(email_blocks)
+    summary = (meeting.get('summary') or meeting.get('title') or '').strip()
+
+    try:
+        response = await call_gpt([
+            {
+                'role': 'system',
+                'content': """You are extracting meeting purpose/agenda from related emails.
+Return compact JSON:
+{"purpose":"...", "agenda":["..."], "confidence":"high|medium|low"}
+- Use the provided emails only; do NOT invent agenda items.
+- Consider overlap scores when judging confidence."""
+            },
+            {
+                'role': 'user',
+                'content': f"""Meeting Title: {summary or "(none)"}
+Attendee overlap emails (highest first):
+{email_context}
+
+Return JSON only."""
+            }
+        ], max_tokens=600)
+
+        parsed = safe_parse_json(response)
+        if isinstance(parsed, dict):
+            return {
+                'purpose': parsed.get('purpose'),
+                'agenda': (parsed.get('agenda') or [])[:10],
+                'confidence': parsed.get('confidence', 'low'),
+                'contextEmail': context_emails_meta,
+                'source': 'email'
+            }
+    except Exception as e:
+        logger.warn(f'LLM email inference failed: {str(e)}', requestId=request_id)
+
+    # Fallback: use the best email subject/body first line
+    best_match = selected[0]['email']
     subject = (best_match.get('subject') or '').strip()
     body = (best_match.get('body') or best_match.get('snippet') or '').strip()
-    
-    # Simple extraction: look for agenda in email body
-    agenda_items = []
-    if body:
-        lines = body.split('\n')
-        in_agenda = False
-        for line in lines[:50]:  # Check first 50 lines
-            line = line.strip()
-            if not line:
-                continue
-            
-            if 'agenda' in line.lower() and ':' in line:
-                in_agenda = True
-                continue
-            
-            if in_agenda and (line.startswith(('-', '*', '•', '1.', '2.')) or line[0].isdigit()):
-                cleaned = line.lstrip('-*•0123456789. ').strip()
-                if cleaned and len(cleaned) > 3:
-                    agenda_items.append(cleaned)
-                    if len(agenda_items) >= 10:
-                        break
-    
-    # Use subject or first line of body as purpose
-    purpose = subject
-    if not purpose and body:
-        first_line = body.split('\n')[0].strip()
-        if len(first_line) < 200:
-            purpose = first_line
-    
-    # Confidence based on overlap ratio
-    best_overlap = matching_emails[0]['overlap']
-    confidence = 'high' if best_overlap >= 0.75 else 'medium'
-    
+    fallback_purpose = subject or (body.split('\n')[0].strip() if body else None)
+
     return {
-        'purpose': purpose,
-        'agenda': agenda_items[:10],
-        'confidence': confidence,
-        'contextEmail': {
-            'id': best_match.get('id'),
-            'subject': subject,
-            'date': best_match.get('date')
-        }
+        'purpose': fallback_purpose,
+        'agenda': [],
+        'confidence': 'low',
+        'contextEmail': context_emails_meta,
+        'source': 'email'
     }
 
 
@@ -303,85 +300,64 @@ def _get_email_date(email: Dict[str, Any]) -> datetime:
         return datetime.min
 
 
-async def _llm_educated_guess(
+async def _final_llm_aggregation(
     meeting: Dict[str, Any],
-    attendees: List[Dict[str, Any]],
-    emails: List[Dict[str, Any]],
+    calendar_result: Dict[str, Any],
+    email_result: Dict[str, Any],
     request_id: str = None
 ) -> Dict[str, Any]:
     """
-    Stage 3: LLM-based educated guess
-    
-    Uses GPT to infer purpose from meeting title, description, and email context
+    Stage 3: Final LLM aggregation using outputs from calendar + email stages
     """
     summary = (meeting.get('summary') or meeting.get('title') or '').strip()
     description = (meeting.get('description') or '').strip()
-    
-    if not summary:
-        return {'purpose': None, 'agenda': [], 'confidence': 'low'}
-    
-    # Prepare email context (limit to 3 most relevant)
-    email_context = ''
-    if emails:
-        email_samples = emails[:3]
-        email_context = '\n\nRelevant emails:\n'
-        for e in email_samples:
-            subject = e.get('subject', '')
-            snippet = (e.get('snippet') or e.get('body') or '')[:200]
-            email_context += f'- Subject: {subject}\n  Preview: {snippet}\n'
-    
-    # Prepare attendee context
-    attendee_names = []
-    for att in attendees[:5]:
-        if isinstance(att, dict):
-            name = att.get('displayName') or att.get('name') or att.get('email')
-            if name:
-                attendee_names.append(name)
-    
-    attendee_context = ', '.join(attendee_names) if attendee_names else 'Unknown attendees'
-    
-    # Call GPT for purpose inference
+
+    calendar_json = {
+        'purpose': calendar_result.get('purpose'),
+        'agenda': calendar_result.get('agenda', []),
+        'confidence': calendar_result.get('confidence')
+    }
+    email_json = {
+        'purpose': email_result.get('purpose'),
+        'agenda': email_result.get('agenda', []),
+        'confidence': email_result.get('confidence')
+    }
+
     try:
-        response = await call_gpt([{
-            'role': 'system',
-            'content': """You are analyzing a calendar meeting to determine its purpose and agenda.
-
+        response = await call_gpt([
+            {
+                'role': 'system',
+                'content': """You are combining two purpose/agenda hypotheses (calendar + emails) to pick the final meeting purpose.
 Return JSON:
-{
-  "purpose": "Clear, concise purpose statement" | null,
-  "agenda": ["item 1", "item 2"] | [],
-  "confidence": "high" | "medium" | "low"
-}
-
+{"purpose":"...", "agenda":["..."], "confidence":"high|medium|low", "source":"calendar|email|combined"}
 Rules:
-- Only extract agenda items if explicitly mentioned (don't fabricate)
-- Purpose should be specific and actionable
-- Confidence should be "high" only if purpose is very clear from title/description
-- If uncertain, return "low" confidence"""
-        }, {
-            'role': 'user',
-            'content': f"""Meeting Title: {summary}
-Description: {description or '(none)'}
-Attendees: {attendee_context}
-{email_context}
+- Prefer explicit agenda items provided; do NOT invent.
+- If both sources disagree, choose the more specific + confident one.
+- Use "combined" when merging elements from both."""
+            },
+            {
+                'role': 'user',
+                'content': f"""Meeting Title: {summary or "(none)"}
+Description: {description or "(none)"}
 
-What is the purpose of this meeting? Extract agenda items if explicitly provided."""
-        }], 600)  # Lower token limit for speed
-        
+Calendar hypothesis: {calendar_json}
+Email hypothesis: {email_json}
+
+Return final JSON only."""
+            }
+        ], max_tokens=400)
+
         parsed = safe_parse_json(response)
         if isinstance(parsed, dict):
             return {
                 'purpose': parsed.get('purpose'),
-                'agenda': parsed.get('agenda', [])[:10],
-                'confidence': parsed.get('confidence', 'low')
+                'agenda': (parsed.get('agenda') or [])[:10],
+                'confidence': parsed.get('confidence', 'low'),
+                'source': parsed.get('source', 'llm'),
+                'contextEmail': email_result.get('contextEmail')
             }
     except Exception as e:
-        logger.warn(f'LLM purpose inference failed: {str(e)}', requestId=request_id)
-    
-    # Fallback: use title as purpose
-    return {
-        'purpose': summary if len(summary) < 100 else summary[:100] + '...',
-        'agenda': [],
-        'confidence': 'low'
-    }
+        logger.warn(f'Final LLM aggregation failed: {str(e)}', requestId=request_id)
+
+    return {'purpose': None, 'agenda': [], 'confidence': 'low', 'source': 'llm', 'contextEmail': email_result.get('contextEmail')}
 

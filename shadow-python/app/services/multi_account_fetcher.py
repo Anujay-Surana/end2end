@@ -7,7 +7,6 @@ we search ALL their connected accounts, not just the one where the meeting is sc
 """
 
 import asyncio
-import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from app.services.google_api import (
@@ -17,31 +16,45 @@ from app.services.google_api import (
     fetch_calendar_events,
     parse_email_date
 )
+from app.services.gpt_service import call_gpt, safe_parse_json
 from app.services.logger import logger
 
 
-def extract_keywords(title: str, description: str = '') -> List[str]:
+async def extract_keywords(title: str, description: str = '') -> List[str]:
     """
-    Extract keywords from meeting title and description
-    Args:
-        title: Meeting title
-        description: Meeting description
-    Returns:
-        List of keywords (max 5)
+    Extract keywords via a single LM call (no regex heuristics).
+    Returns up to 6 concise keywords.
     """
-    text = f"{title} {description}".lower()
-    stop_words = {
-        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
-        'meeting', 'discussion', 'call', 'review', 'session', 'sync', 'chat', 'talk'
-    }
+    meeting_text = f"{title or ''}\n{description or ''}".strip()
+    if not meeting_text:
+        return []
 
-    words = [
-        w for w in re.split(r'[\s\-_,\.;:()[\]{}]+', text)
-        if len(w) > 3 and w not in stop_words and not re.match(r'^\d+$', w)
-    ]
+    try:
+        response = await call_gpt([{
+            'role': 'system',
+            'content': (
+                "Extract 3-6 short, specific keywords from the meeting title/description. "
+                "Return JSON array of lowercase strings without duplicates. "
+                "Omit generic words (meeting, call, sync, discuss, review) and dates/times."
+            )
+        }, {
+            'role': 'user',
+            'content': meeting_text
+        }], max_tokens=150)
 
-    # Return unique words, max 5
-    return list(dict.fromkeys(words))[:5]
+        parsed = safe_parse_json(response)
+        if not isinstance(parsed, list):
+            return []
+
+        keywords: List[str] = []
+        for item in parsed:
+            kw = str(item).strip().lower()
+            if kw and kw not in keywords and len(kw) <= 40:
+                keywords.append(kw)
+        return keywords[:6]
+    except Exception as error:
+        logger.warn(f'Keyword extraction via LM failed: {str(error)}')
+        return []
 
 
 def get_meeting_datetime(meeting: Dict[str, Any], field: str = 'start') -> Optional[str]:
@@ -69,199 +82,87 @@ async def fetch_emails_from_all_accounts(
     meeting: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Fetch emails from all connected accounts in parallel (ENHANCED WITH 2-YEAR LOOKBACK + KEYWORDS)
-    Args:
-        accounts: Array of account objects with access_token
-        attendees: Meeting attendees
-        meeting: Meeting object
-    Returns:
-        Dict with emails and account stats
+    Fetch emails from all connected accounts in parallel using attendee overlap
+    (excluding the account itself) and LM-extracted keywords. Single lookback
+    window, bounded by meeting date.
     """
     logger.info(f'📧 Fetching emails from {len(accounts)} account(s)...')
 
-    # Extract keywords from meeting title for enhanced search
     meeting_title = meeting.get('summary') or meeting.get('title') or ''
-    keywords = extract_keywords(meeting_title, meeting.get('description') or '')
+    keywords = await extract_keywords(meeting_title, meeting.get('description') or '')
     if keywords:
-        logger.debug(f'   🔑 Extracted keywords: {", ".join(keywords)}')
+        logger.debug(f'   🔑 LM keywords: {", ".join(keywords)}')
 
-    # Extract meeting date for temporal filtering (only use data BEFORE meeting)
     meeting_start = get_meeting_datetime(meeting, 'start')
     if meeting_start:
         meeting_date = datetime.fromisoformat(meeting_start.replace('Z', '+00:00'))
-        # Ensure timezone-aware (if naive, assume UTC)
         if meeting_date.tzinfo is None:
             meeting_date = meeting_date.replace(tzinfo=timezone.utc)
     else:
         meeting_date = datetime.now(timezone.utc)
-    
-    # Use end of meeting day as cutoff (23:59:59) to include emails from the same day
+
     meeting_cutoff = meeting_date.replace(hour=23, minute=59, second=59, microsecond=999999)
     before_date = meeting_cutoff.strftime('%Y/%m/%d')
-    
-    # TIME-BOUNDED CONTEXT SEARCH: Cascade 60 → 120 → 180 days
-    # Start with 60 days, extend if no hits
-    time_windows = [
-        {'days': 60, 'label': '60 days'},
-        {'days': 120, 'label': '120 days'},
-        {'days': 180, 'label': '180 days (max)'}
-    ]
-    
-    # Use 60 days as initial window
-    initial_window = time_windows[0]
-    after_date_obj = meeting_date - timedelta(days=initial_window['days'])
-    after_date = after_date_obj.strftime('%Y/%m/%d')
-    
-    logger.info(f'   📅 Using {initial_window["label"]} lookback window', requestId=None)
+    after_date = (meeting_date - timedelta(days=180)).strftime('%Y/%m/%d')
 
     async def fetch_account_emails(account: Dict[str, Any]) -> Dict[str, Any]:
-        nonlocal initial_window
         try:
-            account_email = account.get('account_email', 'unknown')
+            account_email = (account.get('account_email') or '').lower()
 
-            # Build enhanced Gmail search query with keywords and date filter
             attendee_emails = [
-                a.get('email') or a.get('emailAddress')
+                (a.get('email') or a.get('emailAddress')).lower()
                 for a in attendees
-                if a.get('email') or a.get('emailAddress')
+                if (a.get('email') or a.get('emailAddress'))
             ]
+            attendee_emails = [e for e in attendee_emails if e and e != account_email]
 
-            # Handle empty attendees case
-            if len(attendee_emails) == 0:
-                logger.warning('   ⚠️  No attendee emails provided, using keyword-only search')
-                if len(keywords) == 0:
-                    return {
-                        'accountEmail': account_email,
-                        'emails': [],
-                        'success': True,
-                        'timeWindow': initial_window['label']
-                    }
-                keyword_parts = ' OR '.join([f'subject:"{k}" OR "{k}"' for k in keywords[:3]])
-                query = f'({keyword_parts}) after:{after_date} before:{before_date}'
-                emails = await fetch_gmail_messages(account, query, 100)
-                
-                # Post-fetch filtering: Remove any emails after meeting date
-                filtered_emails = []
-                for e in emails:
-                    if not e.get('date'):
-                        filtered_emails.append(e)
-                        continue
-                    email_date = parse_email_date(e['date'])
-                    if email_date and email_date <= meeting_date:
-                        filtered_emails.append(e)
-                emails = filtered_emails
-                
-                # Cascade search if no results and not at max window
-                if len(emails) == 0 and initial_window['days'] < 180:
-                    logger.info(f'   ⚠️  No emails found in {initial_window["label"]}, extending search window...')
-                    # Try next window
-                    for window in time_windows[1:]:
-                        if window['days'] <= initial_window['days']:
-                            continue
-                        extended_after = (meeting_date - timedelta(days=window['days'])).strftime('%Y/%m/%d')
-                        extended_query = f'({keyword_parts}) after:{extended_after} before:{before_date}'
-                        extended_emails = await fetch_gmail_messages(account, extended_query, 100)
-                        
-                        # Filter by date
-                        filtered_extended = []
-                        for e in extended_emails:
-                            if not e.get('date'):
-                                continue
-                            email_date = parse_email_date(e['date'])
-                            if email_date and email_date <= meeting_date:
-                                filtered_extended.append(e)
-                        
-                        if filtered_extended:
-                            logger.info(f'   ✓ Found {len(filtered_extended)} emails in {window["label"]} window')
-                            emails = filtered_extended
-                            initial_window = window
-                            break
-                
-                return {
-                    'accountEmail': account_email,
-                    'emails': emails,
-                    'success': True,
-                    'timeWindow': initial_window['label']
-                }
-
-            domains = list(set([e.split('@')[1] for e in attendee_emails if '@' in e]))
-
-            attendee_queries = ' OR '.join([f'from:{email} OR to:{email}' for email in attendee_emails])
-            domain_queries = ' OR '.join([f'from:*@{d}' for d in domains]) if domains else ''
-
-            # Add keyword search
-            keyword_query = ''
-            if keywords:
-                keyword_parts = ' OR '.join([f'subject:"{k}" OR "{k}"' for k in keywords[:3]])
-                keyword_query = f'({keyword_parts})'
-
-            # Build query parts conditionally
             query_parts = []
-            if attendee_queries:
+            if attendee_emails:
+                attendee_queries = ' OR '.join([f'from:{email} OR to:{email} OR cc:{email}' for email in attendee_emails])
                 query_parts.append(f'({attendee_queries})')
-            if domain_queries:
-                query_parts.append(f'({domain_queries})')
-            if keyword_query:
-                query_parts.append(keyword_query)
+            if keywords:
+                keyword_parts = ' OR '.join([f'subject:\"{k}\" OR \"{k}\"' for k in keywords])
+                query_parts.append(f'({keyword_parts})')
 
             if len(query_parts) == 0:
-                logger.warning('   ⚠️  No valid query parts to search')
+                logger.info('   ℹ️  No attendees/keywords available for email search')
                 return {
                     'accountEmail': account_email,
                     'emails': [],
-                    'success': True,
-                    'timeWindow': initial_window['label']
+                    'success': True
                 }
 
             query = f'{" OR ".join(query_parts)} after:{after_date} before:{before_date}'
-
-            # Fetch up to 100 emails
             emails = await fetch_gmail_messages(account, query, 100)
-            
-            # Post-fetch filtering: Remove any emails after meeting date
-            filtered_emails = []
-            for e in emails:
-                if not e.get('date'):
-                    filtered_emails.append(e)
-                    continue
-                email_date = parse_email_date(e['date'])
-                if email_date and email_date <= meeting_date:
-                    filtered_emails.append(e)
-            emails = filtered_emails
-            
-            # Cascade search if no results and not at max window
-            if len(emails) == 0 and initial_window['days'] < 180:
-                logger.info(f'   ⚠️  No emails found in {initial_window["label"]}, extending search window...')
-                # Try next windows
-                for window in time_windows[1:]:
-                    if window['days'] <= initial_window['days']:
-                        continue
-                    extended_after = (meeting_date - timedelta(days=window['days'])).strftime('%Y/%m/%d')
-                    extended_query = f'{" OR ".join(query_parts)} after:{extended_after} before:{before_date}'
-                    extended_emails = await fetch_gmail_messages(account, extended_query, 100)
-                    
-                    # Filter by date
-                    filtered_extended = []
-                    for e in extended_emails:
-                        if not e.get('date'):
-                            continue
-                        email_date = parse_email_date(e['date'])
-                        if email_date and email_date <= meeting_date:
-                            filtered_extended.append(e)
-                    
-                    if filtered_extended:
-                        logger.info(f'   ✓ Found {len(filtered_extended)} emails in {window["label"]} window')
-                        emails = filtered_extended
-                        initial_window = window
-                        break
 
-            logger.debug(f'   ✅ Fetched {len(emails)} emails from {account_email} (window: {initial_window["label"]})')
+            filtered_emails = []
+            for email in emails:
+                if not email.get('date'):
+                    filtered_emails.append(email)
+                    continue
+                email_date = parse_email_date(email['date'])
+                if email_date and email_date <= meeting_date:
+                    filtered_emails.append(email)
+
+            # Fallback: if we didn't get enough messages, pull user-sent mail in the window
+            # This helps user profiling which needs >=5 sent emails.
+            if len(filtered_emails) < 5 and account_email:
+                fallback_query = f'from:{account_email} after:{after_date} before:{before_date}'
+                fallback_emails = await fetch_gmail_messages(account, fallback_query, 50)
+                for email in fallback_emails:
+                    if not email.get('date'):
+                        filtered_emails.append(email)
+                        continue
+                    email_date = parse_email_date(email['date'])
+                    if email_date and email_date <= meeting_date:
+                        filtered_emails.append(email)
+
+            logger.debug(f'   ✅ Fetched {len(filtered_emails)} emails from {account_email}')
 
             return {
                 'accountEmail': account_email,
-                'emails': emails,
-                'success': True,
-                'timeWindow': initial_window['label']
+                'emails': filtered_emails,
+                'success': True
             }
         except Exception as error:
             logger.error(f'   ❌ Error fetching emails for {account.get("account_email", "unknown")}: {str(error)}')
@@ -272,11 +173,8 @@ async def fetch_emails_from_all_accounts(
                 'error': str(error)
             }
 
-    # Fetch from all accounts in parallel
     results = await asyncio.gather(*[fetch_account_emails(acc) for acc in accounts], return_exceptions=True)
 
-    # Process results
-    all_emails = []
     account_stats = {
         'totalAccounts': len(accounts),
         'successfulAccounts': 0,
@@ -290,7 +188,6 @@ async def fetch_emails_from_all_accounts(
             account_stats['partialFailure'] = True
         elif isinstance(result, dict):
             if result.get('success'):
-                all_emails.extend(result.get('emails', []))
                 account_stats['successfulAccounts'] += 1
             else:
                 account_stats['failedAccounts'].append({
@@ -299,8 +196,11 @@ async def fetch_emails_from_all_accounts(
                 })
                 account_stats['partialFailure'] = True
 
-    # Deduplicate emails
-    deduplicated_emails = merge_and_deduplicate_emails([r.get('emails', []) for r in results if isinstance(r, dict) and r.get('success')])
+    deduplicated_emails = merge_and_deduplicate_emails([
+        r.get('emails', [])
+        for r in results
+        if isinstance(r, dict) and r.get('success')
+    ])
 
     logger.info(f'✅ Fetched {len(deduplicated_emails)} unique emails from {account_stats["successfulAccounts"]} account(s)')
 
@@ -341,16 +241,17 @@ async def fetch_files_from_all_accounts(
     
     # Build Drive query
     attendee_emails = [
-        a.get('email') or a.get('emailAddress')
+        (a.get('email') or a.get('emailAddress')).lower()
         for a in attendees
-        if a.get('email') or a.get('emailAddress')
+        if (a.get('email') or a.get('emailAddress'))
     ]
 
     async def fetch_account_files(account: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            account_email = account.get('account_email', 'unknown')
+            account_email = (account.get('account_email') or 'unknown').lower()
+            target_emails = [e for e in attendee_emails if e and e != account_email]
             
-            if len(attendee_emails) == 0:
+            if len(target_emails) == 0:
                 return {
                     'accountEmail': account_email,
                     'files': [],
@@ -360,7 +261,7 @@ async def fetch_files_from_all_accounts(
             # Build permission query
             perm_queries = ' or '.join([
                 f"'{email}' in readers or '{email}' in writers"
-                for email in attendee_emails
+                for email in target_emails
             ])
             perm_query = f'({perm_queries}) and modifiedTime > \'{two_years_ago.isoformat()}\' and modifiedTime < \'{meeting_date.isoformat()}\''
 
@@ -437,25 +338,26 @@ async def fetch_files_from_all_accounts(
 
 async def fetch_calendar_from_all_accounts(
     accounts: List[Dict[str, Any]],
+    attendees: List[Dict[str, Any]],
     meeting_date: datetime
 ) -> Dict[str, Any]:
     """
-    Fetch calendar events from all connected accounts (6-MONTH LOOKBACK)
-    Args:
-        accounts: Array of account objects
-        meeting_date: Meeting date for context
-    Returns:
-        Dict with calendar events
+    Fetch calendar events from all connected accounts (6-month lookback),
+    filtering to events that overlap with provided attendees (excluding the
+    account itself).
     """
     logger.info(f'📅 Fetching calendar events from {len(accounts)} account(s)...')
 
-    # Ensure meeting_date is timezone-aware (for RFC3339 format)
+    target_attendees = {
+        (a.get('email') or a.get('emailAddress')).lower()
+        for a in attendees
+        if (a.get('email') or a.get('emailAddress'))
+    }
+
     if meeting_date.tzinfo is None:
         meeting_date = meeting_date.replace(tzinfo=timezone.utc)
-    
-    # 6-MONTH lookback FROM MEETING DATE
+
     six_months_ago = meeting_date - timedelta(days=180)
-    # Ensure timezone-aware for RFC3339 format
     if six_months_ago.tzinfo is None:
         six_months_ago = six_months_ago.replace(tzinfo=timezone.utc)
     
@@ -464,16 +366,31 @@ async def fetch_calendar_from_all_accounts(
 
     async def fetch_account_calendar(account: Dict[str, Any]) -> List[Dict[str, Any]]:
         try:
+            account_email = (account.get('account_email') or '').lower()
+            effective_targets = {e for e in target_attendees if e != account_email}
+            if not effective_targets:
+                return []
+
             events = await fetch_calendar_events(account, time_min, time_max, 100)
-            return events
+
+            filtered_events: List[Dict[str, Any]] = []
+            for event in events:
+                event_attendees = event.get('attendees') or []
+                event_emails = {
+                    (att.get('email') or att.get('emailAddress') or '').lower()
+                    for att in event_attendees
+                    if (att.get('email') or att.get('emailAddress'))
+                }
+                if event_emails.intersection(effective_targets):
+                    filtered_events.append(event)
+
+            return filtered_events
         except Exception as error:
             logger.error(f'   ❌ Error fetching calendar for {account.get("account_email", "unknown")}: {str(error)}')
             return []
 
-    # Fetch from all accounts in parallel
     results = await asyncio.gather(*[fetch_account_calendar(acc) for acc in accounts], return_exceptions=True)
 
-    # Process results
     all_events = []
     for result in results:
         if isinstance(result, list):
@@ -481,7 +398,6 @@ async def fetch_calendar_from_all_accounts(
         elif isinstance(result, Exception):
             logger.error(f'   ❌ Calendar fetch exception: {str(result)}')
 
-    # Deduplicate events
     deduplicated_events = merge_and_deduplicate_calendar_events(all_events)
 
     logger.info(f'✅ Fetched {len(deduplicated_events)} unique calendar events')

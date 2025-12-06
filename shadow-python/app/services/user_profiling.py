@@ -517,6 +517,71 @@ Prioritize sent emails but use received emails for additional context."""
         }
 
 
+async def extract_responsibilities(
+    user_sent_emails: List[Dict[str, Any]] = None,
+    user_received_emails: List[Dict[str, Any]] = None,
+    web_bio: Dict[str, Any] = None,
+    request_id: str = None
+) -> Dict[str, Any]:
+    """
+    Extract explicit responsibilities/ownership areas using model-based synthesis.
+    Prefers sent emails; supplements with received emails and web bio text.
+    """
+    if not user_sent_emails:
+        user_sent_emails = []
+    if not user_received_emails:
+        user_received_emails = []
+    if not web_bio:
+        web_bio = {}
+
+    # Sample emails (sent preferred, then received) to keep prompt small
+    email_samples = []
+    for e in (user_sent_emails[:15] + user_received_emails[:10]):
+        email_samples.append({
+            'source': 'sent' if e in user_sent_emails else 'received',
+            'subject': e.get('subject', ''),
+            'from': e.get('from', ''),
+            'to': e.get('to', ''),
+            'bodyPreview': (e.get('body') or e.get('snippet') or '')[:1200]
+        })
+
+    web_text = web_bio.get('bio') or ''
+
+    if len(email_samples) == 0 and not web_text:
+        return {'responsibilities': [], 'confidence': 'low'}
+
+    try:
+        analysis = await call_gpt([{
+            'role': 'system',
+            'content': """Identify the user's explicit roles and responsibilities.
+
+Return JSON:
+{
+  "responsibilities": ["clear responsibility 1", "clear responsibility 2", ...],
+  "confidence": "high" | "medium" | "low"
+}
+
+Guidelines:
+- Use concrete ownership areas (e.g., fundraising, product direction, GTM, team leadership, compliance).
+- Prefer direct statements and repeated patterns; avoid generic traits.
+- If evidence is thin, keep the list short and lower confidence."""
+        }, {
+            'role': 'user',
+            'content': f"Email samples:\n{json.dumps(email_samples, default=str)}\n\nWeb bio text:\n{web_text}"
+        }], 800)
+
+        parsed = safe_parse_json(analysis)
+        if isinstance(parsed, dict):
+            return {
+                'responsibilities': parsed.get('responsibilities', []) if isinstance(parsed.get('responsibilities'), list) else [],
+                'confidence': parsed.get('confidence', 'low')
+            }
+    except Exception as e:
+        logger.warn(f'Responsibility extraction failed: {str(e)}', requestId=request_id)
+
+    return {'responsibilities': [], 'confidence': 'low'}
+
+
 def analyze_working_patterns(events: List[Dict[str, Any]], user_email: str) -> Dict[str, Any]:
     """
     Analyze working patterns from calendar events
@@ -618,6 +683,7 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
         'expertise': None,
         'workingPatterns': None,
         'biographicalInfo': None,
+        'responsibilities': None,
         'relationships': []
     }
     
@@ -806,11 +872,17 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
                             f'  "bio": "Brief professional bio or summary" | null,\n'
                             f'  "expertise": ["area 1", "area 2"] | [],\n'
                             f'  "education": "Education background" | null,\n'
+                            f'  "contactPoints": {{\n'
+                            f'    "linkedin": "https://..." | null,\n'
+                            f'    "website": "https://..." | null,\n'
+                            f'    "twitter": "@handle" | null\n'
+                            f'  }},\n'
+                            f'  "responsibilities": ["role/responsibility 1", "role/responsibility 2"] | [],\n'
                             f'  "confidence": "high" | "medium" | "low"\n'
                             f'}}\n\n'
-                            f'Focus on current role, company, location, and professional background.',
+                            f'Focus on current role, company, location, professional background, and any explicit responsibilities or scopes of work.',
                             validated_results[:5],
-                            800
+                            900
                         )
                         
                         if web_synthesis:
@@ -826,6 +898,14 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
             except Exception as web_error:
                 logger.error(f"  ⚠️  Web search failed for user profile: {str(web_error)}", requestId=request_id)
     
+    # Extract responsibilities (combine emails + web bio)
+    responsibilities_data = await extract_responsibilities(
+        user_sent_emails,
+        user_received_emails,
+        web_biographical_info,
+        request_id
+    )
+
     # Merge location data (combine email and calendar sources)
     merged_location = None
     if biographical_from_emails.get('location') or location_and_travel.get('location'):
@@ -852,6 +932,7 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
         'bio': web_biographical_info.get('bio'),
         'expertise': web_biographical_info.get('expertise', []),
         'education': web_biographical_info.get('education'),
+        'contactPoints': (web_biographical_info.get('contactPoints') or {}) if web_biographical_info else {},
         'travelPatterns': location_and_travel.get('travelPatterns'),
         'confidence': web_biographical_info.get('confidence') or biographical_from_emails.get('confidence') or role_from_content.get('confidence', 'low'),
         'sources': {
@@ -862,6 +943,8 @@ async def build_user_profile(user: Dict[str, Any], all_emails: List[Dict[str, An
             'calendar': 'calendar' if location_and_travel.get('location') else None
         }
     }
+
+    profile['responsibilities'] = responsibilities_data.get('responsibilities', [])
     
     return profile
 

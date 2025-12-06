@@ -227,7 +227,7 @@ async def get_meetings_for_day(
         
         classified_meetings = []
         for meeting in all_meetings:
-            classification = classify_calendar_event(meeting, user_email, user_emails)
+            classification = await classify_calendar_event(meeting, user_email, user_emails)
             meeting['_classification'] = classification
             classified_meetings.append(meeting)
         

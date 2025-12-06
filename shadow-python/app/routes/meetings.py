@@ -83,85 +83,6 @@ def format_meeting_date(meeting: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def understand_meeting_context(
-    meeting: Dict[str, Any],
-    attendees: List[Dict[str, Any]],
-    user_context: Optional[Dict[str, Any]]
-) -> Dict[str, Any]:
-    """Understand meeting context dynamically from available information"""
-    meeting_title = meeting.get('summary') or meeting.get('title') or 'Untitled Meeting'
-    meeting_description = meeting.get('description', '')
-
-    attendee_info = [
-        {
-            'name': a.get('displayName') or a.get('name') or (a.get('email') or a.get('emailAddress') or '').split('@')[0] or 'Unknown',
-            'email': a.get('email') or a.get('emailAddress')
-        }
-        for a in (attendees or [])
-    ]
-
-    user_context_prefix = ''
-    if user_context:
-        user_context_prefix = f'You are preparing a brief for {user_context["formattedName"]} ({user_context["formattedEmail"]}). '
-
-    try:
-        analysis = await call_gpt([{
-            'role': 'system',
-            'content': (
-                f'{user_context_prefix}You are analyzing a meeting to understand its context and purpose. Your goal is to extract key information that will help filter relevant emails.\n\n'
-                f'CRITICAL: Don\'t make assumptions. Only extract information that is clearly present in the available context.\n\n'
-                f'Analyze:\n'
-                f'- Meeting title: What does it tell us?\n'
-                f'- Meeting description: What additional context is provided?\n'
-                f'- Attendees: Who are the key people involved?\n'
-                f'- Extract entities: Person names, project names, topics mentioned\n\n'
-                f'Return JSON:\n'
-                f'{{\n'
-                f'  "understoodPurpose": "What this meeting is actually about based on available context (be specific, don\'t guess)",\n'
-                f'  "keyEntities": ["extracted entities like person names, projects, topics"],\n'
-                f'  "keyTopics": ["extracted topics/themes"],\n'
-                f'  "isSpecificMeeting": true/false,\n'
-                f'  "confidence": "high" | "medium" | "low",\n'
-                f'  "reasoning": "Why we think this based on available context"\n'
-                f'}}\n\n'
-                f'Guidelines:\n'
-                f'- If context is insufficient, mark confidence as "low" and be conservative\n'
-                f'- Don\'t assume meeting types\n'
-                f'- Extract entities from actual context, not patterns\n'
-                f'- If you can\'t determine purpose clearly, say so'
-            )
-        }, {
-            'role': 'user',
-            'content': (
-                f'Meeting Title: "{meeting_title}"\n'
-                + (f'Meeting Description: "{meeting_description}"\n' if meeting_description else 'No description provided\n')
-                + f'Attendees: {", ".join([a["name"] + (" (" + a["email"] + ")" if a.get("email") else "") for a in attendee_info]) or "No attendees listed"}\n'
-                + (f'User: {user_context["formattedName"]} ({user_context["formattedEmail"]})\n\n' if user_context else '\n')
-                + 'Analyze this meeting and extract its context.'
-            )
-        }], 4000)
-
-        context = safe_parse_json(analysis) or {}
-
-        return {
-            'understoodPurpose': context.get('understoodPurpose') or 'Meeting purpose unclear from available context',
-            'keyEntities': context.get('keyEntities') if isinstance(context.get('keyEntities'), list) else [],
-            'keyTopics': context.get('keyTopics') if isinstance(context.get('keyTopics'), list) else [],
-            'isSpecificMeeting': context.get('isSpecificMeeting') is True,
-            'confidence': context.get('confidence') or 'low',
-            'reasoning': context.get('reasoning') or 'Context analysis completed'
-        }
-    except Exception as e:
-        logger.error(f'Failed to understand meeting context: {str(e)}')
-        return {
-            'understoodPurpose': 'Meeting purpose unclear from available context',
-            'keyEntities': [],
-            'keyTopics': [],
-            'isSpecificMeeting': False,
-            'confidence': 'low',
-            'reasoning': 'Failed to analyze meeting context'
-        }
-
 
 async def _generate_prep_response(
     request_body: MeetingPrepRequest,
@@ -219,7 +140,7 @@ async def _generate_prep_response(
         # Classify the meeting event
         user_email = user_context.get('email') if user_context else (user.get('email') if user else '')
         user_emails = user_context.get('emails', []) if user_context else []
-        classification = classify_calendar_event(meeting, user_email, user_emails)
+        classification = await classify_calendar_event(meeting, user_email, user_emails)
         
         # Skip full prep for non-meeting events
         if not should_prep_event(classification):
@@ -335,26 +256,7 @@ async def _generate_prep_response(
 
             accounts = token_validation_result['validAccounts']
 
-            # ===== STEP 1: UNDERSTAND MEETING CONTEXT (from calendar event only) =====
-            logger.info(f'\n  🧠 Understanding meeting context from calendar event...', requestId=request_id)
-            meeting_context = None
-            try:
-                meeting_context = await understand_meeting_context(meeting, attendees, user_context)
-                logger.info(f'  ✓ Meeting context understood: {meeting_context["confidence"]} confidence', requestId=request_id)
-            except Exception as context_error:
-                logger.error(f'  ❌ Meeting context understanding failed: {str(context_error)}', requestId=request_id)
-                meeting_context = {
-                    'understoodPurpose': meeting_title,
-                    'keyEntities': [],
-                    'keyTopics': [],
-                    'isSpecificMeeting': False,
-                    'confidence': 'low',
-                    'reasoning': f'Context analysis failed: {str(context_error)}'
-                }
-            logger.info(f'     Purpose: {meeting_context["understoodPurpose"][:100]}...', requestId=request_id)
-            logger.info(f'     Key Entities: {", ".join(meeting_context["keyEntities"]) or "none"}', requestId=request_id)
-
-            # ===== STEP 2: DETECT MEETING PURPOSE (with minimal email fetch for Stage 2) =====
+            # ===== STEP 1: DETECT MEETING PURPOSE (with minimal email fetch for Stage 2) =====
             yield send_progress('detecting_purpose', {'message': 'Detecting meeting purpose...'})
             if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
                 yield send_progress('keepalive', {'message': 'Detecting purpose...'})
@@ -368,7 +270,7 @@ async def _generate_prep_response(
             try:
                 from app.services.multi_account_fetcher import fetch_emails_from_all_accounts
                 minimal_email_result = await fetch_emails_from_all_accounts(accounts, attendees, meeting)
-                minimal_emails = minimal_email_result.get('emails', [])[:50]  # Limit to 50 for speed
+                minimal_emails = minimal_email_result.get('emails', [])
                 logger.info(f'  ✓ Fetched {len(minimal_emails)} emails for purpose detection Stage 2', requestId=request_id)
             except Exception as email_fetch_error:
                 logger.warn(f'  ⚠️  Minimal email fetch failed for purpose detection: {str(email_fetch_error)}', requestId=request_id)
@@ -398,7 +300,7 @@ async def _generate_prep_response(
                     'source': 'error'
                 }
 
-            # ===== STEP 3: FETCH FULL CONTEXT FROM ALL ACCOUNTS =====
+            # ===== STEP 2: FETCH FULL CONTEXT FROM ALL ACCOUNTS =====
             yield send_progress('fetching_data', {'message': 'Fetching emails, files, and calendar events...'})
             if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
                 yield send_progress('keepalive', {'message': 'Fetching data from accounts...'})
@@ -432,7 +334,7 @@ async def _generate_prep_response(
             else:
                 meeting_datetime = datetime.now(timezone.utc)
             
-            calendar_result = await fetch_calendar_from_all_accounts(accounts, meeting_datetime)
+            calendar_result = await fetch_calendar_from_all_accounts(accounts, attendees, meeting_datetime)
             calendar_events = calendar_result.get('results', [])
 
             # ===== BUILD USER CONTEXT/PROFILE =====
@@ -453,86 +355,58 @@ async def _generate_prep_response(
                         if not user_emails:
                             user_emails = [user_context.get('email')] if user_context.get('email') else []
                         user_emails_lower = [e.lower() for e in user_emails if e]
-                        
-                        # Extract email from "from" field (handles "Name <email>" format)
-                        def extract_email_from_header(header: str) -> str:
-                            """Extract email address from header like 'Name <email@domain.com>' or 'email@domain.com'"""
-                            if not header:
-                                return ''
-                            # Try to find email in angle brackets
-                            match = re.search(r'<([^>]+)>', header)
-                            if match:
-                                return match.group(1).lower()
-                            # If no brackets, check if it's already an email
-                            if '@' in header:
-                                return header.strip().lower()
-                            return ''
-                        
-                        # Filter emails sent by the user (check against all user emails)
-                        user_sent_emails = []
-                        for e in emails:
-                            if not isinstance(e, dict):
-                                continue
-                            from_header = e.get('from', '') or ''
-                            from_email = extract_email_from_header(from_header)
-                            # Check if extracted email matches any of the user's emails (exact match)
-                            if from_email and from_email in user_emails_lower:
-                                user_sent_emails.append(e)
-                        
+
                         logger.info(
-                            f'  📊 Email analysis: {len(emails)} total emails, {len(user_sent_emails)} sent by user',
+                            f'  📊 Email analysis: {len(emails)} total emails available for profiling',
                             requestId=request_id,
-                            userEmails=user_emails,
-                            sentEmailCount=len(user_sent_emails)
+                            userEmails=user_emails
+                        )
+
+                        # Pass all emails (not just sent) so build_user_profile can extract both sent and received
+                        # Get files with content for user profiling
+                        files_with_content = [f for f in files if isinstance(f, dict) and f.get('content')]
+                        user_files = [
+                            f for f in files_with_content
+                            if isinstance(f, dict) and any(
+                                user_email.lower() in (f.get('ownerEmail') or f.get('owner') or '').lower()
+                                for user_email in user_emails_lower
+                            )
+                        ]
+                        
+                        # Ensure user_context has emails list for multi-account support
+                        user_context_with_emails = {
+                            **user_context,
+                            'emails': user_emails  # Include all user emails
+                        }
+                        
+                        # Get parallel client for web search (same as used for attendee research)
+                        parallel_client = getattr(request.state, 'parallel_client', None) if request else None
+                        
+                        full_profile = await build_user_profile(
+                            user_context_with_emails,
+                            emails,  # Pass all emails so function can extract both sent and received
+                            user_files,
+                            calendar_events,
+                            parallel_client,  # Pass parallel client for web search
+                            request_id
                         )
                         
-                        # Pass all emails (not just sent) so build_user_profile can extract both sent and received
-                        if len(user_sent_emails) >= 5:
-                            # Get files with content for user profiling
-                            files_with_content = [f for f in files if isinstance(f, dict) and f.get('content')]
-                            user_files = [
-                                f for f in files_with_content
-                                if isinstance(f, dict) and any(
-                                    user_email.lower() in (f.get('ownerEmail') or f.get('owner') or '').lower()
-                                    for user_email in user_emails_lower
-                                )
-                            ]
-                            
-                            # Ensure user_context has emails list for multi-account support
-                            user_context_with_emails = {
-                                **user_context,
-                                'emails': user_emails  # Include all user emails
-                            }
-                            
-                            # Get parallel client for web search (same as used for attendee research)
-                            parallel_client = getattr(request.state, 'parallel_client', None) if request else None
-                            
-                            full_profile = await build_user_profile(
-                                user_context_with_emails,
-                                emails,  # Pass all emails so function can extract both sent and received
-                                user_files,
-                                calendar_events,
-                                parallel_client,  # Pass parallel client for web search
-                                request_id
-                            )
-                            
-                            # Merge full profile with basic info
-                            brief['_extractionData']['userContext'].update(full_profile)
-                            
-                            profile_parts = []
-                            if brief['_extractionData']['userContext'].get('communicationStyle'):
-                                profile_parts.append('communication style')
-                            if brief['_extractionData']['userContext'].get('expertise'):
-                                profile_parts.append('expertise')
-                            if brief['_extractionData']['userContext'].get('biographicalInfo'):
-                                profile_parts.append('biographical info')
-                            if brief['_extractionData']['userContext'].get('workingPatterns'):
-                                profile_parts.append('working patterns')
-                            
-                            logger.info(f'  ✓ User context built: {", ".join(profile_parts) if profile_parts else "basic info only"}', requestId=request_id)
-                        else:
-                            brief['_extractionData']['userContext']['note'] = f'Insufficient email data for profiling (need at least 5 sent emails, found {len(user_sent_emails)})'
-                            logger.info(f'  ⚠️  Insufficient data for user profiling ({len(user_sent_emails)} sent emails)', requestId=request_id)
+                        # Merge full profile with basic info
+                        brief['_extractionData']['userContext'].update(full_profile)
+                        
+                        profile_parts = []
+                        if brief['_extractionData']['userContext'].get('communicationStyle'):
+                            profile_parts.append('communication style')
+                        if brief['_extractionData']['userContext'].get('expertise'):
+                            profile_parts.append('expertise')
+                        if brief['_extractionData']['userContext'].get('biographicalInfo'):
+                            profile_parts.append('biographical info')
+                        if brief['_extractionData']['userContext'].get('workingPatterns'):
+                            profile_parts.append('working patterns')
+                        if brief['_extractionData']['userContext'].get('responsibilities'):
+                            profile_parts.append('responsibilities')
+                        
+                        logger.info(f'  ✓ User context built: {", ".join(profile_parts) if profile_parts else "basic info only"}', requestId=request_id)
                     else:
                         brief['_extractionData']['userContext']['note'] = 'No email data available for profiling'
                         logger.info(f'  ⚠️  No emails available for user profiling', requestId=request_id)
@@ -546,11 +420,6 @@ async def _generate_prep_response(
             else:
                 logger.info(f'  ⚠️  No user context available for profiling', requestId=request_id)
 
-        # ===== SINGLE-ACCOUNT MODE (OLD - BACKWARD COMPATIBILITY) =====
-        elif access_token:
-            logger.info(f'\n🔑 Single-account mode: Using provided access token', requestId=request_id)
-            # TODO: Implement single-account mode if needed
-            raise HTTPException(status_code=501, detail='Single-account mode not yet implemented in Python version')
 
         # ===== NO AUTHENTICATION =====
         else:
@@ -649,7 +518,7 @@ async def _generate_prep_response(
                 requestId=request_id
             )
 
-            # ===== STEP 2: EMAIL RELEVANCE FILTERING + BATCH EXTRACTION =====
+            # ===== STEP 3: EMAIL RELEVANCE FILTERING + BATCH EXTRACTION =====
             yield send_progress('analyzing_emails', {'message': 'Analyzing email threads...'})
             if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
                 yield send_progress('keepalive', {'message': 'Processing emails...'})
@@ -660,7 +529,7 @@ async def _generate_prep_response(
                     emails,
                     meeting_title,
                     meeting_date_context,
-                    meeting_context,
+                    None,
                     user_context,
                     attendees,
                     purpose_result,  # Pass purpose_result to guide filtering
@@ -677,10 +546,9 @@ async def _generate_prep_response(
                 }
 
             brief['_extractionData']['emailRelevanceReasoning'] = email_extraction_data.get('emailRelevanceReasoning', {})
-            brief['_extractionData']['meetingContext'] = meeting_context
             brief['_extractionData']['relevantContent']['emails'] = email_extraction_data.get('relevantContent', {}).get('emails', [])
 
-            # ===== STEP 3: DOCUMENT ANALYSIS IN BATCHES OF 5 =====
+            # ===== STEP 4: DOCUMENT ANALYSIS IN BATCHES OF 5 =====
             yield send_progress('analyzing_documents', {'message': 'Analyzing document content...'})
             if datetime.now() - last_keepalive >= KEEPALIVE_INTERVAL:
                 yield send_progress('keepalive', {'message': 'Processing documents...'})
@@ -691,7 +559,7 @@ async def _generate_prep_response(
                     files,
                     meeting_title,
                     meeting_date_context,
-                    meeting_context,
+                    None,
                     user_context,
                     attendees,
                     request_id
